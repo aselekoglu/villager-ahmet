@@ -34,7 +34,7 @@
 ## Remaining blockers
 
 1. The user accepted the EULA and the fresh Paper server boot passed. No Minecraft client has joined for in-game checks.
-2. Two legitimate Java 1.21.6 clients and the real in-game spawn, movement, harvesting, deposit, restart, cancellation and chest-full scenarios remain unverified.
+2. The user's current 1.21.6 server responds to status on port 62083, but its plugin directory/console route is not available here. No client has joined from this Mac; real in-game spawn, movement, harvesting, deposit, restart, cancellation and chest-full scenarios remain unverified.
 3. Java unit tests cover task bounds, cancellation, journal reload/replay, chest-slot planning and bounded navigation retries. Forced process-crash recovery with a live Paper world remains unverified; conflicting state deliberately pauses for manual review.
 4. No Git remote is configured, so hosted GitHub Actions have not run. A local repository is being used for the handoff snapshot; equivalent Node, HTTP smoke, Maven and Java checks were run here.
 5. A TypeSafe key is stored privately in `brain/.env`; one live call succeeded using `jev-latest` and returned actual model `jev-1.13.0`. Safe execution of that choice in Paper remains unverified. `OPENAI_API_KEY` is pending secure provisioning, so direct GPT-6 Luna chat is not live-tested yet.
