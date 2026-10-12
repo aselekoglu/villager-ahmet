@@ -13,6 +13,9 @@
 
 - [x] Fresh Paper 1.21.6 server boots with Citizens 2.0.41 build 4138 + VillagerAhmet enabled without exceptions.
 - [x] User save copied with a SHA-256 manifest to a separate Paper 1.21.6 server directory; source save preserved; imported-world boot completed; official account `aselekoglu` whitelisted and opped.
+- [x] One Minecraft 1.21.6 client joined the imported world; operator `/ahmet summon` visibly placed the named Citizens villager beside the player.
+- [x] `/ahmet chest` saved the delivery chest in plugin state.
+- [ ] Oak collection gameplay: the screenshot session started an 8-log job, but Ahmet found no eligible oak within its current loaded-chunk search and collected 0; harvesting remains unverified.
 - [ ] Two **legitimate Minecraft Java clients** connect on Java 1.21.6, with `online-mode=true` and whitelist active.
 - [ ] Admin runs `/ahmet spawn`: an **EntityType.VILLAGER** appears, not a player with a skin; `/ahmet status` reports active.
 - [ ] Admin `/ahmet summon` moves an existing idle Ahmet to a safe loaded block next to them; it is rejected during active work or recovery.

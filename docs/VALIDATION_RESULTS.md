@@ -16,7 +16,7 @@
 
 ## Not yet verified
 
-- No Minecraft client has joined the fresh project server. Real Villager rendering, `/ahmet spawn`, `/ahmet summon`, player chat, Citizens movement, log harvesting, chest deposit, cancellation, restart recovery and two-player permissions still need in-game checks.
+- Two-client multiplayer permissions, `/ahmet spawn`, chest persistence across restart, Citizens pathing, oak harvesting/deposit, cancellation, restart recovery and chest-full behavior still need in-game checks. One client summon, chest binding and a failed collection attempt are recorded below.
 - The user's current server at `10.0.0.11:62083` answered a read-only Minecraft status handshake: version `1.21.6`, 2/8 players. Earlier ports `59519` and `61759` did not yield a status response. No login or command was sent. The server's plugin directory/console route is still unavailable, so Ahmet has **not** been installed or teleported there. The local test server at port `25565` was a separate fresh world and has been stopped cleanly.
 - The user confirmed the TLauncher `ahmet` profile is offline. No client login was attempted because the project forbids bypassing Minecraft account authentication. The official Launcher account is already present in the server status sample, so launching it again could disconnect the user.
 - `OPENAI_API_KEY` is still unset. The chat route is implemented and mocked tests pass for direct `https://api.openai.com/v1/chat/completions` with `gpt-6-luna`, but a real OpenAI conversation was not sent. The secure OpenAI key picker/local destination flow has not completed.
@@ -27,8 +27,11 @@
 
 - The user's save at `/Users/aselekoglu/Downloads/Ajanlar ve Ananlar/Ajanlar ve Ananlar` was copied to `server-live/world`. A SHA-256 manifest verified all **45 files / 30,188,019 bytes** matched; only `.DS_Store` and the transient `session.lock` were excluded from the copy. The source folder was left untouched.
 - The copy's `level.dat` DataVersion is 4435, matching Minecraft 1.21.6. Paper 1.21.6 build 48 booted this copied world with Citizens 2.0.41 build 4138 and VillagerAhmet 0.1.0. Paper's Nether and End folder migrations completed in `server-live/`; those changes did not touch the source save.
-- The local server remains running on TCP port 25565 with `online-mode=true` and whitelist enabled. Official Java account `aselekoglu` was added to whitelist and operators (`ops.json`, level 4). This verifies server/plugin startup only; no client has joined this imported-save server and Ahmet has not yet been seen or summoned in-game.
+- The local server remains running on TCP port 25565 with `online-mode=true` and whitelist enabled. Official Java account `aselekoglu` was added to whitelist and operators (`ops.json`, level 4). Subsequent client and summon evidence is recorded below.
 - The brain started on `127.0.0.1:3197`. Live OpenAI chat is unavailable because `OPENAI_API_KEY` is not configured; the real JEV result recorded above is separate from this world boot.
+- The user then joined the imported world with Minecraft 1.21.6 as `aselekoglu`. Server logs show successful joins and `/ahmet summon`; the supplied screenshot shows the named villager NPC beside the player and Ahmet's “yanına geldim” response. This is observed in-game summon evidence for the Citizens villager implementation.
+- In the same session, `/ahmet chest` saved the delivery chest at `world (3,73,143)`. Chat started an 8-log task; the persisted task state showed `requested=8`, `collected=0`, `cargo=0`. The screenshot and server state show that tree selection/harvesting did **not** succeed.
+- Diagnosis: the current MVP resolves generic “odun” requests to **oak logs only**. `findTree` scans loaded chunks within a 16-block horizontal radius and only ±2 vertical blocks from Ahmet; `isTree` additionally requires nearby oak leaves. “Git bul” does not expand that bounded search or authorize a new movement action. The pale trunks visible through the windows look like birch, but that species identification is an image-based inference, not a block-state inspection. The no-tree warning repeats on bounded retries, so it can appear as chat spam.
 
 ## Local test-server commands
 
