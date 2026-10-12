@@ -56,6 +56,12 @@
 - Final plugin SHA-256: `4dcc473030832984a49ba0518b9bb6659e25c813afdea2ee35853d5536b56e69`. The transfer ZIP `dist/villager-ahmet-plugins-paper-1.21.6.zip` passed `unzip -t`; ZIP SHA-256: `f2e9b1476eddcfed64658b6c3256e828760862a9c43715682bc22d7b62933374`.
 - After confirming zero clients, the copied `server-live/world` was cleanly restarted with the final plugin at 18:06. Paper 1.21.6 build 48, Citizens build 4138 and VillagerAhmet loaded without plugin errors; `/ahmet items oak_log` succeeded. Citizens loaded one saved NPC record, but it remains unspawned until operator `/ahmet summon`. The live copied world has not had any resource collection performed in this verification turn.
 
+## OpenAI key connection — 2026-10-12
+
+- Created the OpenAI Platform key named `minecraft-agent` through the secure setup flow and wrote it only as `OPENAI_API_KEY` in ignored `brain/.env`. The file permission is `0600`; the key value was not printed or committed.
+- A real direct OpenAI GPT-6 Luna structured chat/task call for `Ahmet, 5 ham demir getir` succeeded. It returned a Turkish reply and validated `{type: collect_item, itemId: minecraft:raw_iron, amount: 5}`. This was a live model/API test, not an in-game task test.
+- `./scripts/doctor.sh` now reports `[OK] OpenAI chat key configured`. The local brain and Paper server were restarted with zero players online; both are listening on loopback `127.0.0.1:3197` and LAN port `25565`. Citizens loaded the saved NPC record, which still needs operator `/ahmet summon` after reconnecting.
+
 ## Local test-server commands
 
 On this Mac, with Homebrew Java 21 and Maven installed:

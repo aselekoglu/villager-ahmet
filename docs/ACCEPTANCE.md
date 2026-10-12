@@ -37,7 +37,7 @@
 - [x] One **real** JEV choice call returns an offered action and actual model id from TypeSafe.
 - [x] One **real** common-resource JEV call selected an offered candidate: `target_a`, source `jev`, model `jev-1.13.0`, confidence `0.98`.
 - [ ] The Paper server safely executes that live JEV-selected action in-game.
-- [ ] One **real** LLM dialogue call succeeds in Turkish with direct OpenAI GPT-6 Luna.
+- [x] One **real** direct OpenAI GPT-6 Luna structured chat/task call returned Turkish and a validated common-resource intent. Actual in-game chat/task execution remains unverified.
 - [ ] Secrets absent from git commits, Paper console logs and event memory data.
 
 ## Remaining blockers
@@ -46,5 +46,5 @@
 2. The local server is at `10.0.0.140:25565`. The other computer reaches it, but its `BebekYiyen_69` TLauncher profile is offline and receives `Invalid session`. With `online-mode=true`, it requires a legitimate authenticated Java account; the offline profile cannot join. Two-client acceptance remains open.
 3. Java unit tests cover task bounds, cancellation, journal reload/replay, chest-slot planning and bounded navigation retries. Forced process-crash recovery with a live Paper world remains unverified; conflicting state deliberately pauses for manual review.
 4. No Git remote is configured, so hosted GitHub Actions have not run. A local repository is being used for the handoff snapshot; equivalent Node, HTTP smoke, Maven and Java checks were run here.
-5. A TypeSafe key is stored privately in `brain/.env`; live wood and common-resource calls succeeded using `jev-latest` and returned actual model `jev-1.13.0`. Safe execution of those choices in Paper remains unverified. `OPENAI_API_KEY` is missing, so direct GPT-6 Luna chat is not live-tested.
+5. TypeSafe and OpenAI keys are stored in ignored `brain/.env`. Live wood/common-resource JEV calls and one direct GPT-6 Luna structured task call succeeded with their respective providers. Safe in-game execution of either provider's intent remains unverified.
 6. The full item catalog and common-resource gather path are compiled, tested, and installed on the running imported-world server. Actual mixed-wood/common-resource harvesting, navigation and deposit remain unverified. The tree marker is heuristic, and region-protection integration and native villager mining/item carrying are not implemented.
