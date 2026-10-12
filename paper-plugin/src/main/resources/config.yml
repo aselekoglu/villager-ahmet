@@ -1,0 +1,12 @@
+brain:
+  url: http://127.0.0.1:3197
+  token: CHANGE_ME_TO_A_RANDOM_SECRET
+  timeout-seconds: 14
+npc-id: -1
+chest: {}
+task: {}
+options:
+  search-radius: 16
+  max-distance-from-home: 32
+  # Intended for a private trusted world; grief prevention integrations are a follow-up.
+  only-oak-logs-near-leaves: true

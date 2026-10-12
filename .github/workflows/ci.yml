@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  brain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Run Node tests
+        working-directory: brain
+        run: npm test
+      - name: Run mock HTTP smoke test
+        run: ./scripts/smoke.sh
+
+  paper-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: paper-plugin/pom.xml
+      - name: Compile Paper/Citizens plugin and run Java tests
+        working-directory: paper-plugin
+        run: mvn -B -ntp clean package

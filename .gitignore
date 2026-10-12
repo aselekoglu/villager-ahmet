@@ -1,0 +1,9 @@
+/brain/.env
+/brain/data/
+/server/
+/cache/
+/libraries/
+/versions/
+/paper-plugin/target/
+*.log
+.DS_Store
