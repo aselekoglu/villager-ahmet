@@ -119,20 +119,27 @@ final class OperationJournal {
   }
 
   record Harvest(String taskId, String world, int x, int y, int z, int beforeCollected, int beforeCargo,
-      String material) {
+      String material, String outputMaterial) {
     Harvest(String taskId, String world, int x, int y, int z, int beforeCollected, int beforeCargo) {
-      this(taskId, world, x, y, z, beforeCollected, beforeCargo, "OAK_LOG");
+      this(taskId, world, x, y, z, beforeCollected, beforeCargo, "OAK_LOG", "OAK_LOG");
+    }
+
+    Harvest(String taskId, String world, int x, int y, int z, int beforeCollected, int beforeCargo,
+        String material) {
+      this(taskId, world, x, y, z, beforeCollected, beforeCargo, material, material);
     }
 
     Harvest {
       if (taskId == null || taskId.isBlank() || world == null || world.isBlank()
           || beforeCollected < 0 || beforeCollected >= 64 || beforeCargo < 0 || beforeCargo >= 64
-          || material != null && !WoodMaterials.isAllowedName(material)) {
+          || material != null && !WoodMaterials.isAllowedName(material) && !ResourceCatalog.isBlockMaterial(material)
+          || outputMaterial != null && !WoodMaterials.isAllowedName(outputMaterial)) {
         throw new IllegalArgumentException("Invalid harvest journal entry");
       }
     }
 
     String effectiveMaterial() { return material == null ? "OAK_LOG" : material; }
+    String effectiveOutputMaterial() { return outputMaterial == null ? effectiveMaterial() : outputMaterial; }
     int afterCollected() { return beforeCollected + 1; }
     int afterCargo() { return beforeCargo + 1; }
   }

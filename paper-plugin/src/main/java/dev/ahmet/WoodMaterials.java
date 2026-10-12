@@ -18,10 +18,15 @@ final class WoodMaterials {
   private WoodMaterials() {}
 
   static boolean isPreference(String preference) {
-    return "any".equals(preference) || PREFIX.containsKey(preference);
+    return "any".equals(preference) || PREFIX.containsKey(preference) || ResourceCatalog.isPreference(preference);
   }
 
   static boolean isAllowedName(String name) {
+    if (name == null) return false;
+    return isWoodName(name) || ResourceCatalog.isCargoName(name);
+  }
+
+  static boolean isWoodName(String name) {
     if (name == null) return false;
     String normalized = name.toUpperCase(java.util.Locale.ROOT);
     if ("BAMBOO".equals(normalized)) return true;

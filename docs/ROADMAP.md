@@ -1,5 +1,9 @@
 # Villager Ahmet roadmap
 
+## Common-resource helper scope (current direction)
+
+The 1.21.6 vanilla item catalog and common-resource code path are implemented; verify them in a disposable Paper world and fix any gameplay issues before adding rare blocks, crafting, mobs, Nether/End routines, or edge-case world mechanics. Collection capabilities remain opt-in and narrower than the catalog. Paper owns block/drop validation and the durable cargo journal; Node returns only a canonical item ID and quantity; JEV selects only among nearby, safe candidates offered by Paper. Unsupported catalog entries stay discoverable but non-executable.
+
 ## P0 — MVP acceptance, in order
 
 1. Resolve Maven dependencies and compile plugin against pinned Paper/Citizens; add automated Java tests for logic where feasible.
@@ -8,6 +12,13 @@
 4. Run separate live checks: TypeSafe `/v1/systemone` for JEV and OpenAI `/v1/chat/completions` for GPT-6 Luna chat; record source/model without sensitive prompts.
 5. Implement stricter tree detection and backoff when no reachable tree exists; include safety constraints for player builds.
 6. Document a fully reproducible setup and perform a fresh-machine installation.
+
+## P0.5 — Common resource collection
+
+1. [x] Export and search the complete Paper 1.21.6 item catalog; recognition is separate from executable capabilities.
+2. [x] Generalize chat intent to a bounded canonical item ID while retaining the separate TypeSafe JEV choice boundary.
+3. [x] Add common block/drop mappings, minimum tools, bounded target scans, mixed-item cargo, and journal output-item persistence.
+4. [ ] Finish runtime tests for the item search command, actual Paper drop results, and each common collection group in a disposable Paper world.
 
 ## P1 — Real villager immersion
 

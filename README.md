@@ -2,7 +2,7 @@
 
 An AI-assisted **real villager NPC** for a private Minecraft Java Edition multiplayer world. Not a player bot wearing a villager skin.
 
-**Status: generalized log/stem build is installed and booted on the imported Paper 1.21.6 world.** Ahmet is a real Citizens villager. The previous oak-only plugin failed to find nearby oak; the new build supports mixed log/stem types. The imported world is running, and operator `/ahmet summon` is needed after restart because Citizens loaded the NPC record unspawned. Mixed-wood harvesting is not yet verified in-game.
+**Status: full Paper 1.21.6 item catalog and common-resource gather path are installed and booted.** The live copied world exported 1,414 unique item IDs; a separate fresh Paper test world loaded the final JAR and passed item/status commands. The common-resource task has not yet been run through real player chat or harvesting/deposit. Ahmet remains a real Citizens villager.
 
 ## Architecture
 
@@ -15,7 +15,7 @@ Minecraft Java clients (same game version, unmodified)
                      │
         VillagerAhmet Paper plugin
         ├── in-world NPC navigation
-        ├── actual supported log/stem removal (server-side world edit)
+        ├── bounded common-resource block removal with exact drop checks
         ├── per-material virtual cargo, persisted in plugin YAML
         └── actual chest insertion
                      │ local authenticated HTTP
@@ -59,13 +59,15 @@ Join Minecraft Java **1.21.6** with multiplayer server `localhost:25565` on the 
 
 1. In the server as operator, stand where Ahmet should live, enter `/ahmet spawn`. If Ahmet already exists and is idle, `/ahmet summon` moves him to a safe nearby block.
 2. Put a chest beside your house, look directly at it from within six blocks, enter `/ahmet chest`.
-3. Ensure naturally generated tree logs/stems or bamboo stalks are within 24 blocks of Ahmet in already loaded chunks (configurable). The supported set is Minecraft's `#logs` block tag, including tree species, Nether stems, wood and stripped variants, plus natural bamboo stalks. Planks and crafted bamboo blocks are not searched.
-4. Stand within 18 blocks of Ahmet and type `Ahmet, 20 tane odun topla` for any nearby supported wood, or name a species such as `20 huş kütüğü topla`.
-5. Watch Ahmet move toward real logs, remove them one at a time, and then walk to deposit the exact collected number into the configured real chest. Verify with `/ahmet status` and chest inventory.
+3. Ensure safe targets are within 24 blocks of Ahmet in already loaded chunks (configurable): natural tree logs/stems and bamboo, dirt/grass blocks, sand/red sand, stone (cobblestone output), coal ore, iron ore, or gold ore. Planks and crafted bamboo blocks are not searched. Ore harvesting checks Paper's block drops with the minimum pickaxe tier; fortune/silk-touch variants and variable-output drops are excluded.
+4. Stand within 18 blocks of Ahmet and type `Ahmet, 20 tane odun topla`, `12 toprak topla`, `8 kum getir`, `10 taş topla`, `4 kömür topla`, `5 ham demir getir` or `3 ham altın getir`.
+5. Watch Ahmet walk toward a server-discovered candidate, remove one supported block at a time, and then walk to deposit the exact matching output items into the configured real chest. Verify with `/ahmet status` and chest inventory.
 
 Other commands: `/ahmet cancel` (task owner or op), `/ahmet deliver` (recover cargo after cancellation), `/ahmet ask <mesaj>` (speech), `/ahmet status`. Only operators can spawn/summon Ahmet or bind the chest. Summoning is disabled during an active task or journal recovery.
 
-**MVP realism caveat:** Mining is performed by the *Paper server plugin* removing a physically present oak log and crediting one corresponding virtual cargo item; it is **not** native villager item pickup or a Mineflayer dig packet. Ahmet visibly walks, changes the real world, and deposits real items. Animation, actual carried-item render, protected-region hooks, proper tree detection, advanced navigation and autonomous routines are next milestones.
+The plugin also exports Paper 1.21.6's complete obtainable vanilla item-material catalog to `plugins/VillagerAhmet/item-catalog-1.21.6.json`. In game, `/ahmet items <ad>` searches that catalog. Catalog presence means Ahmet can identify and validate the vanilla item ID; it does **not** mean every item has a gather action. The executable collection registry currently supports logs/stems and natural bamboo, dirt, sand/red sand, stone-to-cobblestone, coal ore, iron ore and gold ore; unsupported items are listed as not yet gatherable.
+
+**MVP realism caveat:** Harvesting is performed by the *Paper server plugin* removing an eligible physical block and crediting the exact checked output to virtual cargo; it is **not** native villager mining or item pickup. Ahmet visibly walks, changes the real world, and deposits real items. Tool durability is not consumed, and the plugin's natural-tree marker is a heuristic. Animation, actual carried-item render, protected-region hooks, advanced navigation and autonomous routines are next milestones.
 
 ## Model modes
 
@@ -90,7 +92,7 @@ Then perform the **manual multiplayer acceptance scenario** in `docs/ACCEPTANCE.
 
 - Private/trusted worlds only. A simple oak-leaves adjacency heuristic prevents some structure damage but cannot guarantee that every oak log belongs to a tree; don't deploy on a public/protected world without permission checks and stricter tree detection.
 - The NPC is a *Citizens-managed villager* (not a vanilla villager with naturally modified brain). Commands, movement and inventory changes are server controlled.
-- At most 64 log/stem blocks per job. GPT-6 Luna may classify only a bounded wood preference and quantity; JEV may choose only among loaded, nearby, Java-validated candidate blocks. JEV runs at target selection, while Paper deterministically handles navigation and item transactions. Neither model can supply coordinates, teleport, create inventory, run commands, cheat, or place blocks. Only an explicit operator `/ahmet summon` can reposition the NPC, and never during task navigation.
+- At most 64 output items per job. GPT-6 Luna may classify a bounded wood preference or canonical item ID; Paper accepts only the explicit common-resource registry. JEV may choose only among loaded, nearby, Java-validated candidate blocks. JEV runs at target selection, while Paper deterministically handles navigation and item transactions. Neither model can supply coordinates, teleport, create inventory, run commands, cheat, or place blocks. Only an explicit operator `/ahmet summon` can reposition the NPC, and never during task navigation.
 - Server plugin exclusively authorizes block deletion and chest deposit, on the Paper main thread. Async model calls never touch Bukkit world state.
 - Task state persists in `plugins/VillagerAhmet/config.yml`; `plugins/VillagerAhmet/operations.json` journals harvest and chest-slot changes for restart reconciliation; conversational events persist separately in `brain/data/memory.json`. Unit tests cover replay and conflict detection, but a forced-crash Paper-world test is still required before using valuable items. Conflicting world/chest state pauses recovery for manual inspection.
 - Keep Paper and Citizens versions pinned and tested together; never automatically update Minecraft on a running persistent world.

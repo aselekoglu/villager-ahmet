@@ -3,6 +3,7 @@ package dev.ahmet;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.UUID;
@@ -106,5 +107,17 @@ final class WoodTaskTest {
     task.deposit(1);
     assertEquals(0, task.cargo);
     assertEquals(1, task.deposited);
+  }
+
+  @Test
+  void boundedCommonResourceTasksCarryTheMappedOutputItem() {
+    WoodTask task = new WoodTask();
+    String preference = ResourceCatalog.preferenceFor("minecraft:raw_iron").orElseThrow();
+    task.start(UUID.randomUUID(), 2, preference);
+    task.harvestOne("RAW_IRON");
+    task.harvestOne("RAW_IRON");
+    assertEquals(2, task.cargoItems().get("RAW_IRON"));
+    task.deposit("RAW_IRON", 2);
+    assertTrue(task.readyToFinish());
   }
 }

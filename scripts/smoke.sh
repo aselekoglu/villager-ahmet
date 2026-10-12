@@ -14,6 +14,9 @@ for i in {1..30}; do curl -fsS "http://127.0.0.1:$PORT/health" >/dev/null 2>&1 &
 BODY='{"actorUuid":"test-player","actorName":"Ata","text":"Ahmet, bulabildiğin 20 tane odun topla","context":{"busy":false,"chestBound":true}}'
 REPLY="$(curl -fsS "http://127.0.0.1:$PORT/api/chat" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$BODY")"
 python3 -c 'import sys,json;d=json.load(sys.stdin);assert d["task"]=={"type":"collect_wood","material":"any","amount":20};assert d["taskSource"]=="heuristic";print("Chat contract OK:",d["reply"])' <<< "$REPLY"
+RESOURCE_BODY='{"actorUuid":"test-player","actorName":"Ata","text":"Ahmet, 5 ham demir getir","context":{"busy":false,"chestBound":true}}'
+RESOURCE_REPLY="$(curl -fsS "http://127.0.0.1:$PORT/api/chat" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$RESOURCE_BODY")"
+python3 -c 'import sys,json;d=json.load(sys.stdin);assert d["task"]=={"type":"collect_item","itemId":"minecraft:raw_iron","amount":5};assert d["taskSource"]=="heuristic";print("Common resource intent OK:",d["task"])' <<< "$RESOURCE_REPLY"
 DECISION="$(curl -fsS "http://127.0.0.1:$PORT/api/decide" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"observation":{"task":"collect_wood"},"actions":[{"id":"target_a","description":"Select birch log"},{"id":"target_b","description":"Select oak log"},{"id":"wait","description":"Wait"}]}')"
 python3 -c 'import sys,json;d=json.load(sys.stdin);assert d["id"]=="target_a";print("Decision contract OK:",d)' <<< "$DECISION"
 EVENT="$(curl -fsS "http://127.0.0.1:$PORT/api/event" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"type":"task_delivered","actor":"test-player","count":20}')"

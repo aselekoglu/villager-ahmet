@@ -1,4 +1,4 @@
-import {parseTask,isCancel,validateWoodTask} from './intent.mjs';
+import {parseTask,isCancel,validateTask} from './intent.mjs';
 import {chooseAction,conversationalReply,interpretTurn} from './models.mjs';
 export async function chat(req,{store,models={chooseAction,conversationalReply,interpretTurn},key,chatMode}={}) {
   const actor=String(req.actorUuid??'unknown').slice(0,80);
@@ -15,22 +15,22 @@ export async function chat(req,{store,models={chooseAction,conversationalReply,i
     if(turn){
       reply=typeof turn.reply==='string'?turn.reply.slice(0,350):'Hmm, bir daha söyler misin?';
       if(turn.task!==null&&turn.task!==undefined){
-        const validated=validateWoodTask(turn.task);
+        const validated=validateTask(turn.task);
         if(validated){
           if(busy)reply='Şu anda bir görevdeyim. Önce bitirmemi bekle ya da /ahmet cancel yaz.';
-          else if(!req.context?.chestBound)reply='Odunları nereye koyacağımı bilmiyorum. Bir sandığa bakıp /ahmet chest komutunu kullan.';
+          else if(!req.context?.chestBound)reply='Topladıklarımı nereye koyacağımı bilmiyorum. Bir sandığa bakıp /ahmet chest komutunu kullan.';
           else {task=validated;taskSource='llm';}
-        }else reply='Bu isteği güvenli ve desteklenen bir odun görevi olarak çözemiyorum. Türü ve 1–64 arası miktarı belirt.';
+        }else reply='Bu isteği güvenli ve desteklenen bir kaynak görevi olarak çözemiyorum. Türü ve 1–64 arası miktarı belirt.';
       }
     }else if(modelFailed){
       const parsed=parseTask(message);
       if(parsed?.error)reply=parsed.error;
       else if(parsed&&busy)reply='Şu anda bir görevdeyim. Önce bitirmemi bekle ya da /ahmet cancel yaz.';
-      else if(parsed&&!req.context?.chestBound)reply='Odunları nereye koyacağımı bilmiyorum. Bir sandığa bakıp /ahmet chest komutunu kullan.';
-      else if(parsed){task=validateWoodTask(parsed);taskSource='heuristic';reply=`Tamam ${name}, ${parsed.amount} kütük toplayıp işaretlediğin sandığa bırakacağım.`;}
+      else if(parsed&&!req.context?.chestBound)reply='Topladıklarımı nereye koyacağımı bilmiyorum. Bir sandığa bakıp /ahmet chest komutunu kullan.';
+      else if(parsed){task=validateTask(parsed);taskSource='heuristic';reply=`Tamam ${name}, ${parsed.amount} kaynak toplayıp işaretlediğin sandığa bırakacağım.`;}
       else {
         try {reply=await models.conversationalReply(message,name,store.history(actor),modelOptions);}
-        catch {reply=`Selam ${name}! Buradayım. Ağaç kütüğü toplamamı istersen söyle.`;}
+        catch {reply=`Selam ${name}! Buradayım. Yaygın odun ve kaynakları toplamamı istersen söyle.`;}
       }
     }
   }

@@ -45,7 +45,10 @@ final class WoodTask {
     if(!readyToFinish())throw new IllegalStateException("Task is not ready to finish");
     active=false;
   }
-  String describe(){return !active?"boşta (taşınan odun: "+cargo+")":"kütük "+collected+"/"+requested+" toplandı, "+deposited+" teslim";}
+  String describe(){
+    String resource=materialPreference.startsWith("item:")?materialPreference.substring("item:".length()).toLowerCase(java.util.Locale.ROOT):"kütük";
+    return !active?"boşta (taşınan kaynak: "+cargo+")":resource+" "+collected+"/"+requested+" toplandı, "+deposited+" teslim";
+  }
   void load(FileConfiguration c){
     active=c.getBoolean("task.active");owner=c.getString("task.owner","");requested=c.getInt("task.requested");
     collected=c.getInt("task.collected");deposited=c.getInt("task.deposited");cargo=c.getInt("task.cargo");

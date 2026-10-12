@@ -48,4 +48,19 @@ final class OperationJournalTest {
     journal.load();
     assertEquals("OAK_LOG", journal.pendingHarvest().orElseThrow().effectiveMaterial());
   }
+
+  @Test
+  void harvestJournalPersistsTheBlockAndItsDifferentOutputItem() throws Exception {
+    Path path = temp.resolve("resource-harvest.json");
+    OperationJournal journal = new OperationJournal(path);
+    journal.load();
+    var harvest = new OperationJournal.Harvest("task-resource", "world", 2, 65, 3, 0, 0, "STONE", "COBBLESTONE");
+    journal.prepareHarvest(harvest);
+
+    OperationJournal restored = new OperationJournal(path);
+    restored.load();
+    var pending = restored.pendingHarvest().orElseThrow();
+    assertEquals("STONE", pending.effectiveMaterial());
+    assertEquals("COBBLESTONE", pending.effectiveOutputMaterial());
+  }
 }

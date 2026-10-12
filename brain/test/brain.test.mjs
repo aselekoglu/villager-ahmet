@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {parseTask} from '../src/intent.mjs';
+import {parseTask,validateTask} from '../src/intent.mjs';
 import {chat,decide} from '../src/engine.mjs';
 import {MemoryStore} from '../src/store.mjs';
 import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';
@@ -13,6 +13,17 @@ test('generic wood requests allow any Minecraft log while named wood stays speci
  assert.match(parseTask('200 logs collect').error,/1–64/);
  assert.equal(parseTask('how are you?'),null);
 });
+test('common resource requests map language to canonical vanilla item ids',()=>{
+ assert.deepEqual(parseTask('Ahmet 12 toprak topla'),{type:'collect_item',itemId:'minecraft:dirt',amount:12});
+ assert.deepEqual(parseTask('8 kum getir'),{type:'collect_item',itemId:'minecraft:sand',amount:8});
+ assert.deepEqual(parseTask('10 taş topla'),{type:'collect_item',itemId:'minecraft:cobblestone',amount:10});
+ assert.deepEqual(parseTask('4 kömür topla'),{type:'collect_item',itemId:'minecraft:coal',amount:4});
+ assert.deepEqual(parseTask('5 ham demir getir'),{type:'collect_item',itemId:'minecraft:raw_iron',amount:5});
+ assert.deepEqual(parseTask('5 demir cevheri getir'),{type:'collect_item',itemId:'minecraft:raw_iron',amount:5});
+ assert.deepEqual(parseTask('3 ham altın getir'),{type:'collect_item',itemId:'minecraft:raw_gold',amount:3});
+ assert.deepEqual(validateTask({type:'collect_item',itemId:'minecraft:raw_iron',amount:5}),{type:'collect_item',itemId:'minecraft:raw_iron',amount:5});
+ assert.equal(validateTask({type:'collect_item',itemId:'other:raw_iron',amount:5}),null);
+});
 test('No job without assigned chest and no job when busy',async()=>{
  const d=await mkdtemp(join(tmpdir(),'ahmet-'));
  try {const store=new MemoryStore(join(d,'memory.json'));await store.load();
@@ -20,6 +31,23 @@ test('No job without assigned chest and no job when busy',async()=>{
   const b=await chat({actorUuid:'1',actorName:'Ata',text:'20 meşe odunu topla',context:{chestBound:true,busy:true}},{store});assert.equal(b.task,null);
   const c=await chat({actorUuid:'1',actorName:'Ata',text:'20 meşe odunu topla',context:{chestBound:true,busy:false}},{store});assert.equal(c.task.amount,20);
   const fresh=new MemoryStore(join(d,'memory.json'));await fresh.load();assert.equal(fresh.history('1').length,3);
+ }finally{await rm(d,{recursive:true,force:true});}
+});
+test('common-resource request becomes a bounded item intent through the chat fallback',async()=>{
+ const d=await mkdtemp(join(tmpdir(),'ahmet-'));
+ try {const store=new MemoryStore(join(d,'memory.json'));await store.load();
+  const result=await chat({actorUuid:'resource-player',actorName:'Ata',text:'Ahmet, 7 ham demir getir',context:{chestBound:true,busy:false}},{store});
+  assert.deepEqual(result.task,{type:'collect_item',itemId:'minecraft:raw_iron',amount:7});
+  assert.equal(result.taskSource,'heuristic');
+ }finally{await rm(d,{recursive:true,force:true});}
+});
+test('LLM common-resource intents accept only bounded Minecraft item IDs',async()=>{
+ const d=await mkdtemp(join(tmpdir(),'ahmet-'));
+ try {const store=new MemoryStore(join(d,'memory.json'));await store.load();
+  const result=await chat({actorUuid:'resource-llm',actorName:'Ece',text:'7 ham demir getir',context:{chestBound:true,busy:false}},{store,
+   models:{interpretTurn:async()=>({reply:'Demiri getireceğim.',task:{type:'collect_item',itemId:'minecraft:raw_iron',amount:7}})}});
+  assert.deepEqual(result.task,{type:'collect_item',itemId:'minecraft:raw_iron',amount:7});
+  assert.equal(result.taskSource,'llm');
  }finally{await rm(d,{recursive:true,force:true});}
 });
 test('LLM structured task is accepted only after bounded validation',async()=>{
