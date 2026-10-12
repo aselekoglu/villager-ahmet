@@ -1,6 +1,7 @@
 /brain/.env
 /brain/data/
 /server/
+/server-live/
 /cache/
 /libraries/
 /versions/

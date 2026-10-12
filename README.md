@@ -45,6 +45,8 @@ ACCEPT_MINECRAFT_EULA=true ./scripts/run.sh
 
 This intentionally does **not** auto-consent to Mojang's EULA. The setup script downloads a checksummed stable Paper 1.21.6 build from the official PaperMC API and pinned Citizens 2.0.41 build 4138, creates a random local bridge token and compiles the plugin against the matching Citizens API. You can also download those exact official JARs yourself into `server/` and `server/plugins/` if the download endpoints fail.
 
+To preserve the default test server while hosting a copied world separately, set `AHMET_SERVER_DIR=server-live` for both setup and run. Relative paths are resolved under the project root; the source world should be copied into that directory's `world/` only after the server has been set up and stopped.
+
 From the Minecraft server console, add every real Java username and make yourself operator:
 
 ```text

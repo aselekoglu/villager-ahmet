@@ -23,6 +23,13 @@
 - The hosted GitHub Actions workflow has not run because no Git remote is configured. A local repository is used for this handoff; equivalent Node, local HTTP smoke and Maven checks were run locally.
 - The journal's crash-recovery behavior has fixture coverage but has not been crash-tested against a running Minecraft world. Tree identification remains a private-world oak/leaves heuristic, not a region-protection system or native villager mining.
 
+## Imported-save local server — 2026-10-12
+
+- The user's save at `/Users/aselekoglu/Downloads/Ajanlar ve Ananlar/Ajanlar ve Ananlar` was copied to `server-live/world`. A SHA-256 manifest verified all **45 files / 30,188,019 bytes** matched; only `.DS_Store` and the transient `session.lock` were excluded from the copy. The source folder was left untouched.
+- The copy's `level.dat` DataVersion is 4435, matching Minecraft 1.21.6. Paper 1.21.6 build 48 booted this copied world with Citizens 2.0.41 build 4138 and VillagerAhmet 0.1.0. Paper's Nether and End folder migrations completed in `server-live/`; those changes did not touch the source save.
+- The local server remains running on TCP port 25565 with `online-mode=true` and whitelist enabled. Official Java account `aselekoglu` was added to whitelist and operators (`ops.json`, level 4). This verifies server/plugin startup only; no client has joined this imported-save server and Ahmet has not yet been seen or summoned in-game.
+- The brain started on `127.0.0.1:3197`. Live OpenAI chat is unavailable because `OPENAI_API_KEY` is not configured; the real JEV result recorded above is separate from this world boot.
+
 ## Local test-server commands
 
 On this Mac, with Homebrew Java 21 and Maven installed:
@@ -37,6 +44,17 @@ ACCEPT_MINECRAFT_EULA=true ./scripts/run.sh
 ```
 
 The Maven repository override is useful in this restricted environment; omit it on a normal machine if `~/.m2` is writable. The run command starts both the brain and Paper server. The fresh server has a whitelist enabled; add and op the correct Java username before connecting. As operator, use `/ahmet spawn` for a new villager or `/ahmet summon` for an existing idle Ahmet.
+
+The user's copied save is already prepared and running separately. To launch it after a clean shutdown (or on the same Mac after the current process stops):
+
+```bash
+cd /Users/aselekoglu/villager-ahmet
+export JAVA_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"
+export PATH="$JAVA_HOME/bin:/opt/homebrew/opt/maven/bin:$PATH"
+AHMET_SERVER_DIR=server-live ACCEPT_MINECRAFT_EULA=true ./scripts/run.sh
+```
+
+Connect the official `aselekoglu` Java 1.21.6 client to `localhost:25565`, then run `/ahmet summon` in-game. The EULA was accepted by the user; the environment flag is only needed because this script also supports fresh server folders.
 
 ## Provider references
 

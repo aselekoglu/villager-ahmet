@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SERVER="$ROOT/server"
+SERVER="${AHMET_SERVER_DIR:-$ROOT/server}"
+[[ "$SERVER" == /* ]] || SERVER="$ROOT/$SERVER"
 mkdir -p "$SERVER/plugins/VillagerAhmet"
 for cmd in java python3 mvn node; do command -v "$cmd" >/dev/null || { echo "Missing $cmd. Install Java 21, Node.js 20+, Python 3 and Maven 3.9+, then rerun."; exit 1; }; done
 JAVA_VERSION="$(java -version 2>&1 | sed -n '1s/.*version "\([^"]*\)".*/\1/p')"
