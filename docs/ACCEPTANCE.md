@@ -26,7 +26,8 @@
 - [ ] Cancellation by task owner and admin succeeds, and cargo recovery does not lose or invent logs.
 - [ ] NPC pathfinding failure gives actionable error, no infinite busy loop or unbounded chunk scan.
 - [ ] Block modifications respect region protection in an appropriate test OR project explicitly remains private-only.
-- [x] One **real** JEV decision is captured from TypeSafe with model id, selected action and safe server execution.
+- [x] One **real** JEV choice call returns an offered action and actual model id from TypeSafe.
+- [ ] The Paper server safely executes that live JEV-selected action in-game.
 - [ ] One **real** LLM dialogue call succeeds in Turkish with direct OpenAI GPT-6 Luna.
 - [ ] Secrets absent from git commits, Paper console logs and event memory data.
 
