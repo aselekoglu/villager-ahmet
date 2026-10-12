@@ -3,10 +3,14 @@ import {parseTask} from '../src/intent.mjs';
 import {chat,decide} from '../src/engine.mjs';
 import {MemoryStore} from '../src/store.mjs';
 import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';
-test('Turkish oak log task is bounded and parsed',()=>{
- assert.deepEqual(parseTask('Ahmet bana 20 tane meşe odunu topla'),{type:'collect_oak_logs',amount:20});
- assert.deepEqual(parseTask('collect 8 oak logs'),{type:'collect_oak_logs',amount:8});
- assert.match(parseTask('200 oak logs collect').error,/1–64/);
+test('generic wood requests allow any Minecraft log while named wood stays specific',()=>{
+ assert.deepEqual(parseTask('Ahmet bana 20 tane odun topla'),{type:'collect_wood',material:'any',amount:20});
+ assert.deepEqual(parseTask('collect 8 oak logs'),{type:'collect_wood',material:'oak',amount:8});
+ assert.deepEqual(parseTask('8 huş kütüğü getir'),{type:'collect_wood',material:'birch',amount:8});
+ assert.deepEqual(parseTask('10 crimson stem getir'),{type:'collect_wood',material:'crimson',amount:10});
+ assert.deepEqual(parseTask('6 pale oak kütüğü topla'),{type:'collect_wood',material:'pale_oak',amount:6});
+ assert.deepEqual(parseTask('12 bamboo getir'),{type:'collect_wood',material:'bamboo',amount:12});
+ assert.match(parseTask('200 logs collect').error,/1–64/);
  assert.equal(parseTask('how are you?'),null);
 });
 test('No job without assigned chest and no job when busy',async()=>{
@@ -18,11 +22,22 @@ test('No job without assigned chest and no job when busy',async()=>{
   const fresh=new MemoryStore(join(d,'memory.json'));await fresh.load();assert.equal(fresh.history('1').length,3);
  }finally{await rm(d,{recursive:true,force:true});}
 });
-test('chat-addressed Turkish command starts the bounded wood task',async()=>{
+test('LLM structured task is accepted only after bounded validation',async()=>{
  const d=await mkdtemp(join(tmpdir(),'ahmet-'));
  try {const store=new MemoryStore(join(d,'memory.json'));await store.load();
-  const result=await chat({actorUuid:'2',actorName:'Ece',text:'Ahmet, 20 tane meşe odunu topla',context:{chestBound:true,busy:false}},{store});
-  assert.deepEqual(result.task,{type:'collect_oak_logs',amount:20});
+  const result=await chat({actorUuid:'2',actorName:'Ece',text:'Ahmet, bulduğun herhangi bir ağaçtan 20 odun topla',context:{chestBound:true,busy:false}},{store,
+   models:{interpretTurn:async()=>({reply:'Tamam, bulduğum odunları getireceğim.',task:{type:'collect_wood',material:'any',amount:20}})}});
+  assert.deepEqual(result.task,{type:'collect_wood',material:'any',amount:20});
+  assert.equal(result.taskSource,'llm');
+ }finally{await rm(d,{recursive:true,force:true});}
+});
+
+test('invalid LLM task fields cannot escape the wood type and quantity allowlists',async()=>{
+ const d=await mkdtemp(join(tmpdir(),'ahmet-'));
+ try {const store=new MemoryStore(join(d,'memory.json'));await store.load();
+  const result=await chat({actorUuid:'3',actorName:'Ece',text:'bana odun getir',context:{chestBound:true,busy:false}},{store,
+   models:{interpretTurn:async()=>({reply:'Tamam.',task:{type:'run_command',material:'diamond',amount:999}})}});
+  assert.equal(result.task,null);
  }finally{await rm(d,{recursive:true,force:true});}
 });
 test('decision mocks safely and validates offered actions',async()=>{

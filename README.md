@@ -2,7 +2,7 @@
 
 An AI-assisted **real villager NPC** for a private Minecraft Java Edition multiplayer world. Not a player bot wearing a villager skin.
 
-**Status: Paper/Citizens build verified; gameplay is not yet verified.** The plugin compiles for Paper 1.21.6 with Citizens 2.0.41 build 4138, and the Node and Java unit suites pass. The EULA has now been accepted by the user; an in-game run and live multiplayer checks are still pending (see `docs/VALIDATION_RESULTS.md`).
+**Status: generalized log/stem build is installed and booted on the imported Paper 1.21.6 world.** Ahmet is a real Citizens villager. The previous oak-only plugin failed to find nearby oak; the new build supports mixed log/stem types. The imported world is running, and operator `/ahmet summon` is needed after restart because Citizens loaded the NPC record unspawned. Mixed-wood harvesting is not yet verified in-game.
 
 ## Architecture
 
@@ -15,13 +15,12 @@ Minecraft Java clients (same game version, unmodified)
                      │
         VillagerAhmet Paper plugin
         ├── in-world NPC navigation
-        ├── actual log removal (server-side world edit)
-        ├── virtual cargo, persisted in plugin YAML
+        ├── actual supported log/stem removal (server-side world edit)
+        ├── per-material virtual cargo, persisted in plugin YAML
         └── actual chest insertion
                      │ local authenticated HTTP
       Node.js brain (127.0.0.1:3197)
-        ├── Turkish/English bounded task parser
-        ├── chat LLM (OpenAI chat/completions, GPT-6 Luna)
+        ├── chat/task intent (OpenAI chat/completions, GPT-6 Luna JSON)
         ├── JEV (TypeSafe System One, account alias `jev-latest`)
         ├── JSON memory persisted to disk
         └── deterministic mock/fallback mode
@@ -54,14 +53,14 @@ whitelist add YourUsername
 op YourUsername
 ```
 
-Join Minecraft Java **1.21.6** with multiplayer server `localhost:25565` on the server computer, or its LAN IP on another computer. Remote play requires **secure networking/VPN or firewall-managed port access**; do not put the local brain API or Paper admin interfaces on the Internet. EULA and Minecraft server/client licensing remain yours to respect.
+Join Minecraft Java **1.21.6** with multiplayer server `localhost:25565` on the server computer, or the server computer's LAN IP (currently `10.0.0.140:25565`) on another computer on the same network. Only Microsoft-authenticated Java accounts can join (`online-mode=true`); whitelist each legitimate account. Remote play beyond the LAN requires **secure networking/VPN or firewall-managed port access**; do not put the local brain API or Paper admin interfaces on the Internet.
 
 ## In-game walkthrough
 
 1. In the server as operator, stand where Ahmet should live, enter `/ahmet spawn`. If Ahmet already exists and is idle, `/ahmet summon` moves him to a safe nearby block.
 2. Put a chest beside your house, look directly at it from within six blocks, enter `/ahmet chest`.
-3. Ensure naturally generated *oak trees* are within ~16 blocks of Ahmet (configurable). For testing, place Ahmet, a chest and a naturally leaf-connected oak tree in safe, level terrain.
-4. Stand within 18 blocks of Ahmet and type `Ahmet, 20 tane meşe odunu topla`, or `/ahmet ask 20 meşe odunu topla`.
+3. Ensure naturally generated tree logs/stems or bamboo stalks are within 24 blocks of Ahmet in already loaded chunks (configurable). The supported set is Minecraft's `#logs` block tag, including tree species, Nether stems, wood and stripped variants, plus natural bamboo stalks. Planks and crafted bamboo blocks are not searched.
+4. Stand within 18 blocks of Ahmet and type `Ahmet, 20 tane odun topla` for any nearby supported wood, or name a species such as `20 huş kütüğü topla`.
 5. Watch Ahmet move toward real logs, remove them one at a time, and then walk to deposit the exact collected number into the configured real chest. Verify with `/ahmet status` and chest inventory.
 
 Other commands: `/ahmet cancel` (task owner or op), `/ahmet deliver` (recover cargo after cancellation), `/ahmet ask <mesaj>` (speech), `/ahmet status`. Only operators can spawn/summon Ahmet or bind the chest. Summoning is disabled during an active task or journal recovery.
@@ -91,7 +90,7 @@ Then perform the **manual multiplayer acceptance scenario** in `docs/ACCEPTANCE.
 
 - Private/trusted worlds only. A simple oak-leaves adjacency heuristic prevents some structure damage but cannot guarantee that every oak log belongs to a tree; don't deploy on a public/protected world without permission checks and stricter tree detection.
 - The NPC is a *Citizens-managed villager* (not a vanilla villager with naturally modified brain). Commands, movement and inventory changes are server controlled.
-- At most 64 oak logs per job. No LLM/JEV teleport, inventory creation, cheats, shell execution, arbitrary game commands or block placement in the action contract. Only an explicit operator `/ahmet summon` can reposition the NPC, and never during task navigation.
+- At most 64 log/stem blocks per job. GPT-6 Luna may classify only a bounded wood preference and quantity; JEV may choose only among loaded, nearby, Java-validated candidate blocks. JEV runs at target selection, while Paper deterministically handles navigation and item transactions. Neither model can supply coordinates, teleport, create inventory, run commands, cheat, or place blocks. Only an explicit operator `/ahmet summon` can reposition the NPC, and never during task navigation.
 - Server plugin exclusively authorizes block deletion and chest deposit, on the Paper main thread. Async model calls never touch Bukkit world state.
 - Task state persists in `plugins/VillagerAhmet/config.yml`; `plugins/VillagerAhmet/operations.json` journals harvest and chest-slot changes for restart reconciliation; conversational events persist separately in `brain/data/memory.json`. Unit tests cover replay and conflict detection, but a forced-crash Paper-world test is still required before using valuable items. Conflicting world/chest state pauses recovery for manual inspection.
 - Keep Paper and Citizens versions pinned and tested together; never automatically update Minecraft on a running persistent world.

@@ -19,10 +19,10 @@ Request:
 {"actorUuid":"<Minecraft UUID>","actorName":"Ata","text":"Ahmet, 20 meşe odunu topla","context":{"busy":false,"chestBound":true}}
 ```
 
-Response:
+Response (the LLM may set a species or request any supported log):
 
 ```json
-{"reply":"Tamam, 20 meşe odunu topluyorum.","task":{"type":"collect_oak_logs","amount":20},"cancel":false}
+{"reply":"Tamam, bulabildiğim odunları topluyorum.","task":{"type":"collect_wood","material":"any","amount":20},"cancel":false}
 ```
 
 `task` can be null. Paper checks amount 1–64, type, chest, job ownership and current availability before starting. No executable code, target coordinates or permissions are accepted from the brain.
@@ -32,7 +32,7 @@ Response:
 Request:
 
 ```json
-{"observation":{"task":"collect_oak_logs","requested":20,"collected":3,"cargo":3,"deposited":0,"requiredAction":"walk_tree","chestBound":true,"position":"10,64,9"},"actions":[{"id":"walk_tree","description":"Walk to chosen oak log"},{"id":"wait","description":"Wait briefly"}]}
+{"observation":{"task":"collect_wood","materialPreference":"any","requested":20,"collected":3,"cargo":3,"deposited":0,"requiredAction":"select_tree","chestBound":true,"position":"10,64,9"},"actions":[{"id":"target_a","description":"Walk to nearby BIRCH_LOG block, distance 5 blocks"},{"id":"target_b","description":"Walk to nearby OAK_LOG block, distance 8 blocks"},{"id":"wait","description":"Wait briefly"}]}
 ```
 
 Response:
@@ -63,13 +63,13 @@ IDLE -> FIND_TREE -> WALK_TREE -> HARVEST -> [repeat until requested]
                                       cancellation -> CANCELLED -> DELIVER_RECOVERY
 ```
 
-Each log harvest writes an atomic `operations.json` intent before changing the block, then updates cargo in `config.yml` and commits the journal entry. Deposits plan exact chest-slot changes, write the plan before changing inventory, persist task state, flush the world, and only then clear the journal. Startup replays pending operations idempotently; a changed task, block, chest, or slot pauses work and preserves the journal for manual inspection. This reduces silent duplication/loss, but full forced-crash behavior still needs an in-game Paper restart test.
+Each wood harvest writes an atomic `operations.json` intent including the exact block material before changing the block, then updates per-material cargo in `config.yml` and commits the journal entry. Deposits plan exact slots for one material at a time, write that material and slot plan before changing inventory, persist task state, flush the world, and only then clear the journal. Version 1 oak journals remain readable as oak. Startup replays pending operations idempotently; a changed task, block, chest, or slot pauses work and preserves the journal for manual inspection. This reduces silent duplication/loss, but full forced-crash behavior still needs an in-game Paper restart test.
 
 ## Gameplay assumptions
 
 - Version pin: Minecraft Java 1.21.6 / Paper 1.21.6 / Java 21 / Citizens 2.0.41 build 4138 (1.21_R5 adapter).
 - A bound chest must remain in the same world. Task is paused with a warning when missing.
-- Trees are actual `OAK_LOG` blocks near `OAK_LEAVES`; radius default 16.
+- Wood candidates are blocks in Bukkit's `Tag.LOGS` plus natural bamboo stalks, with nearby leaf/fungus or bamboo-stalk markers; default search radius is 24 blocks and only already loaded chunks are inspected. Java bounds natural-marker checks to 64 nearest log candidates and offers at most eight safe target IDs. JEV chooses among those IDs; it never supplies coordinates. Travel, harvest and deposit then run as deterministic server actions without a model call per movement tick.
 - Citizens navigation must be observed in-world. Pathfinding cannot be validated with Node unit tests.
 - The only NPC teleport is operator-requested `/ahmet summon` while idle; normal task navigation uses Citizens pathfinding without teleporting.
 - No player inventory or gameplay resource is silently duplicated; server consumes blocks before crediting the virtual cargo. This is still not vanilla mining physics.

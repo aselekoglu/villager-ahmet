@@ -6,7 +6,7 @@ npc-id: -1
 chest: {}
 task: {}
 options:
-  search-radius: 16
+  search-radius: 24
   max-distance-from-home: 32
-  # Intended for a private trusted world; grief prevention integrations are a follow-up.
-  only-oak-logs-near-leaves: true
+  # Only harvest log/stem blocks with nearby tree leaves or Nether-fungus indicators.
+  only-natural-wood: true

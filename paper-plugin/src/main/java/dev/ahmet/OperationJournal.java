@@ -31,9 +31,10 @@ final class OperationJournal {
     if (!Files.exists(path)) return;
     try {
       Data loaded = GSON.fromJson(Files.readString(path, StandardCharsets.UTF_8), Data.class);
-      if (loaded == null || loaded.version != 1) throw new IOException("Unsupported operation journal version");
+      if (loaded == null || loaded.version < 1 || loaded.version > 2) throw new IOException("Unsupported operation journal version");
       if (loaded.harvests == null) loaded.harvests = new ArrayList<>();
       if (loaded.harvests.size() > 64) throw new IOException("Operation journal exceeds the task bound");
+      loaded.version = 2;
       data = loaded;
     } catch (JsonParseException | IllegalStateException e) {
       throw new IOException("Operation journal is invalid; it was preserved for manual recovery", e);
@@ -117,35 +118,49 @@ final class OperationJournal {
     }
   }
 
-  record Harvest(String taskId, String world, int x, int y, int z, int beforeCollected, int beforeCargo) {
+  record Harvest(String taskId, String world, int x, int y, int z, int beforeCollected, int beforeCargo,
+      String material) {
+    Harvest(String taskId, String world, int x, int y, int z, int beforeCollected, int beforeCargo) {
+      this(taskId, world, x, y, z, beforeCollected, beforeCargo, "OAK_LOG");
+    }
+
     Harvest {
       if (taskId == null || taskId.isBlank() || world == null || world.isBlank()
-          || beforeCollected < 0 || beforeCollected >= 64 || beforeCargo < 0 || beforeCargo >= 64) {
+          || beforeCollected < 0 || beforeCollected >= 64 || beforeCargo < 0 || beforeCargo >= 64
+          || material != null && !WoodMaterials.isAllowedName(material)) {
         throw new IllegalArgumentException("Invalid harvest journal entry");
       }
     }
 
+    String effectiveMaterial() { return material == null ? "OAK_LOG" : material; }
     int afterCollected() { return beforeCollected + 1; }
     int afterCargo() { return beforeCargo + 1; }
   }
 
   record Deposit(String taskId, String world, int x, int y, int z, int beforeCargo,
-      int beforeDeposited, int moved, List<CargoDepositPlanner.Change> changes) {
+      int beforeDeposited, int moved, List<CargoDepositPlanner.Change> changes, String material) {
+    Deposit(String taskId, String world, int x, int y, int z, int beforeCargo,
+        int beforeDeposited, int moved, List<CargoDepositPlanner.Change> changes) {
+      this(taskId, world, x, y, z, beforeCargo, beforeDeposited, moved, changes, "OAK_LOG");
+    }
+
     Deposit {
       if (taskId == null || taskId.isBlank() || world == null || world.isBlank()
           || beforeCargo < 1 || beforeCargo > 64 || beforeDeposited < 0
-          || moved < 1 || moved > beforeCargo || changes == null || changes.isEmpty()) {
+          || moved < 1 || moved > beforeCargo || changes == null || changes.isEmpty()
+          || material != null && !WoodMaterials.isAllowedName(material)) {
         throw new IllegalArgumentException("Invalid deposit journal entry");
       }
       changes = List.copyOf(changes);
     }
 
+    String effectiveMaterial() { return material == null ? "OAK_LOG" : material; }
     int afterCargo() { return beforeCargo - moved; }
     int afterDeposited() { return beforeDeposited + moved; }
   }
 
   private static final class Data {
-    int version = 1;
+    int version = 2;
     Harvest pendingHarvest;
     List<Harvest> harvests = new ArrayList<>();
     Deposit pendingDeposit;

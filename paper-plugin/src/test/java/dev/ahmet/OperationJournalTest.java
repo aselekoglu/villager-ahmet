@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -35,5 +36,16 @@ final class OperationJournalTest {
     afterThirdRestart.load();
     assertEquals(deposit, afterThirdRestart.pendingDeposit().orElseThrow());
     assertTrue(afterThirdRestart.hasOperations());
+  }
+
+  @Test
+  void legacyVersionOneJournalDefaultsMissingMaterialsToOak() throws Exception {
+    Path path = temp.resolve("legacy-operations.json");
+    Files.writeString(path, """
+        {"version":1,"harvests":[],"pendingHarvest":{"taskId":"legacy","world":"world","x":1,"y":2,"z":3,"beforeCollected":0,"beforeCargo":0}}
+        """);
+    OperationJournal journal = new OperationJournal(path);
+    journal.load();
+    assertEquals("OAK_LOG", journal.pendingHarvest().orElseThrow().effectiveMaterial());
   }
 }

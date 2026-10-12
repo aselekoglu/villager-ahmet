@@ -25,4 +25,15 @@ final class OperationRecoveryTest {
     assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
         OperationRecovery.classifyHarvest(operation, "different-task", 3, 3, "AIR"));
   }
+
+  @Test
+  void recoversHarvestsForTheSpecificSelectedLogMaterial() {
+    var birch = new OperationJournal.Harvest("task-2", "world", 4, 65, -2, 0, 0, "BIRCH_LOG");
+    assertEquals(OperationRecovery.HarvestDisposition.NOT_APPLIED,
+        OperationRecovery.classifyHarvest(birch, "task-2", 0, 0, "BIRCH_LOG"));
+    assertEquals(OperationRecovery.HarvestDisposition.APPLY,
+        OperationRecovery.classifyHarvest(birch, "task-2", 0, 0, "AIR"));
+    assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
+        OperationRecovery.classifyHarvest(birch, "task-2", 0, 0, "OAK_LOG"));
+  }
 }

@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Objects;
 
 final class CargoDepositPlanner {
+  /** Legacy material identifier used for v1 journal recovery. */
   static final String CARGO_MATERIAL = "OAK_LOG";
 
   private CargoDepositPlanner() {}
@@ -33,8 +34,9 @@ final class CargoDepositPlanner {
     }
   }
 
-  record Plan(int requested, int moved, int remaining, List<Change> changes) {
+  record Plan(String material, int requested, int moved, int remaining, List<Change> changes) {
     Plan {
+      if (!WoodMaterials.isAllowedName(material)) throw new IllegalArgumentException("Unsupported cargo material");
       if (requested < 1 || requested > 64 || moved < 0 || remaining < 0 || moved + remaining != requested) {
         throw new IllegalArgumentException("Invalid deposit plan");
       }
@@ -43,14 +45,19 @@ final class CargoDepositPlanner {
   }
 
   static Plan plan(List<Slot> contents, int requested) {
+    return plan(contents, CARGO_MATERIAL, requested);
+  }
+
+  static Plan plan(List<Slot> contents, String material, int requested) {
     if (contents == null) throw new IllegalArgumentException("Inventory is required");
+    if (!WoodMaterials.isAllowedName(material)) throw new IllegalArgumentException("Unsupported cargo material");
     if (requested < 1 || requested > 64) throw new IllegalArgumentException("Cargo must be between 1 and 64");
     List<Change> changes = new ArrayList<>();
     int remaining = requested;
 
     for (int i = 0; i < contents.size() && remaining > 0; i++) {
       Slot slot = Objects.requireNonNull(contents.get(i), "Slot is required");
-      if (!CARGO_MATERIAL.equals(slot.material()) || slot.amount() == slot.maxAmount()) continue;
+      if (!material.equals(slot.material()) || slot.amount() == slot.maxAmount()) continue;
       int added = Math.min(remaining, slot.maxAmount() - slot.amount());
       changes.add(new Change(i, slot.material(), slot.amount(), slot.amount() + added));
       remaining -= added;
@@ -63,7 +70,7 @@ final class CargoDepositPlanner {
       remaining -= added;
     }
 
-    return new Plan(requested, requested - remaining, remaining, changes);
+    return new Plan(material, requested, requested - remaining, remaining, changes);
   }
 
   static List<Slot> apply(List<Slot> contents, Plan plan) {
@@ -73,8 +80,8 @@ final class CargoDepositPlanner {
       if (change.slot() >= result.size()) throw new IllegalStateException("Chest inventory shape changed during deposit");
       Slot current = Objects.requireNonNull(result.get(change.slot()), "Slot is required");
       boolean before = Objects.equals(current.material(), change.beforeMaterial()) && current.amount() == change.beforeAmount();
-      boolean after = CARGO_MATERIAL.equals(current.material()) && current.amount() == change.afterAmount();
-      if (before) result.set(change.slot(), new Slot(CARGO_MATERIAL, change.afterAmount(), current.maxAmount()));
+      boolean after = plan.material().equals(current.material()) && current.amount() == change.afterAmount();
+      if (before) result.set(change.slot(), new Slot(plan.material(), change.afterAmount(), current.maxAmount()));
       else if (!after) throw new IllegalStateException("Chest slot changed during pending deposit");
     }
     return List.copyOf(result);

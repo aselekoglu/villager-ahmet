@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {chooseAction,conversationalReply} from '../src/models.mjs';
+import {chooseAction,conversationalReply,interpretTurn} from '../src/models.mjs';
 test('JEV uses TypeSafe System One and only accepts offered actions',async()=>{
  const previous=globalThis.fetch;let seen={};
  try {
@@ -26,4 +26,13 @@ test('conversation defaults to GPT-6 Luna without changing the JEV model',async(
   await conversationalReply('Selam','Ata',[],{key:'test-only',mode:'llm'});
   assert.equal(body.model,'gpt-6-luna');assert.equal(body.max_completion_tokens,170);assert.equal(body.max_tokens,undefined);
  }finally{globalThis.fetch=previous;if(previousModel===undefined)delete process.env.CHAT_MODEL;else process.env.CHAT_MODEL=previousModel;}
+});
+test('GPT-6 Luna returns a JSON task intent separately from JEV',async()=>{
+ const previous=globalThis.fetch;let seen;
+ try {globalThis.fetch=async(url,init)=>{seen={url,body:JSON.parse(init.body)};return {ok:true,json:async()=>({choices:[{message:{content:JSON.stringify({reply:'Odunları topluyorum.',task:{type:'collect_wood',material:'any',amount:8}})}}]})};};
+  const result=await interpretTurn('Ahmet bulduğun odunları getir','Ata',[],{key:'test-only',mode:'llm'});
+  assert.equal(result.task.material,'any');assert.equal(result.task.amount,8);
+  assert.equal(seen.url,'https://api.openai.com/v1/chat/completions');
+  assert.equal(seen.body.model,'gpt-6-luna');assert.deepEqual(seen.body.response_format,{type:'json_object'});
+ }finally{globalThis.fetch=previous;}
 });

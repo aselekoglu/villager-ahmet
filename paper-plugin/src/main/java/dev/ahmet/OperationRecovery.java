@@ -19,7 +19,7 @@ final class OperationRecovery {
     if (collected != operation.beforeCollected() || cargo != operation.beforeCargo()) {
       return HarvestDisposition.CONFLICT;
     }
-    if ("OAK_LOG".equals(blockMaterial)) return HarvestDisposition.NOT_APPLIED;
+    if (operation.effectiveMaterial().equals(blockMaterial)) return HarvestDisposition.NOT_APPLIED;
     if ("AIR".equals(blockMaterial)) return HarvestDisposition.APPLY;
     return HarvestDisposition.CONFLICT;
   }

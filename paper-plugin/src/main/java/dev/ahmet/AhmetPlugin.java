@@ -9,6 +9,7 @@ import net.kyori.adventure.text.serializer.plain.PlainTextComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.Tag;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
@@ -27,8 +28,11 @@ import org.bukkit.util.Vector;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public final class AhmetPlugin extends JavaPlugin implements Listener {
@@ -52,12 +56,13 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
     saveDefaultConfig();brain=new BrainClient(this);
     int id=getConfig().getInt("npc-id",-1);
     if(id>=0)npc=CitizensAPI.getNPCRegistry().getById(id);
-    chestLocation=loadLoc("chest"); home=loadLoc("home");task.load(getConfig());
+    chestLocation=loadLoc("chest"); home=loadLoc("home");boolean taskStateValid=true;
+    try{task.load(getConfig());}catch(Exception e){taskStateValid=false;blockRecovery("Saved task state is invalid and must be inspected",e);}
     journal=new OperationJournal(getDataFolder().toPath().resolve("operations.json"));
-    try{journal.load();recoverJournal();}
+    try{journal.load();if(taskStateValid)recoverJournal();}
     catch(Exception e){blockRecovery("Operation journal could not be recovered",e);}
     if(task.active && npc==null){getLogger().warning("Saved task exists but NPC is missing; task paused until spawned.");}
-    persist();
+    if(taskStateValid)persist();
     Bukkit.getPluginManager().registerEvents(this,this);
     Bukkit.getScheduler().runTaskTimer(this,this::step,40L,40L);
     getLogger().info("Villager Ahmet ready. Run /ahmet spawn as an operator to summon Ahmet.");
@@ -90,7 +95,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
       if(!player.hasPermission("ahmet.admin")){player.sendMessage("§cYetkin yok.");return true;}
       if(npc==null){npc=CitizensAPI.getNPCRegistry().createNPC(EntityType.VILLAGER,"Ahmet");}
       if(npc.isSpawned()){player.sendMessage("§eAhmet zaten dünyada.");return true;}
-      npc.spawn(player.getLocation());home=player.getLocation().clone();persist();say("Selam! İşe hazırım.");return true;
+      npc.spawn(player.getLocation());home=player.getLocation().clone();treeRetryAfterMs=0;persist();say("Selam! İşe hazırım.");return true;
     }
     if(op.equals("summon")){
       if(!player.hasPermission("ahmet.admin")){player.sendMessage("§cYetkin yok.");return true;}
@@ -104,7 +109,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
       }else if(!npc.spawn(destination)){
         player.sendMessage("§cAhmet güvenli noktada oluşturulamadı.");return true;
       }
-      home=destination.clone();persist();
+      home=destination.clone();treeRetryAfterMs=0;persist();
       player.sendMessage("§aAhmet yanındaki güvenli noktaya geldi.");say("Yanına geldim.");return true;
     }
     if(op.equals("chest")){
@@ -164,6 +169,10 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
       if(error!=null){player.sendMessage("§cAhmet'in beyni şu an yanıt vermiyor: "+error.getMessage());return;}
       if(!player.isOnline())return;
       String answer=reply.has("reply")?reply.get("reply").getAsString():"Hmm?";
+      if(reply.has("taskSource")){
+        String source=reply.get("taskSource").getAsString();
+        if(source.equals("llm")||source.equals("heuristic"))getLogger().info("Wood task intent source: "+source);
+      }
       if(reply.has("cancel")&&reply.get("cancel").getAsBoolean()){
         if(task.active && (task.owner.equals(player.getUniqueId().toString())||player.hasPermission("ahmet.admin")))cancel();
         else {player.sendMessage("§cBaşkasının görevini iptal edemezsin.");return;}
@@ -172,14 +181,18 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
         JsonObject spec=reply.getAsJsonObject("task");
         if(!task.active && task.cargo==0 && !journal.hasOperations() && chestLocation!=null
             && chestLocation.getWorld().equals(npc.getEntity().getWorld())
-            && spec.has("type")&&spec.get("type").getAsString().equals("collect_oak_logs")){
-          int amount=spec.get("amount").getAsInt();if(amount>=1&&amount<=64){task.start(player.getUniqueId(),amount);treeTarget=null;jobGeneration++;persist();event("task_started",amount);}
+            && spec.has("type")&&spec.get("type").getAsString().equals("collect_wood")
+            && spec.has("material")&&spec.has("amount")){
+          String material=spec.get("material").getAsString();int amount=spec.get("amount").getAsInt();
+          if(amount>=1&&amount<=64&&WoodMaterials.isPreference(material)){
+            task.start(player.getUniqueId(),amount,material);treeTarget=null;treeRetryAfterMs=0;waitDecisions=0;jobGeneration++;persist();event("task_started",amount);
+          }
         }
       }
       say(answer);
     }));
   }
-  private void cancel(){event("task_cancelled",task.requested);task.cancel();jobGeneration++;treeTarget=null;clearNavigation();persist();}
+  private void cancel(){event("task_cancelled",task.requested);task.cancel();jobGeneration++;treeTarget=null;treeRetryAfterMs=0;waitDecisions=0;clearNavigation();persist();}
   private void step(){
     if(recoveryBlocked || journal.pendingHarvest().isPresent() || journal.pendingDeposit().isPresent()
         || !task.active || npc==null || !npc.isSpawned() || deciding)return;
@@ -201,48 +214,66 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
       }else if(outcome==NavigationWatchdog.Outcome.WAIT&&!npc.getNavigator().isNavigating())return;
     }
     if(npc.getNavigator().isNavigating() || now<treeRetryAfterMs)return;
-    final JsonArray options=new JsonArray();
-    String required;
     if(task.collected>=task.requested){
       if(chestLocation==null || !chestLocation.getWorld().equals(current.getWorld())){warn("Teslimat sandığı kayıp veya başka dünyada.");return;}
-      required=current.distanceSquared(chestLocation.clone().add(0.5,0,0.5))>3.2*3.2?"walk_chest":"deposit";
-    }else {
-      if(treeTarget==null || !isTree(treeTarget.getBlock()))required="find_tree";
-      else required=current.distanceSquared(treeTarget.clone().add(.5,0,.5))>2.9*2.9?"walk_tree":"harvest";
+      if(current.distanceSquared(chestLocation.clone().add(.5,0,.5))>3.2*3.2)navigate(chestLocation);
+      else execute("deposit");
+      return;
     }
-    options.add(candidate(required,describeAction(required)));options.add(candidate("wait","Wait briefly to assess safety; no progress"));
+    if(treeTarget!=null&&isEligibleWood(treeTarget.getBlock(),task.materialPreference)){
+      if(current.distanceSquared(treeTarget.clone().add(.5,0,.5))>2.9*2.9)navigate(treeTarget);
+      else execute("harvest");
+      return;
+    }
+    // JEV only chooses among Java-discovered wood targets; travel and item transactions stay deterministic.
+    final JsonArray options=new JsonArray();
+    List<Block> found=findTrees(current,task.materialPreference);
+    if(found.isEmpty()){
+      treeRetryAfterMs=now+30000;
+      warn("Yakınımda güvenle toplayabileceğim uygun kütük bulamadım. Yanına git veya arama yarıçapını artır.");
+      return;
+    }
+    LinkedHashMap<String,Location> offeredTargets=new LinkedHashMap<>();
+    for(int i=0;i<found.size();i++){
+      String id="target_"+(char)('a'+i);Block block=found.get(i);
+      double distance=Math.sqrt(current.distanceSquared(block.getLocation()));
+      options.add(candidate(id,"Walk to nearby "+block.getType().name().toLowerCase(java.util.Locale.ROOT)+" block, distance "+Math.round(distance)+" blocks"));
+      offeredTargets.put(id,block.getLocation());
+    }
+    options.add(candidate("wait","Wait briefly to assess safety; no progress"));
     JsonObject req=new JsonObject();JsonObject observation=new JsonObject();
-    observation.addProperty("task","collect_oak_logs");observation.addProperty("requested",task.requested);observation.addProperty("collected",task.collected);
-    observation.addProperty("cargo",task.cargo);observation.addProperty("deposited",task.deposited);observation.addProperty("requiredAction",required);
+    observation.addProperty("task","collect_wood");observation.addProperty("materialPreference",task.materialPreference);observation.addProperty("requested",task.requested);observation.addProperty("collected",task.collected);
+    observation.addProperty("cargo",task.cargo);observation.addProperty("deposited",task.deposited);observation.addProperty("requiredAction","select_tree");
     observation.addProperty("chestBound",chestLocation!=null);observation.addProperty("position",coords(current));
     req.add("observation",observation);req.add("actions",options);
     deciding=true;
-    final String action=required;
     final long generation=jobGeneration;
     brain.post("/api/decide",req).whenComplete((response,error)->Bukkit.getScheduler().runTask(this,()->{
       deciding=false;if(!task.active || npc==null || !npc.isSpawned() || jobGeneration!=generation)return;
-      // Server is authoritative. Never execute an action not in the current candidate list.
-      String selected=error==null&&response.has("id")?response.get("id").getAsString():action;
-      if(selected.equals(action)){waitDecisions=0;execute(action);}
-      else if(selected.equals("wait") && ++waitDecisions>=3){waitDecisions=0;execute(action);}
+      // JEV may select only an offered target ID. Java retains each real block location.
+      String selected=error==null&&response.has("id")?response.get("id").getAsString():"wait";
+      String source=error==null&&response.has("source")?response.get("source").getAsString():"fallback";
+      String model=error==null&&response.has("model")?response.get("model").getAsString():"none";
+      if(!Set.of("jev","heuristic","forced","fallback").contains(source))source="unknown";
+      model=model.replaceAll("[^A-Za-z0-9._-]","");if(model.length()>64)model=model.substring(0,64);
+      String candidateId=offeredTargets.containsKey(selected)?selected:"unoffered";
+      getLogger().info("Wood target selection source: "+source+", model: "+model+", candidate: "+candidateId);
+      Location selectedTarget=offeredTargets.get(selected);
+      if(selectedTarget!=null){treeTarget=selectedTarget;treeRetryAfterMs=0;waitDecisions=0;}
+      else if(++waitDecisions>=3&&!offeredTargets.isEmpty()){
+        waitDecisions=0;treeTarget=offeredTargets.values().iterator().next();
+      }
     }));
   }
   private JsonObject candidate(String id,String description){JsonObject result=new JsonObject();result.addProperty("id",id);result.addProperty("description",description);return result;}
-  private String describeAction(String a){return switch(a){case "find_tree"->"Find a nearby natural oak tree";case "walk_tree"->"Walk to chosen oak log";case "harvest"->"Harvest one real oak log if nearby and still naturally present";case "walk_chest"->"Walk to bound chest with collected wood";case "deposit"->"Deposit actually harvested logs into designated chest";default->"Wait";};}
   private void execute(String action){
     Location here=npc.getEntity().getLocation();
     switch(action){
-      case "find_tree" -> {
-        treeTarget=findTree(here);
-        if(treeTarget==null){treeRetryAfterMs=System.currentTimeMillis()+10000;warn("Çevrede güvenli erişebildiğim meşe ağacı bulamadım.");}
-      }
-      case "walk_tree" -> navigate(treeTarget);
       case "harvest" -> {
         if(treeTarget==null || here.distanceSquared(treeTarget.clone().add(.5,0,.5))>3.5*3.5){treeTarget=null;return;}
-        Block block=treeTarget.getBlock();if(!isTree(block)){treeTarget=null;return;}
+        Block block=treeTarget.getBlock();if(!isEligibleWood(block,task.materialPreference)){treeTarget=null;return;}
         harvest(block);
       }
-      case "walk_chest" -> navigate(chestLocation);
       case "deposit" -> {
         Block block=chestLocation.getBlock();if(!(block.getState() instanceof Chest chest)){warn("İşaretli sandık artık orada değil.");return;}
         deposit(chest);
@@ -252,12 +283,12 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
   }
   private void harvest(Block block){
     OperationJournal.Harvest operation=new OperationJournal.Harvest(task.taskId,block.getWorld().getName(),
-      block.getX(),block.getY(),block.getZ(),task.collected,task.cargo);
+      block.getX(),block.getY(),block.getZ(),task.collected,task.cargo,block.getType().name());
     try{
       journal.prepareHarvest(operation);
       // Write-ahead record precedes the world mutation; task YAML follows it.
       block.setType(Material.AIR,false);
-      task.harvestOne();
+      task.harvestOne(block.getType().name());
       persist();
       journal.completeHarvest();
       treeTarget=null;
@@ -269,18 +300,20 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
   }
   private void deposit(Chest chest){
     if(task.cargo<=0)return;
+    String material=task.nextCargoMaterial();if(material==null)return;
+    int amount=task.cargoItems().getOrDefault(material,0);if(amount<=0)return;
     Inventory inventory=chest.getBlockInventory();
     try{
       List<CargoDepositPlanner.Slot> before=inventorySlots(inventory);
-      CargoDepositPlanner.Plan plan=CargoDepositPlanner.plan(before,task.cargo);
+      CargoDepositPlanner.Plan plan=CargoDepositPlanner.plan(before,material,amount);
       if(plan.moved()==0){warn("Sandık dolu; "+task.cargo+" odun hâlâ bende.");return;}
       List<CargoDepositPlanner.Slot> after=CargoDepositPlanner.apply(before,plan);
       OperationJournal.Deposit operation=new OperationJournal.Deposit(task.taskId,chest.getWorld().getName(),
         chestLocation.getBlockX(),chestLocation.getBlockY(),chestLocation.getBlockZ(),task.cargo,task.deposited,
-        plan.moved(),plan.changes());
+        plan.moved(),plan.changes(),material);
       journal.prepareDeposit(operation);
       writeInventoryPlan(inventory,after,plan.changes());
-      task.deposit(plan.moved());
+      task.deposit(material,plan.moved());
       persist();
       saveJournalWorlds(chest.getWorld());
       journal.clearAfterWorldSave();
@@ -303,8 +336,10 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
       List<CargoDepositPlanner.Change> changes){
     for(CargoDepositPlanner.Change change:changes){
       CargoDepositPlanner.Slot slot=after.get(change.slot());
-      if(!CargoDepositPlanner.CARGO_MATERIAL.equals(slot.material()))throw new IllegalStateException("Deposit plan has an invalid item");
-      inventory.setItem(change.slot(),new ItemStack(Material.OAK_LOG,slot.amount()));
+      if(!WoodMaterials.isAllowedName(slot.material()))throw new IllegalStateException("Deposit plan has an invalid item");
+      Material material=Material.matchMaterial(slot.material());
+      if(material==null)throw new IllegalStateException("Deposit item material is unavailable");
+      inventory.setItem(change.slot(),new ItemStack(material,slot.amount()));
     }
   }
   private void recoverJournal(){
@@ -318,7 +353,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
         var disposition=OperationRecovery.classifyHarvest(operation,task.taskId,task.collected,task.cargo,block.getType().name());
         switch(disposition){
           case NOT_APPLIED -> journal.discardPendingHarvest();
-          case APPLY -> {task.harvestOne();persist();journal.completeHarvest();}
+          case APPLY -> {task.harvestOne(operation.effectiveMaterial());persist();journal.completeHarvest();}
           case ALREADY_APPLIED -> journal.completeHarvest();
           case CONFLICT -> {blockRecovery("Harvest journal conflicts with saved task or block state",null);return;}
         }
@@ -344,10 +379,10 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
           blockRecovery("Deposit journal conflicts with saved task state",null);return;
         }
         Inventory inventory=chest.getBlockInventory();
-        var plan=new CargoDepositPlanner.Plan(operation.moved(),operation.moved(),0,operation.changes());
+        var plan=new CargoDepositPlanner.Plan(operation.effectiveMaterial(),operation.moved(),operation.moved(),0,operation.changes());
         List<CargoDepositPlanner.Slot> after=CargoDepositPlanner.apply(inventorySlots(inventory),plan);
         writeInventoryPlan(inventory,after,operation.changes());
-        if(disposition==OperationRecovery.DepositDisposition.APPLY)task.deposit(operation.moved());
+        if(disposition==OperationRecovery.DepositDisposition.APPLY)task.deposit(operation.effectiveMaterial(),operation.moved());
         persist();
         saveJournalWorlds(world);
         journal.clearAfterWorldSave();
@@ -360,7 +395,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
   private void finishTaskIfReady(){
     if(!task.active||!task.readyToFinish())return;
     task.finish();jobGeneration++;persist();event("task_delivered",task.deposited);
-    say("Bitti! "+task.deposited+" meşe odununu sandığa bıraktım.");
+    say("Bitti! "+task.deposited+" kütüğü sandığa bıraktım.");
   }
   private void saveJournalWorlds(World additional)throws IOException{
     Set<String> names=new LinkedHashSet<>();
@@ -407,30 +442,62 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
     return first!=null&&first.getWorld().equals(second.getWorld())&&first.getBlockX()==second.getBlockX()
       &&first.getBlockY()==second.getBlockY()&&first.getBlockZ()==second.getBlockZ();
   }
-  private Location findTree(Location origin){
-    World world=origin.getWorld();int r=Math.min(24,Math.max(3,getConfig().getInt("options.search-radius",16)));
-    Location best=null;double bestDist=Double.MAX_VALUE;
+  private List<Block> findTrees(Location origin,String preference){
+    World world=origin.getWorld();int r=Math.min(24,Math.max(8,getConfig().getInt("options.search-radius",24)));
+    List<Block> candidates=new ArrayList<>();
     for(int x=-r;x<=r;x++)for(int z=-r;z<=r;z++){
       if(x*x+z*z>r*r)continue;
-      for(int y=-2;y<=2;y++){
+      for(int y=-8;y<=12;y++){
         int xx=origin.getBlockX()+x, yy=origin.getBlockY()+y, zz=origin.getBlockZ()+z;
         if(yy<world.getMinHeight()||yy>=world.getMaxHeight())continue;
         if(!world.isChunkLoaded(xx>>4,zz>>4))continue;
-        Block b=world.getBlockAt(xx,yy,zz);if(!isTree(b))continue;
-        double dist=origin.distanceSquared(b.getLocation());
-        if(dist<bestDist){bestDist=dist;best=b.getLocation();}
+        Block block=world.getBlockAt(xx,yy,zz);
+        if(WoodMaterials.matchesPreference(block.getType(),preference))candidates.add(block);
       }
     }
-    return best;
+    candidates.sort(Comparator.comparingDouble(block->origin.distanceSquared(block.getLocation())));
+    List<Block> eligible=new ArrayList<>(8);
+    int checks=0;
+    for(Block block:candidates){
+      if(checks++>=64)break;
+      if(hasNaturalWoodMarkers(block))eligible.add(block);
+      if(eligible.size()>=8)break;
+    }
+    return eligible;
   }
-  private boolean isTree(Block block){
-    if(block.getType()!=Material.OAK_LOG)return false;
-    if(!getConfig().getBoolean("options.only-oak-logs-near-leaves",true))return true;
-    // Basic house-damage mitigation. A stronger connected-tree/protection policy is required before public servers.
-    for(int dx=-3;dx<=3;dx++)for(int dz=-3;dz<=3;dz++)for(int dy=0;dy<=5;dy++){
-      if(block.getRelative(dx,dy,dz).getType()==Material.OAK_LEAVES)return true;
+  private boolean isEligibleWood(Block block,String preference){
+    if(!WoodMaterials.matchesPreference(block.getType(),preference))return false;
+    return hasNaturalWoodMarkers(block);
+  }
+  private boolean hasNaturalWoodMarkers(Block block){
+    boolean protectNatural=getConfig().getBoolean("options.only-natural-wood",
+        getConfig().getBoolean("options.only-oak-logs-near-leaves",true));
+    if(!protectNatural)return true;
+    if(block.getType()==Material.BAMBOO){
+      int stalkNeighbours=0;
+      for(int dx=-2;dx<=2;dx++)for(int dz=-2;dz<=2;dz++)for(int dy=-3;dy<=3;dy++){
+        if(neighborTypeIfLoaded(block,dx,dy,dz)==Material.BAMBOO)stalkNeighbours++;
+      }
+      return stalkNeighbours>=2;
+    }
+    // Preserve the old private-world structure guard, generalized to all leaf types and Nether fungi.
+    for(int dx=-4;dx<=4;dx++)for(int dz=-4;dz<=4;dz++)for(int dy=-3;dy<=9;dy++){
+      if(Tag.LEAVES.isTagged(neighborTypeIfLoaded(block,dx,dy,dz)))return true;
+    }
+    String type=block.getType().name();
+    if(type.contains("CRIMSON")||type.contains("WARPED")){
+      Set<Material> fungalIndicators=type.contains("CRIMSON")
+          ?Set.of(Material.CRIMSON_FUNGUS,Material.NETHER_WART_BLOCK,Material.SHROOMLIGHT)
+          :Set.of(Material.WARPED_FUNGUS,Material.WARPED_WART_BLOCK,Material.SHROOMLIGHT);
+      for(int dx=-5;dx<=5;dx++)for(int dz=-5;dz<=5;dz++)for(int dy=-5;dy<=9;dy++)
+        if(fungalIndicators.contains(neighborTypeIfLoaded(block,dx,dy,dz)))return true;
     }
     return false;
+  }
+  private Material neighborTypeIfLoaded(Block origin,int dx,int dy,int dz){
+    int x=origin.getX()+dx,y=origin.getY()+dy,z=origin.getZ()+dz;
+    if(!origin.getWorld().isChunkLoaded(x>>4,z>>4))return Material.AIR;
+    return origin.getWorld().getBlockAt(x,y,z).getType();
   }
   private void event(String type,int count){
     JsonObject payload=new JsonObject();payload.addProperty("type",type);payload.addProperty("actor",task.owner);payload.addProperty("count",count);
