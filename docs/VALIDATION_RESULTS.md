@@ -62,6 +62,14 @@
 - A real direct OpenAI GPT-6 Luna structured chat/task call for `Ahmet, 5 ham demir getir` succeeded. It returned a Turkish reply and validated `{type: collect_item, itemId: minecraft:raw_iron, amount: 5}`. This was a live model/API test, not an in-game task test.
 - `./scripts/doctor.sh` now reports `[OK] OpenAI chat key configured`. The local brain and Paper server were restarted with zero players online; both are listening on loopback `127.0.0.1:3197` and LAN port `25565`. Citizens loaded the saved NPC record, which still needs operator `/ahmet summon` after reconnecting.
 
+## Citizens path retry fix — 2026-10-12
+
+- A live task remained at `2/8` collected with cargo retained; server logs showed repeated JEV selections of `target_a`. Code inspection found that the stall watchdog cancelled Citizens navigation, but the following ticks returned while the navigator was stopped instead of reissuing the target.
+- The fix schedules a route restart after two seconds while preserving the watchdog attempt count. After three unsuccessful routes, the target block is suppressed for 60 seconds, allowing the next bounded scan/JEV choice to consider other blocks.
+- Added unit tests for one-shot delayed route restart and temporary failed-target suppression. Full Maven clean package passed **34/34 Java tests**; Node **13/13**, mock HTTP smoke, syntax checks and diff checks passed. New plugin JAR SHA-256: `f2f2d6e9ea0fdfb8b2dce8abfdb565a825b5ab70b98abd3f322544ae385aeed1`. Transfer ZIP SHA-256: `dc460e472ee0773dda17f50ce68203c2bc7ae5e9f0fb107c8dcb5ad318acb331`.
+- A fresh Paper 1.21.6 + Citizens build 4138 test world loaded the new JAR, returned `/ahmet status` and `/ahmet items oak_log`, then shut down cleanly. This verifies load/commands only, not NPC movement or resource harvesting.
+- The active imported-world server still has the previous JAR loaded because `aselekoglu` is online. No server restart or plugin-file replacement was done while the player was connected. Install the new JAR and restart after all players disconnect, then re-run the wood job.
+
 ## Local test-server commands
 
 On this Mac, with Homebrew Java 21 and Maven installed:

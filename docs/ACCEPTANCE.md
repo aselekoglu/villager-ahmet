@@ -32,7 +32,7 @@
 - [ ] Restart during job: task and cargo survive; eventual delivery conserves items.
 - [ ] Chest full: Ahmet retains undelivered cargo and warns; after room is made `/ahmet deliver` works.
 - [ ] Cancellation by task owner and admin succeeds, and cargo recovery does not lose or invent logs.
-- [ ] NPC pathfinding failure gives actionable error, no infinite busy loop or unbounded chunk scan.
+- [ ] NPC pathfinding failure gives actionable error, retries the cancelled route, then temporarily excludes an unreachable block without an infinite busy loop or unbounded chunk scan. Retry/cache units pass; live pathing remains unverified.
 - [ ] Block modifications respect region protection in an appropriate test OR project explicitly remains private-only.
 - [x] One **real** JEV choice call returns an offered action and actual model id from TypeSafe.
 - [x] One **real** common-resource JEV call selected an offered candidate: `target_a`, source `jev`, model `jev-1.13.0`, confidence `0.98`.

@@ -2,7 +2,7 @@
 
 An AI-assisted **real villager NPC** for a private Minecraft Java Edition multiplayer world. Not a player bot wearing a villager skin.
 
-**Status: full Paper 1.21.6 item catalog and common-resource gather path are installed and booted.** The live copied world exported 1,414 unique item IDs; a separate fresh Paper test world loaded the final JAR and passed item/status commands. The common-resource task has not yet been run through real player chat or harvesting/deposit. Ahmet remains a real Citizens villager.
+**Status: full Paper 1.21.6 item catalog and common-resource gather path are installed and booted.** The live copied world exported 1,414 unique item IDs; a separate fresh Paper test world loaded the JAR and passed item/status commands. A navigation retry fix is now built and verified in tests, but the active server still has the previous JAR loaded while a player is online. Real harvesting/deposit remains unverified. Ahmet remains a real Citizens villager.
 
 ## Architecture
 

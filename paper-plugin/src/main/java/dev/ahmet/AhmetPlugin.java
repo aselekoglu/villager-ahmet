@@ -44,6 +44,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
   private Location treeTarget;
   private Location navigationGoal;
   private final NavigationWatchdog navigationWatchdog=new NavigationWatchdog();
+  private final NavigationRetry navigationRetry=new NavigationRetry();
+  private final FailedTargets failedTargets=new FailedTargets();
   private Location home;
   private boolean deciding=false;
   private long jobGeneration=0;
@@ -205,7 +207,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
         if(preference!=null&&amount>=1&&amount<=64&&WoodMaterials.isPreference(preference)
             &&!task.active&&task.cargo==0&&!journal.hasOperations()&&chestLocation!=null
             &&chestLocation.getWorld().equals(npc.getEntity().getWorld())){
-          task.start(player.getUniqueId(),amount,preference);treeTarget=null;treeRetryAfterMs=0;waitDecisions=0;jobGeneration++;persist();event("task_started",amount);
+          task.start(player.getUniqueId(),amount,preference);treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;jobGeneration++;persist();event("task_started",amount);
         }else{
           answer="Bu item kataloğumda tanımlı, ancak güvenli toplama yeteneğim henüz yok. Şimdilik yaygın odun, toprak, kum, taş, kömür, demir ve altın kaynaklarını isteyebilirsin.";
         }
@@ -213,23 +215,30 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
       say(answer);
     }));
   }
-  private void cancel(){event("task_cancelled",task.requested);task.cancel();jobGeneration++;treeTarget=null;treeRetryAfterMs=0;waitDecisions=0;clearNavigation();persist();}
+  private void cancel(){event("task_cancelled",task.requested);task.cancel();jobGeneration++;treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;clearNavigation();persist();}
   private void step(){
     if(recoveryBlocked || journal.pendingHarvest().isPresent() || journal.pendingDeposit().isPresent()
         || !task.active || npc==null || !npc.isSpawned() || deciding)return;
     final Location current=npc.getEntity().getLocation();
     final long now=System.currentTimeMillis();
+    if(navigationRetry.pending()){
+      if(!navigationRetry.consumeIfDue(now))return;
+      if(navigationGoal!=null)issueNavigationTarget(navigationGoal);
+      return;
+    }
     if(navigationGoal!=null){
       NavigationWatchdog.Outcome outcome=navigationWatchdog.observe(current.distanceSquared(navigationGoal),now);
       if(outcome==NavigationWatchdog.Outcome.REACHED)navigationGoal=null;
       else if(outcome==NavigationWatchdog.Outcome.RETRY){
         if(npc.getNavigator().isNavigating())npc.getNavigator().cancelNavigation();
-        treeRetryAfterMs=now+2000;return;
+        navigationRetry.schedule(now);return;
       }else if(outcome==NavigationWatchdog.Outcome.GIVE_UP){
         if(npc.getNavigator().isNavigating())npc.getNavigator().cancelNavigation();
         navigationGoal=null;navigationWatchdog.reset();
-        if(task.collected<task.requested)treeTarget=null;
-        treeRetryAfterMs=now+30000;
+        if(task.collected<task.requested){
+          if(treeTarget!=null){Block failed=treeTarget.getBlock();failedTargets.mark(failed.getWorld().getName(),failed.getX(),failed.getY(),failed.getZ(),now);}
+          treeTarget=null;treeRetryAfterMs=now+2000;
+        }else treeRetryAfterMs=now+30000;
         warn("Ahmet üç kez yol bulamadı. Yolu açıp tekrar deneyin veya görevi iptal edin.");
         return;
       }else if(outcome==NavigationWatchdog.Outcome.WAIT&&!npc.getNavigator().isNavigating())return;
@@ -455,14 +464,17 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
     }
     Location target=location.clone().add(.5,0,.5);
     if(!sameBlock(navigationGoal,target)){navigationGoal=target;navigationWatchdog.reset();}
+    issueNavigationTarget(target);
+  }
+  private void issueNavigationTarget(Location target){
+    if(npc==null||!npc.isSpawned()||target==null)return;
     npc.getNavigator().setTarget(target);
     // Citizens documents these per-target parameters; -1 disables destination and stuck teleports.
     npc.getNavigator().getLocalParameters().destinationTeleportMargin(-1).stationaryTicks(-1);
-
   }
   private void clearNavigation(){
     if(npc!=null&&npc.isSpawned())npc.getNavigator().cancelNavigation();
-    navigationGoal=null;navigationWatchdog.reset();
+    navigationGoal=null;navigationWatchdog.reset();navigationRetry.clear();
   }
   private static boolean sameBlock(Location first,Location second){
     return first!=null&&first.getWorld().equals(second.getWorld())&&first.getBlockX()==second.getBlockX()
@@ -478,7 +490,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
         if(yy<world.getMinHeight()||yy>=world.getMaxHeight())continue;
         if(!world.isChunkLoaded(xx>>4,zz>>4))continue;
         Block block=world.getBlockAt(xx,yy,zz);
-        if(matchesTarget(block,preference))candidates.add(block);
+        if(matchesTarget(block,preference)
+            &&!failedTargets.contains(world.getName(),xx,yy,zz,System.currentTimeMillis()))candidates.add(block);
       }
     }
     candidates.sort(Comparator.comparingDouble(block->origin.distanceSquared(block.getLocation())));
