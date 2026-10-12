@@ -50,6 +50,12 @@ Referans README'si 1.16.5'te 8:43'lük bir Ender Dragon run raporluyor; bu repo 
 
 Chat modeline yalnızca gerekli, sınırlı çevre özeti ver: oyuncuya mesafe, NPC/iş durumu, chest availability, görülen kaynak türleri ve tarama kapsamı. Harita keşfini bütçele; taranmış hücreleri ve başarısız hedef cooldown'larını kaydet. Yüklü chunk dışında arama/otomatik chunk yükleme yapma. Kaynak yoksa sınırlı retry sonrasında `no_resource` sonucu üret ve oyuncudan yön iste; tekrarlı chat spam üretme.
 
+### İlk genel item kapsamı
+
+Minecraft wiki sayfasını scrape edip tüm item adlarını doğrudan modele vermek doğru katalog olmaz: adlar, bloklar, düşen item'lar, tarifler, gereken alet ve sürüm farkları aynı şey değildir. Kaynak olarak Paper/Minecraft 1.21.6 `Material` ve block-tag registry'si kullanılmalı; üstüne yalnızca davranışı test edilmiş `GatherableResource` tanımları eklenmeli. Her tanım en azından istek adı/alias, hedef blok(lar), elde edilen item, doğal kaynak işareti, gerekli tool profili ve güvenli search sınırını taşımalı.
+
+Common-case sırası: (1) tüm log/stem türleri ve bambu sapı — mevcut ilk capability; (2) dirt, sand ve gravel — elle/normal düşen item; (3) stone → cobblestone ve coal/iron gibi yaygın ore'lar — doğru kazma/drops/tool dayanıklılığı test edildikten sonra; (4) yerdeki dropped item'lar — yalnızca oyuncunun açıkça hedeflediği ve almaya yetkili olduğu item'lar. Kalas, dekor blokları, container loot ve tehlikeli/özel world-state item'ları ilk common setin dışında kalır. LLM yalnızca registry ID + miktar üretir; JEV Java'nın bulduğu blok/item entity hedefini seçer; Paper drop ve izinleri tekrar doğrular.
+
 ### P3 — Item pickup ve genel inventory
 
 Önce yere düşen item'ları görme, erişilebilir olanı seçme, yürüme ve inventory artışıyla doğrulama. Sonra `gather_item` allowlist'i, item metadata, tool durability ve güvenli chest transferi. Genel item akışını log cargo koduna kopyalama; journal exact material/quantity için testli transaction sağlamalı.
