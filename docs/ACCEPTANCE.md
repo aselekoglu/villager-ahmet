@@ -33,9 +33,9 @@
 
 ## Remaining blockers
 
-1. The user has accepted the EULA. A fresh Paper server boot and game session remain unverified.
+1. The user accepted the EULA and the fresh Paper server boot passed. No Minecraft client has joined for in-game checks.
 2. Two legitimate Java 1.21.6 clients and the real in-game spawn, movement, harvesting, deposit, restart, cancellation and chest-full scenarios remain unverified.
 3. Java unit tests cover task bounds, cancellation, journal reload/replay, chest-slot planning and bounded navigation retries. Forced process-crash recovery with a live Paper world remains unverified; conflicting state deliberately pauses for manual review.
 4. No Git remote is configured, so hosted GitHub Actions have not run. A local repository is being used for the handoff snapshot; equivalent Node, HTTP smoke, Maven and Java checks were run here.
-5. A TypeSafe key has been copied privately into `brain/.env`; live JEV still needs a successful API call. `OPENAI_API_KEY` remains pending secure provisioning, so direct GPT-6 Luna chat is not live-tested yet.
+5. A TypeSafe key is stored privately in `brain/.env`; one live call succeeded using `jev-latest` and returned actual model `jev-1.13.0`. Safe execution of that choice in Paper remains unverified. `OPENAI_API_KEY` is pending secure provisioning, so direct GPT-6 Luna chat is not live-tested yet.
 6. Tree detection is an oak-log/nearby-leaves heuristic for private, trusted worlds. Region-protection integration and actual native villager mining/item carrying are not implemented.
