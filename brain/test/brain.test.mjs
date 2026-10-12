@@ -33,6 +33,16 @@ test('No job without assigned chest and no job when busy',async()=>{
   const fresh=new MemoryStore(join(d,'memory.json'));await fresh.load();assert.equal(fresh.history('1').length,3);
  }finally{await rm(d,{recursive:true,force:true});}
 });
+test('carried cargo without an active task asks the player to deliver before starting another job',async()=>{
+ const d=await mkdtemp(join(tmpdir(),'ahmet-'));
+ try {const store=new MemoryStore(join(d,'memory.json'));await store.load();
+  const result=await chat({actorUuid:'cargo-player',actorName:'Ata',text:'Ahmet, 5 ham demir getir',context:{chestBound:true,busy:true,taskActive:false,cargo:2}},{store,
+   models:{interpretTurn:async()=>({reply:'Ham demiri getiriyorum.',task:{type:'collect_item',itemId:'minecraft:raw_iron',amount:5}})}});
+  assert.equal(result.task,null);
+  assert.match(result.reply,/2 kaynak/);
+  assert.match(result.reply,/\/ahmet deliver/);
+ }finally{await rm(d,{recursive:true,force:true});}
+});
 test('common-resource request becomes a bounded item intent through the chat fallback',async()=>{
  const d=await mkdtemp(join(tmpdir(),'ahmet-'));
  try {const store=new MemoryStore(join(d,'memory.json'));await store.load();

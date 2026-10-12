@@ -79,7 +79,7 @@ fi
 cp "$ROOT/paper-plugin/target/villager-ahmet-0.1.0-SNAPSHOT.jar" "$SERVER/plugins/VillagerAhmet.jar"
 if [[ ! -f "$SERVER/server.properties" ]]; then
   cat > "$SERVER/server.properties" <<'PROPS'
-online-mode=true
+online-mode=false
 white-list=true
 server-port=25565
 motd=Villager Ahmet MVP

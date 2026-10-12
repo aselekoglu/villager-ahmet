@@ -16,11 +16,14 @@
 
 - [x] Fresh Paper 1.21.6 test world boots the final plugin with Citizens 2.0.41 build 4138; `/ahmet items raw_iron` and `/ahmet status` return successfully without plugin exceptions.
 - [x] User save copied with a SHA-256 manifest to a separate Paper 1.21.6 server directory; source save preserved; imported-world boot completed; official account `aselekoglu` whitelisted and opped.
+- [x] At the user's explicit request, the private LAN copy runs `online-mode=false` with whitelist enabled. The local `aselekoglu` offline UUID connected and can operate Ahmet; the identity backup is in `server-live/identity-backup-2026-10-12/`.
+- [x] After restart, the plugin recovered saved Citizens NPC id 1 after Citizens' delayed registry load; the task and 2-item birch cargo remained in YAML.
 - [x] One Minecraft 1.21.6 client joined the imported world; operator `/ahmet summon` visibly placed the named Citizens villager beside the player.
 - [x] `/ahmet chest` saved the delivery chest in plugin state.
 - [ ] Mixed-wood collection gameplay: the screenshot session started an 8-log job, but the old oak-only plugin found no eligible oak and collected 0. The generalized log/stem implementation is now deployed; it still needs an in-game job run.
 - [ ] Common-resource collection is verified through player chat and actual world harvesting/deposit. No gameplay collection test was run while the user was away.
-- [ ] Two **legitimate Minecraft Java clients** connect on Java 1.21.6, with `online-mode=true` and whitelist active.
+- [ ] The second LAN client (`BebekYiyen_69`) connects on Java 1.21.6; it has been added to the offline UUID whitelist, but its join has not yet been observed.
+- [ ] Duplicate Citizens NPC record cleanup: two `Ahmet` villager records are loaded; plugin uses saved id 1, but the other record has not been identified/deleted.
 - [ ] Admin runs `/ahmet spawn`: an **EntityType.VILLAGER** appears, not a player with a skin; `/ahmet status` reports active.
 - [ ] Admin `/ahmet summon` moves an existing idle Ahmet to a safe loaded block next to them; it is rejected during active work or recovery.
 - [ ] Admin binds a chest by looking at it and running `/ahmet chest`; binding survives a server restart.
@@ -43,7 +46,7 @@
 ## Remaining blockers
 
 1. The user accepted the EULA. One Minecraft 1.21.6 client joined the imported save; `/ahmet summon` and chest binding were observed. Real harvesting, movement and deposit remain unverified.
-2. The local server is at `10.0.0.140:25565`. The other computer reaches it, but its `BebekYiyen_69` TLauncher profile is offline and receives `Invalid session`. With `online-mode=true`, it requires a legitimate authenticated Java account; the offline profile cannot join. Two-client acceptance remains open.
+2. The local server is at `10.0.0.140:25565`, `online-mode=false`, whitelist enabled. The local offline `aselekoglu` profile joined successfully; the second `BebekYiyen_69` computer has not yet connected. The online UUID's player data remains preserved under the backup identity; the offline profile has a separate UUID and may start with different inventory/position.
 3. Java unit tests cover task bounds, cancellation, journal reload/replay, chest-slot planning and bounded navigation retries. Forced process-crash recovery with a live Paper world remains unverified; conflicting state deliberately pauses for manual review.
 4. No Git remote is configured, so hosted GitHub Actions have not run. A local repository is being used for the handoff snapshot; equivalent Node, HTTP smoke, Maven and Java checks were run here.
 5. TypeSafe and OpenAI keys are stored in ignored `brain/.env`. Live wood/common-resource JEV calls and one direct GPT-6 Luna structured task call succeeded with their respective providers. Safe in-game execution of either provider's intent remains unverified.

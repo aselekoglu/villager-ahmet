@@ -2,7 +2,7 @@
 
 An AI-assisted **real villager NPC** for a private Minecraft Java Edition multiplayer world. Not a player bot wearing a villager skin.
 
-**Status: full Paper 1.21.6 item catalog and common-resource gather path are installed and booted.** The live copied world exported 1,414 unique item IDs; a separate fresh Paper test world loaded the JAR and passed item/status commands. A navigation retry fix is now built and verified in tests, but the active server still has the previous JAR loaded while a player is online. Real harvesting/deposit remains unverified. Ahmet remains a real Citizens villager.
+**Status: full Paper 1.21.6 item catalog, common-resource gather path, navigation retry fix, and delayed Citizens-NPC restore are installed and booted.** The copied world exported 1,414 unique item IDs; a fresh Paper test world passed item/status commands. LAN `online-mode=false` is enabled at the user's request with whitelist on; the local offline profile has joined. One task remains idle with two birch logs in Ahmet's virtual cargo; run `/ahmet deliver` before issuing another collection request. Actual wood harvest/path retry after this fix and the second computer's login remain unverified. Ahmet is still a real Citizens villager.
 
 ## Architecture
 
@@ -53,7 +53,7 @@ whitelist add YourUsername
 op YourUsername
 ```
 
-Join Minecraft Java **1.21.6** with multiplayer server `localhost:25565` on the server computer, or the server computer's LAN IP (currently `10.0.0.140:25565`) on another computer on the same network. Only Microsoft-authenticated Java accounts can join (`online-mode=true`); whitelist each legitimate account. Remote play beyond the LAN requires **secure networking/VPN or firewall-managed port access**; do not put the local brain API or Paper admin interfaces on the Internet.
+Join Minecraft Java **1.21.6** with multiplayer server `localhost:25565` on the server computer, or the server computer's LAN IP (currently `10.0.0.140:25565`) on another computer on the same network. Per the user's request, this private LAN server uses `online-mode=false` and keeps the whitelist enabled so the offline TLauncher profile can join. Offline mode lets clients on that LAN claim usernames and changes UUID-based player identity; use only on the trusted LAN, do not configure port forwarding, and restore `online-mode=true` before any public/WAN exposure. Do not put the local brain API or Paper admin interfaces on the Internet.
 
 ## In-game walkthrough
 
@@ -64,6 +64,8 @@ Join Minecraft Java **1.21.6** with multiplayer server `localhost:25565` on the 
 5. Watch Ahmet walk toward a server-discovered candidate, remove one supported block at a time, and then walk to deposit the exact matching output items into the configured real chest. Verify with `/ahmet status` and chest inventory.
 
 Other commands: `/ahmet cancel` (task owner or op), `/ahmet deliver` (recover cargo after cancellation), `/ahmet ask <mesaj>` (speech), `/ahmet status`. Only operators can spawn/summon Ahmet or bind the chest. Summoning is disabled during an active task or journal recovery.
+
+If a task is cancelled after Ahmet has collected items, run `/ahmet deliver` to clear the carried cargo into the bound chest before starting another task.
 
 The plugin also exports Paper 1.21.6's complete obtainable vanilla item-material catalog to `plugins/VillagerAhmet/item-catalog-1.21.6.json`. In game, `/ahmet items <ad>` searches that catalog. Catalog presence means Ahmet can identify and validate the vanilla item ID; it does **not** mean every item has a gather action. The executable collection registry currently supports logs/stems and natural bamboo, dirt, sand/red sand, stone-to-cobblestone, coal ore, iron ore and gold ore; unsupported items are listed as not yet gatherable.
 

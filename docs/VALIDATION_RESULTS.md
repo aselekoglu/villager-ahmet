@@ -27,7 +27,7 @@
 
 - The user's save at `/Users/aselekoglu/Downloads/Ajanlar ve Ananlar/Ajanlar ve Ananlar` was copied to `server-live/world`. A SHA-256 manifest verified all **45 files / 30,188,019 bytes** matched; only `.DS_Store` and the transient `session.lock` were excluded from the copy. The source folder was left untouched.
 - The copy's `level.dat` DataVersion is 4435, matching Minecraft 1.21.6. Paper 1.21.6 build 48 booted this copied world with Citizens 2.0.41 build 4138 and VillagerAhmet 0.1.0. Paper's Nether and End folder migrations completed in `server-live/`; those changes did not touch the source save.
-- The local server remains running on TCP port 25565 with `online-mode=true` and whitelist enabled. Official Java account `aselekoglu` was added to whitelist and operators (`ops.json`, level 4). Subsequent client and summon evidence is recorded below.
+- At that validation stage, the local server ran on TCP port 25565 with `online-mode=true` and whitelist enabled. Official Java account `aselekoglu` was added to whitelist and operators (`ops.json`, level 4). This setting was later changed per the user's explicit LAN request, recorded below.
 - The brain started on `127.0.0.1:3197`. Live OpenAI chat is unavailable because `OPENAI_API_KEY` is not configured; the real JEV result recorded above is separate from this world boot.
 - The user then joined the imported world with Minecraft 1.21.6 as `aselekoglu`. Server logs show successful joins and `/ahmet summon`; the supplied screenshot shows the named villager NPC beside the player and Ahmet's “yanına geldim” response. This is observed in-game summon evidence for the Citizens villager implementation.
 - In the same session, `/ahmet chest` saved the delivery chest at `world (3,73,143)`. Chat started an 8-log task; the persisted task state showed `requested=8`, `collected=0`, `cargo=0`. The screenshot and server state show that tree selection/harvesting did **not** succeed.
@@ -43,7 +43,7 @@
 - One live TypeSafe call with offered `target_a`/`target_b` wood candidates returned `target_a`, source `jev`, actual model `jev-1.13.0`. This validates the JEV choice contract only; it did not read or mutate a Minecraft world. The direct OpenAI GPT-6 Luna call was not live-tested because `OPENAI_API_KEY` is absent.
 - Updated transfer ZIP: `dist/villager-ahmet-plugins-paper-1.21.6.zip`, SHA-256 `6ca94bb21646e299338f765cec3e54010bb2da9a76b1cba06e9272bfff3fd5e9`. The archive checksum and embedded JAR checksums were verified.
 - With the user's permission after they disconnected, Paper was cleanly stopped, final JAR SHA-256 `fb251b71ed3e5888b1a4fedcf1ada83644bd23e37efc086b5fcb00eabb8b8be5` installed in `server-live/plugins/VillagerAhmet.jar`, and the imported world restarted at 17:33. Startup loaded Citizens 2.0.41 build 4138 and VillagerAhmet 0.1.0 with `Done (8.322s)` and no plugin exception. Citizens reports one NPC record loaded, but `/ahmet status` says `NPC: yok` because the saved NPC is currently unspawned; the operator must use `/ahmet summon` after reconnecting. The task remains idle with zero cargo.
-- The LAN server is `10.0.0.140:25565` on the current Wi-Fi interface, Paper binds to all interfaces, and `online-mode=true` remains enabled. The other computer at `10.0.0.11` reached the server, but the user confirmed its `BebekYiyen_69` TLauncher profile is offline. It cannot authenticate; use a legitimate Microsoft-authenticated Java account, then whitelist that account. No port forwarding is needed for this LAN-only setup.
+- During that earlier test, the LAN server was `10.0.0.140:25565` with `online-mode=true`. The other computer at `10.0.0.11` reached the server, but its `BebekYiyen_69` TLauncher profile was offline and could not authenticate. The user later requested offline-mode for the trusted LAN; see the reconfiguration result below.
 
 ## Full item catalog and common-resource path — 2026-10-12
 
@@ -62,13 +62,21 @@
 - A real direct OpenAI GPT-6 Luna structured chat/task call for `Ahmet, 5 ham demir getir` succeeded. It returned a Turkish reply and validated `{type: collect_item, itemId: minecraft:raw_iron, amount: 5}`. This was a live model/API test, not an in-game task test.
 - `./scripts/doctor.sh` now reports `[OK] OpenAI chat key configured`. The local brain and Paper server were restarted with zero players online; both are listening on loopback `127.0.0.1:3197` and LAN port `25565`. Citizens loaded the saved NPC record, which still needs operator `/ahmet summon` after reconnecting.
 
-## Citizens path retry fix — 2026-10-12
+## Navigation retry, NPC restore and private LAN mode — 2026-10-12
 
 - A live task remained at `2/8` collected with cargo retained; server logs showed repeated JEV selections of `target_a`. Code inspection found that the stall watchdog cancelled Citizens navigation, but the following ticks returned while the navigator was stopped instead of reissuing the target.
 - The fix schedules a route restart after two seconds while preserving the watchdog attempt count. After three unsuccessful routes, the target block is suppressed for 60 seconds, allowing the next bounded scan/JEV choice to consider other blocks.
-- Added unit tests for one-shot delayed route restart and temporary failed-target suppression. Full Maven clean package passed **34/34 Java tests**; Node **13/13**, mock HTTP smoke, syntax checks and diff checks passed. New plugin JAR SHA-256: `f2f2d6e9ea0fdfb8b2dce8abfdb565a825b5ab70b98abd3f322544ae385aeed1`. Transfer ZIP SHA-256: `dc460e472ee0773dda17f50ce68203c2bc7ae5e9f0fb107c8dcb5ad318acb331`.
+- Added unit tests for one-shot delayed route restart, temporary failed-target suppression, and delayed Citizens registry restoration without clobbering the saved id. Full Maven clean package passed **37/37 Java tests**; Node **14/14**, mock HTTP smoke, doctor and shell syntax checks passed. Final plugin JAR SHA-256: `446c77fd45cd779bd62d82102e16f317ba77f8951fc10d7319376c8e81473c89`. Transfer ZIP SHA-256: `70c2448a243167c892a68c0fe507ce14bc710dd680021c130da30b2ec3cd146a`.
 - A fresh Paper 1.21.6 + Citizens build 4138 test world loaded the new JAR, returned `/ahmet status` and `/ahmet items oak_log`, then shut down cleanly. This verifies load/commands only, not NPC movement or resource harvesting.
-- The active imported-world server still has the previous JAR loaded because `aselekoglu` is online. No server restart or plugin-file replacement was done while the player was connected. Install the new JAR and restart after all players disconnect, then re-run the wood job.
+- The final JAR was installed after confirming zero players; the copied world restarted cleanly. Citizens loaded two NPC records, and delayed lookup restored configured id 1 instead of overwriting it or creating a new one. The plugin does not create another NPC during the delayed registry window. A second Citizens `Ahmet` record still appears in the world; no duplicate was deleted.
+
+## Private LAN offline-mode and NPC restore — 2026-10-12
+
+- Per the user's explicit request, `server-live/server.properties` has `online-mode=false` and `white-list=true`. A mode-600 backup of `server.properties`, `ops.json`, `whitelist.json`, and `usercache.json` is at `server-live/identity-backup-2026-10-12/`.
+- Offline UUIDs for `aselekoglu` were added to whitelist and ops lists; `BebekYiyen_69` was added to the whitelist. The local `aselekoglu` offline profile then joined from `127.0.0.1`; the second computer has not yet produced a successful join.
+- Startup of the final plugin logged `Restored saved Citizens NPC id 1 after registry load.` The config retains `npc-id: 1`, the task remains idle with 2 birch logs in virtual cargo, and the active console reports the Citizens NPC reference present. The game UI still shows two villager entities labelled Ahmet; the extra Citizens record was left untouched to avoid deleting the wrong entity.
+- `online-mode=false` permits same-LAN username impersonation and creates different player UUIDs. Existing online-mode player data remains in its original UUID files and is preserved; the new offline identity may have a separate inventory/position. Keep the whitelist enabled and do not port-forward or expose this server to WAN.
+- Current server: Paper 1.21.6 build 48 + Citizens 2.0.41 build 4138 + VillagerAhmet. The brain now receives `taskActive` and cargo count and tells the player to use `/ahmet deliver` when an old task is cancelled but cargo remains. `/ahmet status` currently reports idle with 2 birch logs in virtual cargo; use `/ahmet deliver` to put them in the bound chest before starting another job.
 
 ## Local test-server commands
 
@@ -94,7 +102,7 @@ export PATH="$JAVA_HOME/bin:/opt/homebrew/opt/maven/bin:$PATH"
 AHMET_SERVER_DIR=server-live ACCEPT_MINECRAFT_EULA=true ./scripts/run.sh
 ```
 
-Connect the official `aselekoglu` Java 1.21.6 client to `localhost:25565`, then run `/ahmet summon` in-game. The EULA was accepted by the user; the environment flag is only needed because this script also supports fresh server folders.
+The current copied LAN server has `online-mode=false` by explicit request and `white-list=true`; local username `aselekoglu` has an offline UUID whitelist/operator entry, and `BebekYiyen_69` is whitelisted. Connect to `10.0.0.140:25565`. After restart, if Ahmet is unspawned run `/ahmet summon`; because the previous task was cancelled with two birch logs still carried, run `/ahmet deliver` before requesting a new collection job. The EULA was accepted by the user; the environment flag is only needed because this script also supports fresh server folders.
 
 ## Provider references
 

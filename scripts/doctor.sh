@@ -32,7 +32,13 @@ else
   echo '[TODO] Paper version marker missing; rerun ./scripts/setup.sh to verify it'
 fi
 if [[ -f "$SERVER/server.properties" ]]; then
-  grep -q '^online-mode=true$' "$SERVER/server.properties" && echo '[OK] online-mode=true' || echo '[TODO] online-mode should remain true for legitimate accounts'
+  if grep -q '^online-mode=false$' "$SERVER/server.properties"; then
+    echo '[OK] offline-mode enabled for the requested private LAN; keep whitelist on and do not expose publicly'
+  elif grep -q '^online-mode=true$' "$SERVER/server.properties"; then
+    echo '[OK] online-mode=true'
+  else
+    echo '[TODO] server.properties needs a valid online-mode setting'
+  fi
   grep -q '^white-list=true$' "$SERVER/server.properties" && echo '[OK] whitelist enabled' || echo '[TODO] enable white-list before multiplayer launch'
 fi
 [[ -f "$SERVER/eula.txt" && "$(grep -c '^eula=true$' "$SERVER/eula.txt" || true)" -gt 0 ]] && echo '[OK] EULA accepted by user' || echo '[TODO] EULA acceptance required before launch'

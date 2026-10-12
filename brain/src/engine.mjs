@@ -1,5 +1,11 @@
 import {parseTask,isCancel,validateTask} from './intent.mjs';
 import {chooseAction,conversationalReply,interpretTurn} from './models.mjs';
+function busyReply(req) {
+  const cargo=Number(req.context?.cargo??0);
+  if(!req.context?.taskActive&&Number.isInteger(cargo)&&cargo>0)
+    return `Yanımda ${cargo} kaynak var. Önce /ahmet deliver komutuyla sandığa teslim edeyim, sonra yeni görev alabilirim.`;
+  return 'Şu anda bir görevdeyim. Önce bitirmemi bekle ya da /ahmet cancel yaz.';
+}
 export async function chat(req,{store,models={chooseAction,conversationalReply,interpretTurn},key,chatMode}={}) {
   const actor=String(req.actorUuid??'unknown').slice(0,80);
   const name=String(req.actorName??'oyuncu').slice(0,40);
@@ -17,7 +23,7 @@ export async function chat(req,{store,models={chooseAction,conversationalReply,i
       if(turn.task!==null&&turn.task!==undefined){
         const validated=validateTask(turn.task);
         if(validated){
-          if(busy)reply='Şu anda bir görevdeyim. Önce bitirmemi bekle ya da /ahmet cancel yaz.';
+          if(busy)reply=busyReply(req);
           else if(!req.context?.chestBound)reply='Topladıklarımı nereye koyacağımı bilmiyorum. Bir sandığa bakıp /ahmet chest komutunu kullan.';
           else {task=validated;taskSource='llm';}
         }else reply='Bu isteği güvenli ve desteklenen bir kaynak görevi olarak çözemiyorum. Türü ve 1–64 arası miktarı belirt.';
@@ -25,7 +31,7 @@ export async function chat(req,{store,models={chooseAction,conversationalReply,i
     }else if(modelFailed){
       const parsed=parseTask(message);
       if(parsed?.error)reply=parsed.error;
-      else if(parsed&&busy)reply='Şu anda bir görevdeyim. Önce bitirmemi bekle ya da /ahmet cancel yaz.';
+      else if(parsed&&busy)reply=busyReply(req);
       else if(parsed&&!req.context?.chestBound)reply='Topladıklarımı nereye koyacağımı bilmiyorum. Bir sandığa bakıp /ahmet chest komutunu kullan.';
       else if(parsed){task=validateTask(parsed);taskSource='heuristic';reply=`Tamam ${name}, ${parsed.amount} kaynak toplayıp işaretlediğin sandığa bırakacağım.`;}
       else {

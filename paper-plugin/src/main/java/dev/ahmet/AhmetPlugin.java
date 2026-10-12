@@ -39,6 +39,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
   private NPC npc;
   private BrainClient brain;
   private OperationJournal journal;
+  private SavedNpcReference savedNpcReference;
   private final WoodTask task=new WoodTask();
   private Location chestLocation;
   private Location treeTarget;
@@ -62,21 +63,38 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
       getLogger().warning("Could not write the vanilla item catalog: " + e.getMessage());
     }
     int id=getConfig().getInt("npc-id",-1);
-    if(id>=0)npc=CitizensAPI.getNPCRegistry().getById(id);
+    savedNpcReference=new SavedNpcReference(id);
     chestLocation=loadLoc("chest"); home=loadLoc("home");boolean taskStateValid=true;
     try{task.load(getConfig());}catch(Exception e){taskStateValid=false;blockRecovery("Saved task state is invalid and must be inspected",e);}
     journal=new OperationJournal(getDataFolder().toPath().resolve("operations.json"));
     try{journal.load();if(taskStateValid)recoverJournal();}
     catch(Exception e){blockRecovery("Operation journal could not be recovered",e);}
-    if(task.active && npc==null){getLogger().warning("Saved task exists but NPC is missing; task paused until spawned.");}
+    if(task.active && npc==null&&!savedNpcReference.pending()){getLogger().warning("Saved task exists but NPC is missing; task paused until spawned.");}
     if(taskStateValid)persist();
     Bukkit.getPluginManager().registerEvents(this,this);
     Bukkit.getScheduler().runTaskTimer(this,this::step,40L,40L);
+    if(savedNpcReference.pending())Bukkit.getScheduler().runTaskLater(this,this::restoreSavedNpc,1L);
     getLogger().info("Villager Ahmet ready. Run /ahmet spawn as an operator to summon Ahmet.");
   }
   @Override public void onDisable(){persist();flushJournalOnShutdown();}
   private void persist(){
-    getConfig().set("npc-id",npc==null?-1:npc.getId());saveLoc("chest",chestLocation);saveLoc("home",home);task.save(getConfig());saveConfig();
+    Integer liveNpcId=npc==null?null:npc.getId();
+    getConfig().set("npc-id",savedNpcReference==null?(liveNpcId==null?-1:liveNpcId):savedNpcReference.idForPersistence(liveNpcId));
+    saveLoc("chest",chestLocation);saveLoc("home",home);task.save(getConfig());saveConfig();
+  }
+  private void restoreSavedNpc(){
+    if(savedNpcReference==null||!savedNpcReference.pending())return;
+    NPC restored=CitizensAPI.getNPCRegistry().getById(savedNpcReference.savedId());
+    savedNpcReference.recordLookup(restored==null?null:restored.getId());
+    if(restored!=null){
+      npc=restored;
+      getLogger().info("Restored saved Citizens NPC id "+npc.getId()+" after registry load.");
+      persist();
+    }else if(savedNpcReference.pending()){
+      Bukkit.getScheduler().runTaskLater(this,this::restoreSavedNpc,1L);
+    }else{
+      getLogger().warning("Saved Citizens NPC id "+savedNpcReference.savedId()+" was not found after registry load; use /ahmet spawn to recover it.");
+    }
   }
   private Location loadLoc(String key) {
     String w=getConfig().getString(key+".world"); if(w==null)return null;
@@ -110,16 +128,24 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
     if(!(sender instanceof Player player)){sender.sendMessage("Bu komut oyun içi oyuncu gerektiriyor.");return true;}
     if(op.equals("spawn")){
       if(!player.hasPermission("ahmet.admin")){player.sendMessage("§cYetkin yok.");return true;}
-      if(npc==null){npc=CitizensAPI.getNPCRegistry().createNPC(EntityType.VILLAGER,"Ahmet");}
+      if(npc==null&&savedNpcReference.pending()){
+        player.sendMessage("§eCitizens eski Ahmet kaydını yüklüyor; birkaç saniye sonra tekrar dene.");return true;
+      }
+      if(npc==null){npc=CitizensAPI.getNPCRegistry().createNPC(EntityType.VILLAGER,"Ahmet");savedNpcReference.created(npc.getId());}
       if(npc.isSpawned()){player.sendMessage("§eAhmet zaten dünyada.");return true;}
-      npc.spawn(player.getLocation());home=player.getLocation().clone();treeRetryAfterMs=0;persist();say("Selam! İşe hazırım.");return true;
+      Location spawnAt=task.active&&home!=null?home:player.getLocation();
+      if(!npc.spawn(spawnAt)){player.sendMessage("§cAhmet dünyada oluşturulamadı.");return true;}
+      if(!task.active)home=player.getLocation().clone();treeRetryAfterMs=0;persist();say("Selam! İşe hazırım.");return true;
     }
     if(op.equals("summon")){
       if(!player.hasPermission("ahmet.admin")){player.sendMessage("§cYetkin yok.");return true;}
       if(task.active||recoveryBlocked){player.sendMessage("§cAhmet görevde veya kurtarma bekliyor; şu an yanına çağrılamaz.");return true;}
+      if(npc==null&&savedNpcReference.pending()){
+        player.sendMessage("§eCitizens eski Ahmet kaydını yüklüyor; birkaç saniye sonra tekrar dene.");return true;
+      }
       Location destination=findSafeSummonLocation(player);
       if(destination==null){player.sendMessage("§cYakınında yüklü ve güvenli bir boş nokta bulamadım.");return true;}
-      if(npc==null)npc=CitizensAPI.getNPCRegistry().createNPC(EntityType.VILLAGER,"Ahmet");
+      if(npc==null){npc=CitizensAPI.getNPCRegistry().createNPC(EntityType.VILLAGER,"Ahmet");savedNpcReference.created(npc.getId());}
       if(npc.isSpawned()){
         npc.getNavigator().cancelNavigation();
         npc.teleport(destination,PlayerTeleportEvent.TeleportCause.PLUGIN);
@@ -181,7 +207,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener {
     if(npc==null || !npc.isSpawned()){player.sendMessage("§cÖnce /ahmet spawn ile Ahmet'i oluştur.");return;}
     if(!player.getWorld().equals(npc.getEntity().getWorld()) || player.getLocation().distanceSquared(npc.getEntity().getLocation())>18*18){player.sendMessage("§cAhmet'le konuşmak için ona yaklaş.");return;}
     JsonObject req=new JsonObject();req.addProperty("actorUuid",player.getUniqueId().toString());req.addProperty("actorName",player.getName());req.addProperty("text",message);
-    JsonObject context=new JsonObject();context.addProperty("busy",task.active || task.cargo>0);context.addProperty("chestBound",chestLocation!=null);req.add("context",context);
+    JsonObject context=new JsonObject();context.addProperty("busy",task.active || task.cargo>0);context.addProperty("taskActive",task.active);context.addProperty("cargo",task.cargo);context.addProperty("chestBound",chestLocation!=null);req.add("context",context);
     brain.post("/api/chat",req).whenComplete((reply,error)->Bukkit.getScheduler().runTask(this,()->{
       if(error!=null){player.sendMessage("§cAhmet'in beyni şu an yanıt vermiyor: "+error.getMessage());return;}
       if(!player.isOnline())return;

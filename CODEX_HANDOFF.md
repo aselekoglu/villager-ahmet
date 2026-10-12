@@ -28,7 +28,7 @@ Make the repository runnable end to end, then validate it in the strongest avail
 ## Safety and source constraints
 
 - Do not copy from `rmalde/minecraft-agent` without permission/license. Its design is a reference, not an authorized code source.
-- Do not bypass Minecraft account authentication / EULA; never expose the local brain API outside loopback or commit credentials.
+- The user explicitly requested offline-mode for this private LAN so the TLauncher client can connect. Keep whitelist enabled and do not expose/port-forward the server outside the trusted LAN. This changes player UUID identity; never expose the local brain API outside loopback or commit credentials.
 - Default to private/whitelisted Paper server. Do not allow LLM-produced world coordinates, commands, or arbitrary action IDs to bypass validation.
 - The current implementation has a server-side log removal/virtual cargo approximation, not native villager mining physics. Improve gesture/visual feedback when stable; document mechanics truthfully.
 - Do not use a player with villager skin as a substitute. Real NPC entity type is a hard requirement.
