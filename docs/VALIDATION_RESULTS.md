@@ -7,6 +7,7 @@
 - `npm test` passed: **8 tests, 0 failures**. Tests cover direct TypeSafe JEV request shape, direct OpenAI endpoint/model contract, bounded offered-action validation, Turkish chat tasks and labelled fallback behavior.
 - `./scripts/smoke.sh` passed: addressed Turkish chat, bounded mock decision, memory event persistence and missing-token rejection. It ran in mock mode; it did not call a live model.
 - `./scripts/setup.sh` completed and copied the tested plugin JAR to `server/plugins/VillagerAhmet.jar`. The source and installed JAR SHA-256 values matched.
+- Created `dist/villager-ahmet-plugins-paper-1.21.6.zip` for transfer to the existing server. It contains the tested Ahmet JAR, pinned Citizens JAR, Turkish installation notes and SHA-256 checksums; archive contents and embedded JAR hashes were verified. The ZIP itself is ignored by Git.
 - A fresh project-owned Paper server booted with Java 21, Paper `1.21.6-48-main@4d854e6`, Citizens `2.0.41` build `4138`, and VillagerAhmet `0.1.0`. Startup logged `Villager Ahmet ready` and `Done (39.399s)` with no plugin exception. It created a new world under `server/`; no existing user world was present in that test directory.
 - The user accepted the Minecraft EULA. `server/eula.txt` now records `eula=true` for that fresh project server. `online-mode=true` and `white-list=true` remain enabled.
 - The local brain health check returned HTTP 200 on `127.0.0.1:3197`; it is not bound to a public interface.
