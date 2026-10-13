@@ -255,3 +255,11 @@ The current copied LAN server has `online-mode=false` by explicit request and `w
 - Moved journal checkpointing to the end of startup reconciliation. After all pending operations are reconciled and every committed harvest/clear task ID, world, and AIR state validates, the plugin now saves referenced worlds and retires any committed-history-only journal, including mixed harvest+clear histories. Any pending operation or conflict prevents this checkpoint.
 - Added a v3 mixed clear/harvest journal regression, plus checkpoint admission and pending-record guards. Focused journal tests and the complete Maven package passed; total Java tests: **124/124**. Node tests passed **16/16**.
 - No restart or deployment was performed; the connected live server and its world/journal were not touched.
+
+## Clear-journal fix deployment — 2026-10-13
+
+- Commit `775ca1e` was pushed to `origin/main`. The live `VillagerAhmet.jar` SHA-256 is `57172d57df10eb13821fd9a907025d8422c3b7bb3dd3a5ec90618c7223eca83a`.
+- Paper 1.21.6 build 48, Citizens 2.0.41 build 4138, and Java 21 started successfully (`Done (10.035s)`). The brain is listening on loopback `127.0.0.1:3197`.
+- `/ahmet status` returned IDLE, cargo 0, chest bound, and recovery unblocked. Citizens restored saved NPC id 1, but it is not spawned (`NPC: yok`).
+- The previous server shutdown saved the worlds and retired the existing committed clear journal before this startup. Therefore this deployment did **not** exercise startup replay/recovery of those old clear records; that path is covered by source-level tests, not this runtime observation.
+- Player chat and gathering gameplay remain unchecked. No further server action was taken during this documentation update.
