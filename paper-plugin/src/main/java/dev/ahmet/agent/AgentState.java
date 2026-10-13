@@ -1,0 +1,14 @@
+package dev.ahmet.agent;
+
+public enum AgentState {
+  IDLE,
+  PLANNING,
+  AWAITING_DECISION,
+  NAVIGATING,
+  EXECUTING,
+  VERIFYING,
+  PARTIAL_DELIVERY,
+  DELIVERING,
+  BLOCKED_AWAITING_HELP,
+  RECOVERING
+}

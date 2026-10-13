@@ -1,0 +1,11 @@
+package dev.ahmet.agent;
+
+public enum AgentGoal {
+  HARVEST_RESOURCE,
+  DELIVER_CARGO,
+  CLEAR_OBSTRUCTION,
+  EXPLORE_RESOURCES,
+  RETURN_HOME,
+  REQUEST_PLAYER_HELP,
+  REST_IDLE
+}
