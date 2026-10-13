@@ -94,3 +94,14 @@ test('decision timeout is labelled and falls back to an offered action',async()=
   assert.ok(signal instanceof AbortSignal);
  }finally{globalThis.fetch=previous;}
 });
+
+test('return home intent cancels and flags goHome',async()=>{
+ const d=await mkdtemp(join(tmpdir(),'ahmet-'));
+ try {
+  const store=new MemoryStore(join(d,'memory.json'));await store.load();
+  const result=await chat({actorUuid:'4',actorName:'Ali',text:'Ahmet, eve dön',context:{chestBound:true,busy:false}},{store});
+  assert.equal(result.cancel,true);
+  assert.equal(result.goHome,true);
+  assert.match(result.reply,/eve dönüyorum/);
+ }finally{await rm(d,{recursive:true,force:true});}
+});

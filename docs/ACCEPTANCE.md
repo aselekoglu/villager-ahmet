@@ -15,6 +15,7 @@
 - [x] Java task model preserves partial-delivery state across restart and only finishes after cargo is deposited; live unreachable-path fallback and chest delivery still require an in-game check.
 - [x] Paper 1.21.6 integration probe confirmed a double chest exposes 27 slots through `getBlockInventory()` but 54 through `getInventory()`; with the first half full, the plugin's planner successfully placed birch logs in the empty second half.
 - [x] Player-placed wood markers round-trip through config persistence; protected-home geometry and world boundaries have unit coverage. Live pre-existing-home exclusion verified in-game (house logs skipped, 8 placed logs dynamically recorded in config).
+- [x] Resource exploration planner searches 8 candidate directions within allowable home bounds outside protected structures; multi-step home return calculates 16-block waypoints with obstacle avoidance offsets. Unit test suite passes 59 tests with 0 failures; Node chat recognizes return-home intent.
 
 ## Real game (record results and logs, do not infer)
 

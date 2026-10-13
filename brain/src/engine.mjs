@@ -1,4 +1,4 @@
-import {parseTask,isCancel,validateTask} from './intent.mjs';
+import {parseTask,isCancel,isReturnHome,validateTask} from './intent.mjs';
 import {chooseAction,conversationalReply,interpretTurn} from './models.mjs';
 function busyReply(req) {
   const cargo=Number(req.context?.cargo??0);
@@ -12,7 +12,9 @@ export async function chat(req,{store,models={chooseAction,conversationalReply,i
   const message=String(req.text??'').slice(0,500);
   const busy=Boolean(req.context?.busy);
   let task=null,reply,taskSource='none';
-  if(isCancel(message))reply='Tamam, duruyorum. Görevi iptal ettim.';
+  const returnHome=isReturnHome(message);
+  if(returnHome)reply='Tamam, eve dönüyorum.';
+  else if(isCancel(message))reply='Tamam, duruyorum. Görevi iptal ettim.';
   else {
     const modelOptions={key,mode:chatMode,events:store.data.events.filter(e=>e.actor===actor).slice(-10)};
     let turn=null,modelFailed=false;
@@ -41,7 +43,7 @@ export async function chat(req,{store,models={chooseAction,conversationalReply,i
     }
   }
   await store.record(actor,message,reply,task);
-  return {reply,task,taskSource,cancel:isCancel(message)};
+  return {reply,task,taskSource,cancel:isCancel(message)||returnHome,goHome:returnHome};
 }
 export async function decide(req,{models={chooseAction},key,decisionMode}={}) {
   if(!req||!Array.isArray(req.actions)||req.actions.length===0||req.actions.length>16)throw new Error('Invalid actions');

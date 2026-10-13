@@ -90,6 +90,21 @@
   - Persisted `config.yml` confirmed: `requested: 4, collected: 4, deposited: 4, cargo: 0, cargoItems: {}`.
 - **Brain service status**: Node brain verified active on loopback `http://127.0.0.1:3197`; `GET /health` returned `{"ok":true,"service":"villager-ahmet-brain","decisionMode":"jev","chatMode":"llm"}`.
 
+## Resource exploration, wandering, and step-by-step home return — 2026-10-12 23:10 EDT
+
+- **Resource Exploration / Wandering**: Added `ExplorationPlanner.java` with `findExplorationWaypoint(...)`. When no eligible resources exist in Ahmet's immediate 24-block search radius (`findTargets().isEmpty()`), Ahmet initiates an exploration routine across up to 4 attempts. He navigates to safe waypoints across 8 rotated directions (radii 8–18 blocks), constrained strictly within `max-distance-from-home` (32 blocks) and outside the operator's protected-home radius.
+- **Continuous In-Transit Detection**: While walking towards an exploration waypoint, Ahmet actively scans for targets on every tick. The moment an eligible resource enters range, exploration navigation is cancelled immediately and Ahmet locks onto the newly discovered resource.
+- **Step-by-step Home Navigation**: Added `ExplorationPlanner.findStepTowardsHome(...)`. When Ahmet is far from home (or returning home when idle after delivery/cancellation), he calculates 16-block intermediate waypoints along the vector towards home on safe ground with angular obstacle offsets (`attempt` rotation). This prevents Citizens pathfinding follow-range timeouts across long distances and advances Ahmet step-by-step until reaching home (<= 2.5 blocks) without teleportation.
+- **Return Home Command & Chat**: Added `/ahmet home` / `/ahmet return` command (and tab completion), plus natural-language chat intent recognition (`isReturnHome`, e.g. "Ahmet, eve dön").
+- **Fixed Boundary Enforcement**: In `navigate()`, destinations that move Ahmet closer to home than his current position, or target the chest or home directly, are never blocked by the max-distance check, allowing recovery when summoned or wandering outdoors beyond 32 blocks.
+- **Test Verification**:
+  - `ExplorationPlannerTest.java` added with 9 tests covering boundary checks, protected area exclusion, direction rotation, arrival conditions, vector advancement, elevation deltas, and angle offsets. Full Java package passed: **59 tests, 0 failures**.
+  - Node brain tests in `brain/test/brain.test.mjs` passed: **15 tests, 0 failures**.
+- **Live Deployment**:
+  - Checked `/list` (0 players online) and safely stopped server with clean chunk saves.
+  - Built and staged updated JAR (SHA-256: `400346320a4d55f36e12c608b0e12749db7aeebb80059d22f980f620be6690c7`), updated transfer ZIP `dist/villager-ahmet-plugins-paper-1.21.6.zip` and checksums.
+  - Restarted live server with `scripts/run.sh`. Startup completed cleanly, Citizens restored NPC id 1, and console `/ahmet help` verified `/ahmet home` active on live server.
+
 ## Verified
 
 - `./scripts/doctor.sh` identifies Java 21.0.12.1, Maven 3.10.0 and Node.js 22.19.0 when Homebrew Java/Maven are on `PATH`. Paper is pinned to 1.21.6 build 48; Citizens is pinned to 2.0.41 build 4138 with the 1.21_R5 adapter.

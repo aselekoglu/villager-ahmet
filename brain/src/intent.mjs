@@ -46,6 +46,8 @@ export function parseTask(text) {
 
 export function isCancel(text) { return /(iptal|vazgeç|vazgec|cancel|stop)/i.test(String(text??'')); }
 
+export function isReturnHome(text) { return /(eve dön|eve don|eve git|evine dön|evine git|go home|return home)/i.test(String(text??'')); }
+
 export function validateWoodTask(task) {
   const materials = new Set(['any', ...MATERIALS.map(([id]) => id)]);
   return task && typeof task === 'object' && task.type === 'collect_wood'

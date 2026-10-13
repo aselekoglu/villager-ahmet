@@ -61,6 +61,12 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private long lastWarningMs=0;
   private long treeRetryAfterMs=0;
   private boolean recoveryBlocked=false;
+  private Location explorationTarget;
+  private int explorationAttempts=0;
+  private static final int MAX_EXPLORATION_ATTEMPTS=4;
+  private Location homeStepTarget;
+  private int homeStepAttempt=0;
+  private boolean returningHome=false;
 
   @Override public void onEnable() {
     saveDefaultConfig();brain=new BrainClient(this);
@@ -219,6 +225,19 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       if(task.active && (player.hasPermission("ahmet.admin") || task.owner.equals(player.getUniqueId().toString()))){cancel();say("Görevi iptal ettim. Topladığım kaynaklar şimdilik bende.");}
       else player.sendMessage("§cİptal edebileceğin bir görevin yok.");return true;
     }
+    if(op.equals("home")||op.equals("return")){
+      if(recoveryBlocked){player.sendMessage("§cKurtarma bekliyor; işlem güvenli değil.");return true;}
+      if(npc==null||!npc.isSpawned()){player.sendMessage("§cÖnce /ahmet spawn ile Ahmet'i oluştur.");return true;}
+      Location effectiveHome=getEffectiveHome();
+      if(effectiveHome==null){player.sendMessage("§cKayıtlı ev konumu yok.");return true;}
+      if(task.active){
+        if(!player.hasPermission("ahmet.admin") && !task.owner.equals(player.getUniqueId().toString())){player.sendMessage("§cYetkin yok.");return true;}
+        cancel();
+      }
+      returningHome=true;homeStepAttempt=0;clearNavigation();persist();
+      player.sendMessage("§aAhmet eve doğru yönlendirildi.");
+      say("Eve doğru yürüyorum.");return true;
+    }
     if(op.equals("ask")){
       if(args.length<2){player.sendMessage("§e/ahmet ask <mesaj>");return true;}
       interact(player,String.join(" ",java.util.Arrays.copyOfRange(args,1,args.length)));return true;
@@ -234,12 +253,13 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     sender.sendMessage("§e/ahmet ask <mesaj> §7— Ahmet'le komut/sohbet");
     sender.sendMessage("§e/ahmet deliver §7— iptalden kalan yükü sandığa teslim et");
     sender.sendMessage("§e/ahmet cancel §7— kendi görevini iptal et");
+    sender.sendMessage("§e/ahmet home §7— görevi bırakıp eve dön");
     if(sender.hasPermission("ahmet.admin"))sender.sendMessage("§e/ahmet spawn | summon | chest | protecthome <0-32> §7— yönetici işlemleri");
     sender.sendMessage("§7Ahmet doğal ağaç adaylarını seçer; oyuncu tarafından konan odunları ve korunan ev alanını atlar.");
   }
   @Override public List<String> onTabComplete(CommandSender sender,Command command,String alias,String[] args){
     if(!command.getName().equalsIgnoreCase("ahmet")||args.length==0)return List.of();
-    List<String> commands=new ArrayList<>(List.of("help","status","cargo","collect","items","ask","deliver","cancel"));
+    List<String> commands=new ArrayList<>(List.of("help","status","cargo","collect","items","ask","deliver","cancel","home"));
     if(sender.hasPermission("ahmet.admin"))commands.addAll(List.of("spawn","summon","chest","protecthome"));
     if(args.length==1)return commands.stream().filter(value->value.startsWith(args[0].toLowerCase(java.util.Locale.ROOT))).toList();
     if(args.length==2&&args[0].equalsIgnoreCase("protecthome")&&sender.hasPermission("ahmet.admin"))return List.of("0","8","10","12","16").stream().filter(value->value.startsWith(args[1])).toList();
@@ -294,6 +314,10 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         String source=reply.get("taskSource").getAsString();
         if(source.equals("llm")||source.equals("heuristic"))getLogger().info("Gather task intent source: "+source);
       }
+      if(reply.has("goHome")&&reply.get("goHome").getAsBoolean()){
+        if(task.active && (task.owner.equals(player.getUniqueId().toString())||player.hasPermission("ahmet.admin")))cancel();
+        returningHome=true;homeStepAttempt=0;clearNavigation();persist();
+      }
       if(reply.has("cancel")&&reply.get("cancel").getAsBoolean()){
         if(task.active && (task.owner.equals(player.getUniqueId().toString())||player.hasPermission("ahmet.admin")))cancel();
         else {player.sendMessage("§cBaşkasının görevini iptal edemezsin.");return;}
@@ -319,10 +343,10 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       say(answer);
     }));
   }
-  private void cancel(){event("task_cancelled",task.requested);task.cancel();jobGeneration++;treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;partialDeliveryPolicy.reset();clearNavigation();persist();}
+  private void cancel(){event("task_cancelled",task.requested);task.cancel();jobGeneration++;treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;partialDeliveryPolicy.reset();clearNavigation();explorationAttempts=0;returningHome=task.cargo==0;persist();}
   private void step(){
     if(recoveryBlocked || journal.pendingHarvest().isPresent() || journal.pendingDeposit().isPresent()
-        || !task.active || npc==null || !npc.isSpawned() || deciding)return;
+        || npc==null || !npc.isSpawned() || deciding)return;
     final Location current=npc.getEntity().getLocation();
     final long now=System.currentTimeMillis();
     if(navigationRetry.pending()){
@@ -332,44 +356,131 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     }
     if(navigationGoal!=null){
       NavigationWatchdog.Outcome outcome=navigationWatchdog.observe(current.distanceSquared(navigationGoal),now);
-      if(outcome==NavigationWatchdog.Outcome.REACHED)navigationGoal=null;
-      else if(outcome==NavigationWatchdog.Outcome.RETRY){
+      if(outcome==NavigationWatchdog.Outcome.REACHED){
+        navigationGoal=null;
+        if(explorationTarget!=null)explorationTarget=null;
+        if(homeStepTarget!=null){homeStepTarget=null;homeStepAttempt=0;}
+      }else if(outcome==NavigationWatchdog.Outcome.RETRY){
         if(npc.getNavigator().isNavigating())npc.getNavigator().cancelNavigation();
         navigationRetry.schedule(now);return;
       }else if(outcome==NavigationWatchdog.Outcome.GIVE_UP){
         if(npc.getNavigator().isNavigating())npc.getNavigator().cancelNavigation();
         getLogger().warning("Navigation route gave up; npc="+coords(current)+", destination="+coords(navigationGoal)+", cargo="+task.cargo+", collected="+task.collected+"/"+task.requested);
         navigationGoal=null;navigationWatchdog.reset();
-        if(!task.readyToDeliver()){
-          if(treeTarget!=null){Block failed=treeTarget.getBlock();failedTargets.mark(failed.getWorld().getName(),failed.getX(),failed.getY(),failed.getZ(),now);}
-          treeTarget=null;treeRetryAfterMs=now+2000;
-          if(partialDeliveryPolicy.unreachableRoute(task.cargo>0)){beginPartialDelivery("Üç farklı kaynağa giden yolu bulamadım");return;}
-        }else treeRetryAfterMs=now+30000;
-        warn(task.readyToDeliver()?"Sandığa giden yolu bulamadım. Sandık çevresindeki yolu açın.":"Ahmet üç kez yol bulamadı. Yolu açıp tekrar deneyeceğim.");
+        if(explorationTarget!=null){
+          explorationTarget=null;
+          treeRetryAfterMs=now+1000;
+          return;
+        }
+        if(homeStepTarget!=null){
+          homeStepTarget=null;
+          homeStepAttempt++;
+          treeRetryAfterMs=now+1000;
+          return;
+        }
+        if(task.active){
+          if(!task.readyToDeliver()){
+            if(treeTarget!=null){Block failed=treeTarget.getBlock();failedTargets.mark(failed.getWorld().getName(),failed.getX(),failed.getY(),failed.getZ(),now);}
+            treeTarget=null;treeRetryAfterMs=now+2000;
+            if(partialDeliveryPolicy.unreachableRoute(task.cargo>0)){beginPartialDelivery("Üç farklı kaynağa giden yolu bulamadım");return;}
+          }else treeRetryAfterMs=now+30000;
+          warn(task.readyToDeliver()?"Sandığa giden yolu bulamadım. Sandık çevresindeki yolu açın.":"Ahmet üç kez yol bulamadı. Yolu açıp tekrar deneyeceğim.");
+        }
         return;
       }else if(outcome==NavigationWatchdog.Outcome.WAIT&&!npc.getNavigator().isNavigating())return;
     }
+
+    if(!task.active){
+      if(task.cargo>0)return;
+      Location effectiveHome=getEffectiveHome();
+      if(effectiveHome==null||!effectiveHome.getWorld().equals(current.getWorld()))return;
+      double distHomeSq=current.distanceSquared(effectiveHome);
+      if(distHomeSq<=2.5*2.5){
+        if(returningHome){
+          returningHome=false;
+          homeStepTarget=null;
+          homeStepAttempt=0;
+          clearNavigation();
+          say("Eve vardım.");
+        }
+        return;
+      }
+      if(returningHome || distHomeSq > 16.0){
+        if(npc.getNavigator().isNavigating() || now<treeRetryAfterMs)return;
+        Location stepTarget=ExplorationPlanner.findStepTowardsHome(current,effectiveHome,16.0,homeStepAttempt,this::isSafeGround);
+        if(stepTarget!=null){
+          homeStepTarget=stepTarget;
+          returningHome=true;
+          navigate(stepTarget);
+        }else{
+          homeStepAttempt++;
+          if(homeStepAttempt>4){
+            homeStepAttempt=0;
+            treeRetryAfterMs=now+10000;
+            warn("Eve giden yolu bulamıyorum, önümde engel var.");
+          }
+        }
+      }
+      return;
+    }
+
+    if(explorationTarget!=null){
+      List<Block> spotted=findTargets(current,task.materialPreference);
+      if(!spotted.isEmpty()){
+        if(npc.getNavigator().isNavigating())npc.getNavigator().cancelNavigation();
+        navigationGoal=null;navigationWatchdog.reset();
+        explorationTarget=null;explorationAttempts=0;
+      }
+    }
+
     if(npc.getNavigator().isNavigating() || now<treeRetryAfterMs)return;
+
     if(task.readyToDeliver()){
       if(chestLocation==null || !chestLocation.getWorld().equals(current.getWorld())){warn("Teslimat sandığı kayıp veya başka dünyada.");return;}
       if(current.distanceSquared(chestLocation.clone().add(.5,0,.5))>3.2*3.2)navigate(chestLocation);
       else execute("deposit");
       return;
     }
+
     if(treeTarget!=null&&isEligibleTarget(treeTarget.getBlock(),task.materialPreference)){
       if(current.distanceSquared(treeTarget.clone().add(.5,0,.5))>2.9*2.9)navigate(treeTarget);
       else execute("harvest");
       return;
     }
+
+    Location effectiveHome=getEffectiveHome();
+    int maxDist=getConfig().getInt("options.max-distance-from-home",32);
+    if(effectiveHome!=null&&effectiveHome.getWorld().equals(current.getWorld())&&current.distanceSquared(effectiveHome)>Math.pow(maxDist,2)){
+      Location stepTarget=ExplorationPlanner.findStepTowardsHome(current,effectiveHome,16.0,homeStepAttempt,this::isSafeGround);
+      if(stepTarget!=null){
+        homeStepTarget=stepTarget;
+        navigate(stepTarget);
+        warn("Güvenlik sınırının dışındayım, eve doğru ilerliyorum.");
+        return;
+      }
+    }
+
     // JEV only chooses among Java-discovered block targets; travel and item transactions stay deterministic.
     final JsonArray options=new JsonArray();
     List<Block> found=findTargets(current,task.materialPreference);
     if(found.isEmpty()){
+      if(explorationAttempts<MAX_EXPLORATION_ATTEMPTS){
+        explorationAttempts++;
+        Location waypoint=ExplorationPlanner.findExplorationWaypoint(current,home,protectedHome,protectHomeRadius,maxDist,explorationAttempts,this::isSafeGround);
+        if(waypoint!=null){
+          explorationTarget=waypoint;
+          navigate(waypoint);
+          say("Yakında kaynak bulamadım, etrafta araştırıyorum...");
+          return;
+        }
+      }
+      explorationAttempts=0;explorationTarget=null;
       if(partialDeliveryPolicy.emptyScan(task.cargo>0)){beginPartialDelivery("Yakında ulaşabileceğim başka kaynak bulamadım");return;}
       treeRetryAfterMs=now+30000;
       warn("Yakınımda güvenle toplayabileceğim uygun kaynak bulamadım. Biraz yaklaş veya sonra tekrar dene.");
       return;
     }
+    explorationAttempts=0;explorationTarget=null;
     partialDeliveryPolicy.targetsFound();
     LinkedHashMap<String,Location> offeredTargets=new LinkedHashMap<>();
     for(int i=0;i<found.size();i++){
@@ -550,6 +661,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     if(!task.active||!task.readyToFinish())return;
     boolean partial=task.partialDelivery;int delivered=task.deposited;int requested=task.requested;
     task.finish();jobGeneration++;persist();event("task_delivered",task.deposited);
+    returningHome=true;homeStepAttempt=0;clearNavigation();
     if(partial)say("Şimdilik "+delivered+"/"+requested+" kaynak topladım ve sandığa bıraktım. Ulaşılabilir kaynağı bulamayınca durdum; yolu açınca kalanını tekrar isteyebilirsin.");
     else say("Bitti! "+task.deposited+" itemi sandığa bıraktım.");
   }
@@ -557,7 +669,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     if(!task.active||task.cargo<=0)return;
     try{
       task.requestPartialDelivery();treeTarget=null;treeRetryAfterMs=0;partialDeliveryPolicy.reset();
-      navigationGoal=null;navigationRetry.clear();navigationWatchdog.reset();persist();
+      navigationGoal=null;navigationRetry.clear();navigationWatchdog.reset();
+      explorationTarget=null;explorationAttempts=0;homeStepTarget=null;persist();
       say(reason+"; topladığım "+task.cargo+" kaynağı sandığa götürüyorum.");
     }catch(Exception e){blockRecovery("Could not begin partial delivery",e);}
   }
@@ -585,11 +698,40 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     recoveryBlocked=true;
     getLogger().severe(message+(cause==null?"":": "+cause.getMessage()));
   }
+  private Location getEffectiveHome(){
+    return protectedHome!=null?protectedHome:home;
+  }
+  private boolean isSafeGround(Location loc){
+    if(loc==null||loc.getWorld()==null)return false;
+    World world=loc.getWorld();
+    int bx=loc.getBlockX(),by=loc.getBlockY(),bz=loc.getBlockZ();
+    if(by<=world.getMinHeight()||by>=world.getMaxHeight()-1)return false;
+    if(!world.isChunkLoaded(bx>>4,bz>>4))return false;
+    Block floor=world.getBlockAt(bx,by-1,bz);
+    Block feet=world.getBlockAt(bx,by,bz);
+    Block head=world.getBlockAt(bx,by+1,bz);
+    if(!floor.getType().isSolid()||floor.isLiquid())return false;
+    if(floor.getType()==Material.MAGMA_BLOCK||floor.getType()==Material.CACTUS)return false;
+    if(!feet.isPassable()||feet.isLiquid())return false;
+    if(!head.isPassable()||head.isLiquid())return false;
+    return true;
+  }
   private void navigate(Location location){
     if(location==null)return;
     if(!location.getWorld().equals(npc.getEntity().getWorld())){warn("Başka dünyaya yürüyemiyorum.");return;}
-    if(home!=null && home.getWorld().equals(location.getWorld()) && home.distanceSquared(location)>Math.pow(getConfig().getInt("options.max-distance-from-home",32),2)){
-      warn("Hedef evden çok uzak, güvenlik sınırına takıldım.");return;
+    Location effectiveHome=getEffectiveHome();
+    int maxDist=getConfig().getInt("options.max-distance-from-home",32);
+    if(effectiveHome!=null&&effectiveHome.getWorld().equals(location.getWorld())){
+      boolean isHomeOrChest=(chestLocation!=null&&sameBlock(location,chestLocation))
+          || sameBlock(location,effectiveHome)
+          || (home!=null&&sameBlock(location,home))
+          || (protectedHome!=null&&sameBlock(location,protectedHome));
+      double targetDistSq=effectiveHome.distanceSquared(location);
+      double currentDistSq=npc.getEntity().getLocation().distanceSquared(effectiveHome);
+      boolean movingCloserToHome=targetDistSq<currentDistSq;
+      if(!isHomeOrChest && !movingCloserToHome && targetDistSq>Math.pow(maxDist,2)){
+        warn("Hedef evden çok uzak, güvenlik sınırına takıldım.");return;
+      }
     }
     Location target=location.clone().add(.5,0,.5);
     if(!sameBlock(navigationGoal,target)){navigationGoal=target;navigationWatchdog.reset();}
@@ -604,6 +746,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private void clearNavigation(){
     if(npc!=null&&npc.isSpawned())npc.getNavigator().cancelNavigation();
     navigationGoal=null;navigationWatchdog.reset();navigationRetry.clear();
+    explorationTarget=null;homeStepTarget=null;
   }
   private static boolean sameBlock(Location first,Location second){
     return first!=null&&first.getWorld().equals(second.getWorld())&&first.getBlockX()==second.getBlockX()
