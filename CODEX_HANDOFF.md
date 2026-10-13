@@ -1,39 +1,91 @@
-# Codex run instruction — Villager Ahmet
+# Codex Handoff — Villager Ahmet
 
-You are continuing an existing repository, NOT starting from a product idea. Inspect all source and docs before altering it. Target a **reproducible, usable MVP** for two players on a private Minecraft Java 1.21.6 server with a REAL Citizens villager NPC called Ahmet.
+## 1. Project Overview & Architecture
+Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition running on **Paper 1.21.6 (build 48)** with **Citizens 2.0.41 (build 4138)** and **Java 21**, coordinated by a local **Node.js (v22)** brain daemon (`127.0.0.1:3197`).
 
-## Primary objective
+### Architectural Division of Responsibility
+- **Java Paper Plugin (`paper-plugin/`)**: Authoritative owner of world mutations, entity pathfinding, item transactions, task state, write-ahead journaling, and safe boundaries. All Bukkit/Citizens calls stay on the server main thread.
+- **Node Brain Daemon (`brain/`)**: Language understanding, structured task extraction, conversational memory, and decision candidate selection. Strictly distinguishes **TypeSafe JEV** (`POST https://api.typesafe.ai/v1/systemone` using model `jev-latest`) for bounded decision selection from **OpenAI GPT-6 Luna** (`POST https://api.openai.com/v1/chat/completions`) for conversational chat.
+- **Private LAN Network Policy**: Operating on private LAN (`10.0.0.140:25565`) with `online-mode=false` (to accommodate operator's offline TLauncher client profile) and whitelist enabled. Strictly private; never port-forwarded or exposed publicly.
 
-Make the repository runnable end to end, then validate it in the strongest available environment. Success: admin spawns a real villager Ahmet, admin binds a chest, player says in Turkish 'Ahmet, 20 tane meşe odunu topla', NPC walks to natural oak trees, removes exactly 20 actual oak log blocks, walks to the chest, deposits exactly 20 real oak log items, announces completion; second player can interact. Ahmet is NOT a disguised player bot. Real JEV is a bounded decisions model, LLM is separate for conversation.
+---
 
-## Existing work, verify before changing
+## 2. Implemented Capabilities & Verified Features
 
-- `brain/src`: Node.js HTTP brain with bounded Turkish/English parsing, direct TypeSafe JEV choice, direct OpenAI GPT-6 Luna conversation, persistent event/chat memory, token auth, mock fallback.
-- `paper-plugin/src`: Java 21 Paper + Citizens plugin creating EntityType.VILLAGER, commands, chat listener, Citizens navigator, oak log removal with virtual cargo, deposit to bound chest, persistent YAML state.
-- `scripts`: setup (Paper API download, Citizens CI download, Maven compile), server+brain launcher with EULA gate, diagnostic and mock smoke test.
-- `docs`: architecture, limitations, acceptance and roadmap. `AGENTS.md` contains non-negotiable constraints.
+### A. Real Citizens VILLAGER NPC & Bounded Movement
+- Instantiates a genuine `EntityType.VILLAGER` Citizens NPC (never a player bot in villager disguise).
+- Bounded navigation using Citizens pathfinding with watchdog stall detection (`NavigationWatchdog`) and exponential backoff retry (`NavigationRetry`).
+- **Teleportation Invariant**: Normal task movement never teleports. Only an explicit operator `/ahmet summon` can reposition Ahmet while idle to a safe, loaded adjacent location.
 
-## Execution workflow (act; do not merely propose)
+### B. Natural Resource Harvesting & Full Item Catalog
+- Complete 1.21.6 item catalog with 1,414 items (`MaterialCatalog.java`).
+- Supports general wood (`odun`) across all 12 wood species, plus common resources (cobblestone, coal, raw iron, raw gold, dirt, sand).
+- Direct bounded operator/player commands: `/ahmet collect <item|odun> <1-64>`.
 
-1. Run `./scripts/doctor.sh`, `cd brain && npm test`, and `./scripts/smoke.sh`; fix failures.
-2. With network and Java21/Maven3.9, run `./scripts/setup.sh`. Fix plugin dependency resolution and ALL Java compile errors against pinned Citizens 2.0.41 build 4138 / Paper 1.21.6 artifacts, with official API reference. Confirm actual plugin.yml command registration and event handlers.
-3. Add Java-level tests of bounded task transitions, cancellation/recovery, and chest transactions where mock server or test fixtures permit.
-4. Audit any non-atomic sequences. Implement a small durable operation journal or reconciled recovery mechanism so crashes between log block mutation, cargo persistence and chest inventory insertion do not silently duplicate or lose items. Add restart tests. Do not assert atomicity without tests.
-5. Ensure a real villager moves correctly using Citizens pathfinding. Improve target selection, navigation failure detection, server tick performance, not breaking village buildings or player structures, chest-full recovery. Bound retries and avoid server chunk load spikes. Do not teleport during task navigation; the explicit operator `/ahmet summon` is allowed only while idle and must choose a loaded, safe block beside the operator.
-6. Boot a fresh Paper 1.21.6 test world with Citizens build 4138 and the plugin. Test NPC spawn, single logs, 20 logs, chest binding, completion, cancellation, blocked paths, restart, player-owner authorization and two Java clients where available. Save logs/test results to `docs/VALIDATION_RESULTS.md`; clearly distinguish machine-tested from manual checks.
-7. For live AI tests, use `TYPESAFE_API_KEY` only for the TypeSafe `/v1/systemone` JEV call and `OPENAI_API_KEY` only for the OpenAI `/v1/chat/completions` conversation call; never print either key. Verify a typed JEV action and one GPT-6 Luna conversation. Label heuristic/fallback vs Jev model in logs.
-8. Repeat tests, ensure `npm test`, HTTP smoke, `mvn package` and GitHub Actions pass. Update README setup and `docs/ACCEPTANCE.md` checkboxes backed by evidence, with remaining blockers explicit.
-9. Commit changes in a feature branch if git remote is configured. If there is no remote, create sensible local commits. Never force-push or overwrite existing work. Finish with exact commands to launch, acceptance evidence, remaining limitations and any required user inputs.
+### C. Double-Chest & Single-Chest Delivery
+- Fixed double-chest inspection using `Chest.getInventory()` (Paper DoubleInventory view providing full 54 slots, avoiding the 27-slot single-half limitation of `getBlockInventory()`).
+- Atomic capacity planner (`CargoDepositPlanner`) fills existing partial stacks and empty slots up to stack limits.
+- Live in-game verified: Ahmet autonomously walked to double chest at `world (3, 73, 144)` and deposited carried birch logs cleanly into slot 27 of the empty second half.
 
-## Safety and source constraints
+### D. Write-Ahead Operations Journal & Crash Recovery
+- Durable write-ahead journal (`OperationJournal` -> `operations.json`) logs every harvest and deposit before mutating world/chest state.
+- **Battle-tested during host disk full event**: Recovered from 100% APFS disk exhaustion without data loss; `recoveryBlocked` engaged automatically, and state reconciled cleanly on restart with 0 items lost.
 
-- Do not copy from `rmalde/minecraft-agent` without permission/license. Its design is a reference, not an authorized code source.
-- The user explicitly requested offline-mode for this private LAN so the TLauncher client can connect. Keep whitelist enabled and do not expose/port-forward the server outside the trusted LAN. This changes player UUID identity; never expose the local brain API outside loopback or commit credentials.
-- Default to private/whitelisted Paper server. Do not allow LLM-produced world coordinates, commands, or arbitrary action IDs to bypass validation.
-- The current implementation has a server-side log removal/virtual cargo approximation, not native villager mining physics. Improve gesture/visual feedback when stable; document mechanics truthfully.
-- Do not use a player with villager skin as a substitute. Real NPC entity type is a hard requirement.
-- Protect irreplaceable saves: only test on newly created worlds.
+### E. Player Structure & Home Protection
+- `PlayerPlacedWoodRegistry`: Tracks player-placed logs/stems via `BlockPlaceEvent` in `config.yml`, preventing accidental harvesting of player builds.
+- `ProtectedHomeArea` & `/ahmet protecthome <0-32>`: Configurable spherical exclusion zone around player home (default 10 blocks) protecting pre-existing houses. Natural leaf-neighbor heuristics redirect harvesting to wild trees.
 
-## Final acceptance
+### F. Resource Exploration & Wandering (Latest Addition)
+- `ExplorationPlanner.findExplorationWaypoint(...)`: When no resources exist within 24 blocks (`findTargets().isEmpty()`), Ahmet does not freeze; he rotates across 8 directions (radii 8–18 blocks) exploring within `max-distance-from-home: 32` outside the protected house.
+- **In-Transit Target Spotting**: Scans for targets on every tick while walking to exploration waypoints; as soon as a tree/resource enters view, exploration navigation halts immediately and harvesting begins.
 
-Use the checklist in `docs/ACCEPTANCE.md` and return a short, honest evidence table. A success without a compiled plugin and observed game run is NOT 'plug and play'. If client/game automation is unavailable, deliver best verified server build and precise remaining manual instructions rather than claiming full completion.
+### G. Multi-Step Safe Home Return (Latest Addition)
+- `ExplorationPlanner.findStepTowardsHome(...)`: When Ahmet is far from home (or returning home when idle after delivery/cancellation), calculates 16-block intermediate waypoints along the direct vector towards home on safe ground.
+- Obstacle avoidance: Rotates angle offsets (0°, ±25°, ±45°) on successive retry attempts if straight lines are obstructed. Stops cleanly upon arrival within 2.5 blocks of home.
+- `/ahmet home` / `/ahmet return` command and Turkish chat intent (`"Ahmet, eve dön"`, `"Ahmet, evine git"`) via `isReturnHome`.
+- Updated `navigate()` check: destinations moving Ahmet closer to home or targeting chest/home are never blocked even if Ahmet was outdoor-summoned beyond 32 blocks.
+
+---
+
+## 3. Test Suites & Verification Evidence
+
+- **Java Maven Unit Tests**: **59 tests, 0 failures** (`mvn test` in `paper-plugin/`).
+  - Covers `ExplorationPlannerTest` (9 tests), `WoodTaskTest` (11 tests), `CargoDepositPlannerTest` (5 tests), `OperationJournalTest` (3 tests), `OperationRecoveryTest` (3 tests), `PlayerPlacedWoodRegistryTest` (2 tests), `ProtectedHomeAreaTest` (2 tests), `NavigationWatchdogTest` (2 tests), `NavigationRetryTest` (2 tests), `PartialDeliveryPolicyTest` (3 tests), `SummonTargetTest` (2 tests), `TaskRequestTest` (3 tests), `MaterialCatalogTest` (2 tests), `ResourceCatalogTest` (2 tests), `FailedTargetsTest` (2 tests), `SavedNpcReferenceTest` (3 tests), `AddressedChatTest` (3 tests).
+- **Node Brain Unit Tests**: **15 tests, 0 failures** (`npm test` in `brain/`).
+  - Covers Turkish chat parsing, return-home intent (`isReturnHome`), JEV model contract, OpenAI GPT-6 Luna contract, memory store, decision fallbacks, bounded item IDs, and action allowlists.
+- **Distribution Packages**:
+  - `server-live/plugins/VillagerAhmet.jar` (SHA-256: `400346320a4d55f36e12c608b0e12749db7aeebb80059d22f980f620be6690c7`)
+  - `dist/villager-ahmet-plugins-paper-1.21.6.zip` (SHA-256: `39d182e9b81a5319affa07edf1b3883e1c14573ecb13a893bf189884cf67bfe0`)
+  - Validated by `dist/SHA256SUMS.txt`.
+
+---
+
+## 4. Live Server Environment (`server-live`)
+- **Server Version**: Paper 1.21.6 build 48 + Citizens 2.0.41 build 4138.
+- **Configured Locations**:
+  - Home: `world (4, 76, 125)`
+  - Protected Home: `world (5, 73, 149)` (radius 10)
+  - Delivery Chest: `world (3, 73, 144)`
+- **Server Startup Command**:
+  ```bash
+  export JAVA_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"
+  export PATH="$JAVA_HOME/bin:/opt/homebrew/opt/maven/bin:/Users/aselekoglu/.local/bin:$PATH"
+  AHMET_SERVER_DIR=server-live ACCEPT_MINECRAFT_EULA=true ./scripts/run.sh
+  ```
+- **Rules of Engagement for Restarts**:
+  - Check `/list` before restarting. NEVER restart while players are connected.
+  - Shut down using `stop` command so all chunk I/O terminates cleanly and world dimensions save.
+
+---
+
+## 5. Codex Review Instructions (sol 6.1)
+
+Codex should perform a thorough multi-axis review of the codebase using **sol 6.1**:
+1. **Architectural Coherence & Concurrency Safety**: Verify that all Bukkit/Citizens mutations and reads remain strictly on the server main thread, and all Node/Brain HTTP communications remain non-blocking with bounded timeouts.
+2. **State & Transaction Atomicity**: Audit `OperationJournal`, `OperationRecovery`, and `CargoDepositPlanner` for edge cases in failure recovery or chest capacity exhaustion.
+3. **Exploration & Navigation Robustness**: Review `ExplorationPlanner.java` algorithms (`findExplorationWaypoint` and `findStepTowardsHome`) for pathfinding efficiency, boundary limits, and obstacle avoidance.
+4. **Security & Input Validation**: Ensure bounded typed actions and strict validation of player chat and task inputs without any command injection or arbitrary coordinate passthrough.
+5. **Next Roadmap Objectives**:
+   - Live gameplay validation of wandering exploration and multi-step home return with online player.
+   - Enhanced visual feedback / particle effects or arm swinging during harvesting.
+   - Clean up duplicate Citizens NPC template records if any exist in the saved world registry.
