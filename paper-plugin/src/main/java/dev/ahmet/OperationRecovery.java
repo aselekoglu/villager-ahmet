@@ -7,6 +7,16 @@ final class OperationRecovery {
 
   enum HarvestDisposition { NOT_APPLIED, APPLY, ALREADY_APPLIED, CONFLICT }
   enum DepositDisposition { APPLY, ALREADY_APPLIED, CONFLICT }
+  enum ClearDisposition { NOT_APPLIED, ALREADY_APPLIED, CONFLICT }
+
+  static ClearDisposition classifyClear(OperationJournal.Clear operation, String taskId, String blockMaterial) {
+    if (operation == null || !Objects.equals(operation.taskId(), taskId) || blockMaterial == null) {
+      return ClearDisposition.CONFLICT;
+    }
+    if (operation.material().equals(blockMaterial)) return ClearDisposition.NOT_APPLIED;
+    if ("AIR".equals(blockMaterial)) return ClearDisposition.ALREADY_APPLIED;
+    return ClearDisposition.CONFLICT;
+  }
 
   static HarvestDisposition classifyHarvest(OperationJournal.Harvest operation, String taskId,
       int collected, int cargo, String blockMaterial) {

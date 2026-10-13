@@ -59,4 +59,18 @@ final class OperationRecoveryTest {
     assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
         OperationRecovery.classifyHarvest(birch, "task-2", 0, 0, "OAK_LOG"));
   }
+
+  @Test
+  void clearRecoveryClassifiesBlockStateAccurately() {
+    var clear = new OperationJournal.Clear("task-c", "world", 2, 70, 3, "OAK_LEAVES");
+    assertEquals(OperationRecovery.ClearDisposition.NOT_APPLIED,
+        OperationRecovery.classifyClear(clear, "task-c", "OAK_LEAVES"));
+    assertEquals(OperationRecovery.ClearDisposition.ALREADY_APPLIED,
+        OperationRecovery.classifyClear(clear, "task-c", "AIR"));
+    assertEquals(OperationRecovery.ClearDisposition.CONFLICT,
+        OperationRecovery.classifyClear(clear, "task-c", "STONE"));
+    assertEquals(OperationRecovery.ClearDisposition.CONFLICT,
+        OperationRecovery.classifyClear(clear, "different-task", "AIR"));
+  }
 }
+

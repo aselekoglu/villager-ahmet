@@ -9,7 +9,8 @@ final class WoodTask {
   boolean partialDelivery=false;
   String owner="";
   String materialPreference="any";
-  int requested=0,collected=0,deposited=0,cargo=0;
+  int requested=0,collected=0,deposited=0,cargo=0,cleared=0;
+  static final int MAX_JOB_CLEARS=12;
   private final Map<String,Integer> cargoItems=new LinkedHashMap<>();
   void start(UUID user,int count){start(user,count,"any");}
   void start(UUID user,int count,String preference){
@@ -17,8 +18,14 @@ final class WoodTask {
     if(count<1||count>64)throw new IllegalArgumentException("Task amount must be between 1 and 64");
     if(!WoodMaterials.isPreference(preference))throw new IllegalArgumentException("Unsupported wood preference");
     if(active||cargo>0)throw new IllegalStateException("Finish or recover the current task before starting another");
-    taskId=UUID.randomUUID().toString();active=true;partialDelivery=false;owner=user.toString();materialPreference=preference;requested=count;collected=0;deposited=0;cargo=0;cargoItems.clear();
+    taskId=UUID.randomUUID().toString();active=true;partialDelivery=false;owner=user.toString();materialPreference=preference;requested=count;collected=0;deposited=0;cargo=0;cleared=0;cargoItems.clear();
   }
+  boolean canClearObstruction(){return active&&cleared<MAX_JOB_CLEARS;}
+  void recordClear(){
+    if(!active||cleared>=MAX_JOB_CLEARS)throw new IllegalStateException("Task clear budget exhausted or inactive");
+    cleared++;
+  }
+
   void harvestOne(){harvestOne("OAK_LOG");}
   void harvestOne(String material){
     if(!active||requested<1||requested>64||collected>=requested||cargo>=64)
@@ -81,6 +88,8 @@ final class WoodTask {
     }
     taskId=c.getString("task.id","");
     if(taskId.isBlank()&&(active||cargo>0))taskId=UUID.randomUUID().toString();
+    cleared=c.getInt("task.cleared",0);
+    if(cleared<0||cleared>64)throw new IllegalStateException("Saved task cleared count is invalid");
   }
   private int loadCargoItem(String material,Object rawAmount){
     if(!WoodMaterials.isAllowedName(material)||!(rawAmount instanceof Number number))
@@ -94,7 +103,8 @@ final class WoodTask {
   }
   void save(FileConfiguration c){
     c.set("task.id",taskId);c.set("task.active",active);c.set("task.partialDelivery",partialDelivery);c.set("task.owner",owner);c.set("task.requested",requested);
-    c.set("task.collected",collected);c.set("task.deposited",deposited);c.set("task.cargo",cargo);
+    c.set("task.collected",collected);c.set("task.deposited",deposited);c.set("task.cargo",cargo);c.set("task.cleared",cleared);
     c.set("task.materialPreference",materialPreference);c.set("task.cargoItems",new LinkedHashMap<>(cargoItems));
   }
 }
+

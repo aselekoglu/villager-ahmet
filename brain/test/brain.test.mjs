@@ -95,6 +95,28 @@ test('decision timeout is labelled and falls back to an offered action',async()=
  }finally{globalThis.fetch=previous;}
 });
 
+test('decision fallback and mock modes never select a clear mutation action',async()=>{
+ const previous=globalThis.fetch;
+ try {
+  globalThis.fetch=async()=>{throw new DOMException('request timed out','TimeoutError');};
+  const result=await decide({observation:{requiredAction:'clear_obstruction'},actions:[
+    {id:'clear_a',description:'Clear oak leaves'},
+    {id:'retry_route',description:'Retry route'},
+    {id:'wait',description:'Wait'}
+  ]},{key:'test-only',decisionMode:'jev'});
+  assert.equal(result.id,'retry_route');
+  assert.equal(result.source,'fallback');
+
+  const mockChoice=await decide({observation:{requiredAction:'clear_obstruction'},actions:[
+    {id:'clear_a',description:'Clear oak leaves'},
+    {id:'retry_route',description:'Retry route'},
+    {id:'wait',description:'Wait'}
+  ]},{decisionMode:'mock'});
+  assert.equal(mockChoice.id,'retry_route');
+ }finally{globalThis.fetch=previous;}
+});
+
+
 test('return home intent cancels and flags goHome',async()=>{
  const d=await mkdtemp(join(tmpdir(),'ahmet-'));
  try {

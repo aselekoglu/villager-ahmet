@@ -11,8 +11,13 @@ async function request(url,body,{key,timeoutMs=10000,provider='Model provider'}=
 }
 export async function chooseAction(observation,actions,{key=process.env.TYPESAFE_API_KEY,mode=process.env.AHMET_DECISION_MODE??'jev'}={}) {
   if(!Array.isArray(actions)||actions.length===0)throw new Error('No candidates');
-  if(actions.length===1)return {id:actions[0].id,source:'forced'};
-  if(mode==='mock'||!key)return {id:actions.find(a=>a.id!=='wait')?.id??actions[0].id,source:'heuristic'};
+  if(mode==='mock'||!key){
+    const id=actions.find(a=>!a.id.startsWith('clear_')&&a.id!=='wait')?.id
+      ??actions.find(a=>!a.id.startsWith('clear_'))?.id
+      ??actions.find(a=>a.id!=='wait')?.id
+      ??actions[0].id;
+    return {id,source:'heuristic'};
+  }
   const criteria=Object.fromEntries(actions.map((a,i)=>['a'+i,a.description]));
   const data=await request(TYPESAFE_JEV_URL,{model:process.env.JEV_MODEL??'jev-latest',state:observation,questions:{action:{type:'choice',instructions:'You are Ahmet, a Minecraft villager completing the current task. Choose the safe, productive available action. Prefer progress to waiting. Respect the provided candidates, never infer missing actions.',criteria}}},{key,timeoutMs:8000,provider:'TypeSafe'});
   const choice=data.answers?.action?.choice;

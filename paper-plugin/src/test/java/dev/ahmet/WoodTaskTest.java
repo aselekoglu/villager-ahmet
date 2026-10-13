@@ -153,4 +153,28 @@ final class WoodTaskTest {
     assertEquals(64, restored.requested);
     assertEquals(1, restored.cargo);
   }
+
+  @Test
+  void obstructionClearBudgetIsEnforcedAndPersisted() {
+    WoodTask task = new WoodTask();
+    task.start(UUID.randomUUID(), 10, "any");
+    assertEquals(0, task.cleared);
+    assertTrue(task.canClearObstruction());
+
+    for (int i = 0; i < WoodTask.MAX_JOB_CLEARS; i++) {
+      task.recordClear();
+    }
+    assertEquals(WoodTask.MAX_JOB_CLEARS, task.cleared);
+    assertFalse(task.canClearObstruction());
+    assertThrows(IllegalStateException.class, task::recordClear);
+
+    YamlConfiguration config = new YamlConfiguration();
+    task.save(config);
+
+    WoodTask restored = new WoodTask();
+    restored.load(config);
+    assertEquals(WoodTask.MAX_JOB_CLEARS, restored.cleared);
+    assertFalse(restored.canClearObstruction());
+  }
 }
+

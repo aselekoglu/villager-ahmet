@@ -77,4 +77,26 @@ final class OperationJournalTest {
     assertEquals("STONE", pending.effectiveMaterial());
     assertEquals("COBBLESTONE", pending.effectiveOutputMaterial());
   }
+
+  @Test
+  void pendingClearIsDurableAcrossReloadsAndCompletesWithoutCargoChange() throws Exception {
+    Path path = temp.resolve("clear-operations.json");
+    OperationJournal journal = new OperationJournal(path);
+    journal.load();
+    OperationJournal.Clear clear = new OperationJournal.Clear("task-clear", "world", 5, 70, 10, "OAK_LEAVES");
+    journal.prepareClear(clear);
+    assertTrue(journal.hasOperations());
+
+    OperationJournal afterRestart = new OperationJournal(path);
+    afterRestart.load();
+    assertEquals(clear, afterRestart.pendingClear().orElseThrow());
+    afterRestart.completeClear();
+
+    OperationJournal afterSecondRestart = new OperationJournal(path);
+    afterSecondRestart.load();
+    assertTrue(afterSecondRestart.pendingClear().isEmpty());
+    assertEquals(List.of(clear), afterSecondRestart.clears());
+    assertTrue(afterSecondRestart.hasOperations());
+  }
 }
+

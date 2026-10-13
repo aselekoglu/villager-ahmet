@@ -50,6 +50,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private Location chestLocation;
   private Location treeTarget;
   private Location navigationGoal;
+  private int routeClears=0;
   private final NavigationWatchdog navigationWatchdog=new NavigationWatchdog();
   private final NavigationRetry navigationRetry=new NavigationRetry();
   private final FailedTargets failedTargets=new FailedTargets();
@@ -335,9 +336,11 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   @EventHandler(ignoreCancelled=true) public void onPlayerPlaceWood(BlockPlaceEvent event){
     if(!woodProtectionStateValid)return;
     Block block=event.getBlockPlaced();
-    if(!WoodMaterials.isCollectableWood(block.getType()))return;
+    if(!WoodMaterials.isCollectableWood(block.getType()) && !ObstructionPolicy.isLeaf(block.getType()))return;
     if(playerPlacedWood.record(block.getWorld().getName(),block.getX(),block.getY(),block.getZ()))persist();
   }
+
+
   private void interact(Player player,String message){
     if(recoveryBlocked){player.sendMessage("§cAhmet'in görev verisi kurtarma bekliyor; önce yönetici incelemeli.");return;}
     if(npc==null || !npc.isSpawned()){player.sendMessage("§cÖnce /ahmet spawn ile Ahmet'i oluştur.");return;}
@@ -375,7 +378,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         if(preference!=null&&amount>=1&&amount<=64&&WoodMaterials.isPreference(preference)
             &&!task.active&&task.cargo==0&&!journal.hasOperations()&&chestLocation!=null
             &&chestLocation.getWorld().equals(npc.getEntity().getWorld())){
-          task.start(player.getUniqueId(),amount,preference);treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();jobGeneration++;persist();event("task_started",amount);
+          task.start(player.getUniqueId(),amount,preference);treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;jobGeneration++;persist();event("task_started",amount);
         }else{
           answer="Bu item kataloğumda tanımlı, ancak güvenli toplama yeteneğim henüz yok. Şimdilik yaygın odun, toprak, kum, taş, kömür, demir ve altın kaynaklarını isteyebilirsin.";
         }
@@ -383,10 +386,11 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       say(answer);
     }));
   }
-  private void cancel(){event("task_cancelled",task.requested);task.cancel();jobGeneration++;treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();clearNavigation();explorationAttempts=0;returningHome=task.cargo==0;persist();}
+  private void cancel(){event("task_cancelled",task.requested);task.cancel();jobGeneration++;treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;clearNavigation();explorationAttempts=0;returningHome=task.cargo==0;persist();}
+
   private void step(){
     if(recoveryBlocked || journal.pendingHarvest().isPresent() || journal.pendingDeposit().isPresent()
-        || npc==null || !npc.isSpawned() || deciding)return;
+        || journal.pendingClear().isPresent() || npc==null || !npc.isSpawned() || deciding)return;
     final Location current=npc.getEntity().getLocation();
     final long now=System.currentTimeMillis();
     if(navigationRetry.pending()){
@@ -398,15 +402,22 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       NavigationWatchdog.Outcome outcome=navigationWatchdog.observe(current.distanceSquared(navigationGoal),now);
       if(outcome==NavigationWatchdog.Outcome.REACHED){
         navigationGoal=null;
+        routeClears=0;
         if(explorationTarget!=null){explorationTarget=null;invalidateTargetScan();}
         if(homeStepTarget!=null){homeStepTarget=null;homeStepAttempt=0;}
       }else if(outcome==NavigationWatchdog.Outcome.RETRY){
         if(npc.getNavigator().isNavigating())npc.getNavigator().cancelNavigation();
+        if(task.active && !task.readyToDeliver() && treeTarget!=null && task.canClearObstruction() && routeClears<3){
+          if(evaluateObstructionClearing(current,navigationGoal)){
+            return;
+          }
+        }
         navigationRetry.schedule(now);return;
       }else if(outcome==NavigationWatchdog.Outcome.GIVE_UP){
         if(npc.getNavigator().isNavigating())npc.getNavigator().cancelNavigation();
         getLogger().warning("Navigation route gave up; npc="+coords(current)+", destination="+coords(navigationGoal)+", cargo="+task.cargo+", collected="+task.collected+"/"+task.requested);
         navigationGoal=null;navigationWatchdog.reset();
+        routeClears=0;
         if(explorationTarget!=null){
           explorationTarget=null;
           treeRetryAfterMs=now+1000;
@@ -429,6 +440,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         return;
       }else if(outcome==NavigationWatchdog.Outcome.WAIT&&!npc.getNavigator().isNavigating())return;
     }
+
 
     if(!task.active){
       if(task.cargo>0&&!returningHome)return;
@@ -484,8 +496,10 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     }
 
     if(treeTarget!=null){
-      if(current.distanceSquared(treeTarget.clone().add(.5,0,.5))>2.9*2.9)navigate(NavigationTarget.fromBlock(treeTarget));
-      else execute("harvest");
+      if(current.distanceSquared(treeTarget.clone().add(.5,0,.5))>2.9*2.9){
+        Location approachTarget=NavigationTarget.approachFor(treeTarget,current,this::isSafeGround);
+        navigate(approachTarget);
+      } else execute("harvest");
       return;
     }
 
@@ -554,17 +568,127 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       String candidateId=offeredTargets.containsKey(selected)?selected:"unoffered";
       Location selectedTarget=offeredTargets.get(selected);
       if(selectedTarget!=null&&!isEligibleTarget(selectedTarget.getBlock(),task.materialPreference))selectedTarget=null;
-      if(selectedTarget!=null){decisionRetry.clear();treeTarget=selectedTarget;treeRetryAfterMs=0;waitDecisions=0;getLogger().info("Gather target selection source: "+source+", model: "+model+", candidate: "+candidateId+", block="+coords(selectedTarget));}
+      if(selectedTarget!=null){decisionRetry.clear();treeTarget=selectedTarget;routeClears=0;treeRetryAfterMs=0;waitDecisions=0;getLogger().info("Gather target selection source: "+source+", model: "+model+", candidate: "+candidateId+", block="+coords(selectedTarget));}
       else {
         decisionRetry.schedule(System.currentTimeMillis());
         getLogger().info("Gather target selection source: "+source+", model: "+model+", candidate: "+candidateId);
         if(++waitDecisions>=3&&!offeredTargets.isEmpty()){
-          waitDecisions=0;treeTarget=offeredTargets.values().iterator().next();
+          waitDecisions=0;treeTarget=offeredTargets.values().iterator().next();routeClears=0;
         }
       }
     }));
   }
+  private boolean evaluateObstructionClearing(Location current,Location goal){
+    if(deciding)return false;
+    List<ObstructionPolicy.CandidateObstruction> candidates=ObstructionPolicy.findCandidates(current,goal,getProtectedHomeArea(),playerPlacedWood);
+    if(candidates.isEmpty()){
+      World world=current.getWorld();
+      Block floor=world.getBlockAt(current.getBlockX(),current.getBlockY()-1,current.getBlockZ());
+      if(ObstructionPolicy.isLeaf(floor.getType())){
+        warn("Önümdeki yaprakları güvenle kıramıyorum, düşme tehlikesi var. Yolu açmama yardım eder misin?");
+      }
+
+      return false;
+    }
+    final JsonArray options=new JsonArray();
+    final LinkedHashMap<String,ObstructionPolicy.CandidateObstruction> offeredObstructions=new LinkedHashMap<>();
+    for(int i=0;i<candidates.size();i++){
+      String id="clear_"+(char)('a'+i);
+      ObstructionPolicy.CandidateObstruction c=candidates.get(i);
+      Block b=c.block();
+      double dist=Math.sqrt(current.distanceSquared(b.getLocation().add(0.5,0.5,0.5)));
+      String desc="Clear natural "+b.getType().name().toLowerCase(java.util.Locale.ROOT)
+          +(c.isSupportLeaf()?" support leaf under feet":" obstruction")
+          +", distance "+Math.round(dist)+" blocks";
+      options.add(candidate(id,desc));
+      offeredObstructions.put(id,c);
+    }
+    options.add(candidate("retry_route","Retry navigation to target without modifying blocks"));
+    options.add(candidate("wait","Wait briefly to assess safety; no progress"));
+
+    JsonObject req=new JsonObject();JsonObject observation=new JsonObject();
+    boolean woodTask=!task.materialPreference.startsWith("item:");
+    observation.addProperty("task",woodTask?"collect_wood":"collect_item");
+    observation.addProperty("materialPreference",task.materialPreference);
+    observation.addProperty("requested",task.requested);
+    observation.addProperty("collected",task.collected);
+    observation.addProperty("cargo",task.cargo);
+    observation.addProperty("deposited",task.deposited);
+    observation.addProperty("requiredAction","clear_obstruction");
+    observation.addProperty("chestBound",chestLocation!=null);
+    observation.addProperty("position",coords(current));
+    observation.addProperty("routeClears",routeClears);
+    req.add("observation",observation);req.add("actions",options);
+
+    deciding=true;
+    final long generation=jobGeneration;
+    brain.post("/api/decide",req).whenComplete((response,error)->Bukkit.getScheduler().runTask(this,()->{
+      deciding=false;
+      if(!task.active||npc==null||!npc.isSpawned()||jobGeneration!=generation)return;
+
+      String selected=error==null&&response.has("id")?response.get("id").getAsString():"wait";
+      String source=error==null&&response.has("source")?response.get("source").getAsString():"fallback";
+      String model=error==null&&response.has("model")?response.get("model").getAsString():"none";
+      if(!Set.of("jev","heuristic","forced","fallback").contains(source))source="unknown";
+      model=model.replaceAll("[^A-Za-z0-9._-]","");
+      if(model.length()>64)model=model.substring(0,64);
+
+      if(selected.startsWith("clear_")){
+        if(error!=null||!"jev".equals(source)){
+          getLogger().info("Clear obstruction choice rejected due to non-JEV source: "+source+", model: "+model+"; scheduling navigation retry");
+          navigationRetry.schedule(System.currentTimeMillis());
+          return;
+        }
+
+        ObstructionPolicy.CandidateObstruction chosen=offeredObstructions.get(selected);
+        if(chosen==null||!task.canClearObstruction()||routeClears>=3){
+          navigationRetry.schedule(System.currentTimeMillis());
+          return;
+        }
+
+        Block block=chosen.block();
+        Location nowLoc=npc.getEntity().getLocation();
+        if(nowLoc.distanceSquared(block.getLocation().add(0.5,0.5,0.5))>3.5*3.5
+            ||!ObstructionPolicy.isEligibleLeaf(block,getProtectedHomeArea(),playerPlacedWood)){
+          getLogger().warning("Obstruction block revalidation failed at "+coords(block.getLocation()));
+          navigationRetry.schedule(System.currentTimeMillis());
+          return;
+        }
+        if(chosen.isSupportLeaf()&&!DescentSimulator.isSafeDescent(block.getWorld(),nowLoc.getBlockX(),nowLoc.getBlockY(),nowLoc.getBlockZ())){
+          getLogger().warning("Support leaf descent simulation failed revalidation at "+coords(block.getLocation()));
+          warn("Altımdaki yaprağı güvenle kıramıyorum, düşme tehlikesi var.");
+          navigationRetry.schedule(System.currentTimeMillis());
+          return;
+        }
+
+        clearObstruction(block);
+        routeClears++;
+        task.recordClear();
+        persist();
+        getLogger().info("Obstruction cleared by JEV ("+model+"): "+block.getType().name()+" at "+coords(block.getLocation())+", routeClears="+routeClears+", jobClears="+task.cleared);
+        if(navigationGoal!=null){
+          issueNavigationTarget(navigationGoal);
+        }
+        return;
+      }
+
+      navigationRetry.schedule(System.currentTimeMillis());
+    }));
+    return true;
+  }
+  private void clearObstruction(Block block){
+    OperationJournal.Clear operation=new OperationJournal.Clear(task.taskId,block.getWorld().getName(),
+        block.getX(),block.getY(),block.getZ(),block.getType().name());
+    try{
+      journal.prepareClear(operation);
+      block.setType(Material.AIR,false);
+      journal.completeClear();
+    }catch(Exception e){
+      blockRecovery("Clear transaction is pending; the job is paused",e);
+    }
+  }
   private JsonObject candidate(String id,String description){JsonObject result=new JsonObject();result.addProperty("id",id);result.addProperty("description",description);return result;}
+
   private void execute(String action){
     Location here=npc.getEntity().getLocation();
     switch(action){
@@ -655,6 +779,28 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
   private void recoverJournal(){
     try{
+      var pendingClear=journal.pendingClear();
+      if(pendingClear.isPresent()){
+        OperationJournal.Clear operation=pendingClear.get();
+        World world=Bukkit.getWorld(operation.world());
+        if(world==null){blockRecovery("Clear journal world is unavailable: "+operation.world(),null);return;}
+        Block block=world.getBlockAt(operation.x(),operation.y(),operation.z());
+        var disposition=OperationRecovery.classifyClear(operation,task.taskId,block.getType().name());
+        switch(disposition){
+          case NOT_APPLIED -> journal.discardPendingClear();
+          case ALREADY_APPLIED -> journal.completeClear();
+          case CONFLICT -> {blockRecovery("Clear journal conflicts with saved block state",null);return;}
+        }
+      }
+      for(OperationJournal.Clear operation:journal.clears()){
+        World world=Bukkit.getWorld(operation.world());
+        if(world==null||!operation.taskId().equals(task.taskId)){
+          blockRecovery("Committed clear does not match saved task state",null);return;
+        }
+        if(world.getBlockAt(operation.x(),operation.y(),operation.z()).getType()!=Material.AIR){
+          blockRecovery("A previously cleared block changed before its world save",null);return;
+        }
+      }
       var pendingHarvest=journal.pendingHarvest();
       if(pendingHarvest.isPresent()){
         OperationJournal.Harvest operation=pendingHarvest.get();
@@ -718,7 +864,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     if(!task.active||task.cargo<=0)return;
     try{
       task.requestPartialDelivery();treeTarget=null;treeRetryAfterMs=0;partialDeliveryPolicy.reset();
-      navigationGoal=null;navigationRetry.clear();navigationWatchdog.reset();
+      navigationGoal=null;navigationRetry.clear();navigationWatchdog.reset();routeClears=0;
       explorationTarget=null;explorationAttempts=0;homeStepTarget=null;persist();
       say(reason+"; topladığım "+task.cargo+" kaynağı sandığa götürüyorum.");
     }catch(Exception e){blockRecovery("Could not begin partial delivery",e);}
@@ -726,8 +872,10 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private void saveJournalWorlds(World additional)throws IOException{
     Set<String> names=new LinkedHashSet<>();
     for(OperationJournal.Harvest operation:journal.harvests())names.add(operation.world());
+    for(OperationJournal.Clear operation:journal.clears())names.add(operation.world());
     journal.pendingHarvest().ifPresent(operation->names.add(operation.world()));
     journal.pendingDeposit().ifPresent(operation->names.add(operation.world()));
+    journal.pendingClear().ifPresent(operation->names.add(operation.world()));
     if(additional!=null)names.add(additional.getName());
     for(String name:names){
       World world=Bukkit.getWorld(name);
@@ -737,12 +885,13 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
   private void flushJournalOnShutdown(){
     if(journal==null||!journal.hasOperations())return;
-    if(journal.pendingHarvest().isPresent()||journal.pendingDeposit().isPresent()){
+    if(journal.pendingHarvest().isPresent()||journal.pendingDeposit().isPresent()||journal.pendingClear().isPresent()){
       getLogger().warning("An unfinished operation journal was retained for startup recovery.");return;
     }
     try{saveJournalWorlds(null);journal.clearAfterWorldSave();}
     catch(Exception e){getLogger().severe("Could not flush the operation journal; it was retained: "+e.getMessage());}
   }
+
   private void blockRecovery(String message,Exception cause){
     recoveryBlocked=true;
     getLogger().severe(message+(cause==null?"":": "+cause.getMessage()));
@@ -797,9 +946,10 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
   private void clearNavigation(){
     if(npc!=null&&npc.isSpawned())npc.getNavigator().cancelNavigation();
-    navigationGoal=null;navigationWatchdog.reset();navigationRetry.clear();
+    navigationGoal=null;navigationWatchdog.reset();navigationRetry.clear();routeClears=0;
     explorationTarget=null;homeStepTarget=null;
   }
+
   private static boolean sameBlock(Location first,Location second){
     return first!=null&&first.getWorld().equals(second.getWorld())&&first.getBlockX()==second.getBlockX()
       &&first.getBlockY()==second.getBlockY()&&first.getBlockZ()==second.getBlockZ();
@@ -848,12 +998,17 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     if(WoodMaterials.isCollectableWood(block.getType())&&isProtectedWood(block))return false;
     return hasNaturalWoodMarkers(block);
   }
+  private ProtectedHomeArea getProtectedHomeArea(){
+    if(protectedHome==null||protectHomeRadius<=0)return null;
+    return new ProtectedHomeArea(protectedHome.getWorld().getName(),protectedHome.getBlockX(),protectedHome.getBlockY(),protectedHome.getBlockZ(),protectHomeRadius);
+  }
   private boolean isProtectedWood(Block block){
     if(playerPlacedWood.contains(block.getWorld().getName(),block.getX(),block.getY(),block.getZ()))return true;
-    if(protectedHome==null||protectHomeRadius==0||!protectedHome.getWorld().equals(block.getWorld()))return false;
-    return new ProtectedHomeArea(protectedHome.getWorld().getName(),protectedHome.getBlockX(),protectedHome.getBlockY(),protectedHome.getBlockZ(),protectHomeRadius)
-        .contains(block.getWorld().getName(),block.getX(),block.getY(),block.getZ());
+    ProtectedHomeArea homeArea=getProtectedHomeArea();
+    if(homeArea==null||!protectedHome.getWorld().equals(block.getWorld()))return false;
+    return homeArea.contains(block.getWorld().getName(),block.getX(),block.getY(),block.getZ());
   }
+
   private String expectedOutput(Block block,String preference){
     if(WoodMaterials.matchesPreference(block.getType(),preference))return block.getType().name();
     var resource=ResourceCatalog.forPreference(preference).orElse(null);

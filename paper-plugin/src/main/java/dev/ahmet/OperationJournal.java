@@ -33,7 +33,8 @@ final class OperationJournal {
       Data loaded = GSON.fromJson(Files.readString(path, StandardCharsets.UTF_8), Data.class);
       if (loaded == null || loaded.version < 1 || loaded.version > 3) throw new IOException("Unsupported operation journal version");
       if (loaded.harvests == null) loaded.harvests = new ArrayList<>();
-      if (loaded.harvests.size() > 64) throw new IOException("Operation journal exceeds the task bound");
+      if (loaded.clears == null) loaded.clears = new ArrayList<>();
+      if (loaded.harvests.size() > 64 || loaded.clears.size() > 64) throw new IOException("Operation journal exceeds the task bound");
       if (loaded.version == 2) {
         if (missingRecoveryFields(loaded.pendingHarvest) || loaded.harvests.stream().anyMatch(OperationJournal::missingRecoveryFields)
             || missingInventorySize(loaded.pendingDeposit)) {
@@ -67,12 +68,22 @@ final class OperationJournal {
     return Optional.ofNullable(data.pendingDeposit);
   }
 
+  synchronized Optional<Clear> pendingClear() {
+    return Optional.ofNullable(data.pendingClear);
+  }
+
+  synchronized List<Clear> clears() {
+    return List.copyOf(data.clears);
+  }
+
   synchronized boolean hasOperations() {
-    return data.pendingHarvest != null || data.pendingDeposit != null || !data.harvests.isEmpty();
+    return data.pendingHarvest != null || data.pendingDeposit != null || data.pendingClear != null
+        || !data.harvests.isEmpty() || !data.clears.isEmpty();
   }
 
   synchronized void prepareHarvest(Harvest operation) throws IOException {
-    if (operation == null || data.pendingHarvest != null || data.pendingDeposit != null || data.harvests.size() >= 64) {
+    if (operation == null || data.pendingHarvest != null || data.pendingDeposit != null
+        || data.pendingClear != null || data.harvests.size() >= 64) {
       throw new IllegalStateException("Cannot prepare another harvest operation");
     }
     data.pendingHarvest = operation;
@@ -93,11 +104,34 @@ final class OperationJournal {
   }
 
   synchronized void prepareDeposit(Deposit operation) throws IOException {
-    if (operation == null || data.pendingHarvest != null || data.pendingDeposit != null) {
+    if (operation == null || data.pendingHarvest != null || data.pendingDeposit != null
+        || data.pendingClear != null) {
       throw new IllegalStateException("Cannot prepare another deposit operation");
     }
     data.pendingDeposit = operation;
     persist();
+  }
+
+  synchronized void prepareClear(Clear operation) throws IOException {
+    if (operation == null || data.pendingHarvest != null || data.pendingDeposit != null
+        || data.pendingClear != null || data.clears.size() >= 64) {
+      throw new IllegalStateException("Cannot prepare another clear operation");
+    }
+    data.pendingClear = operation;
+    persist();
+  }
+
+  synchronized void completeClear() throws IOException {
+    if (data.pendingClear == null) throw new IllegalStateException("No clear operation is pending");
+    data.clears.add(data.pendingClear);
+    data.pendingClear = null;
+    persist();
+  }
+
+  synchronized void discardPendingClear() throws IOException {
+    if (data.pendingClear == null) return;
+    data.pendingClear = null;
+    persistOrDeleteIfEmpty();
   }
 
   synchronized void clearAfterWorldSave() throws IOException {
@@ -106,13 +140,15 @@ final class OperationJournal {
   }
 
   private void persistOrDeleteIfEmpty() throws IOException {
-    if (data.harvests.isEmpty() && data.pendingDeposit == null) {
+    if (data.harvests.isEmpty() && data.clears.isEmpty() && data.pendingDeposit == null
+        && data.pendingHarvest == null && data.pendingClear == null) {
       Files.deleteIfExists(path);
       data = new Data();
     } else {
       persist();
     }
   }
+
 
   private void persist() throws IOException {
     Path parent = path.toAbsolutePath().getParent();
@@ -204,10 +240,22 @@ final class OperationJournal {
     int afterDeposited() { return beforeDeposited + moved; }
   }
 
+  record Clear(String taskId, String world, int x, int y, int z, String material) {
+    Clear {
+      if (taskId == null || taskId.isBlank() || world == null || world.isBlank()
+          || material == null || material.isBlank()) {
+        throw new IllegalArgumentException("Invalid clear journal entry");
+      }
+    }
+  }
+
   private static final class Data {
     int version = 3;
     Harvest pendingHarvest;
     List<Harvest> harvests = new ArrayList<>();
     Deposit pendingDeposit;
+    Clear pendingClear;
+    List<Clear> clears = new ArrayList<>();
   }
 }
+

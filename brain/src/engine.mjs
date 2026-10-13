@@ -50,5 +50,11 @@ export async function decide(req,{models={chooseAction},key,decisionMode}={}) {
   const actions=req.actions.map(a=>({id:String(a.id).slice(0,40),description:String(a.description??a.id).slice(0,180)}));
   if(actions.some(a=>!/^[a-z_]+$/.test(a.id)))throw new Error('Invalid action id');
   try{return await models.chooseAction(req.observation??{},actions,{key,mode:decisionMode});}
-  catch(e){return {id:actions.find(a=>a.id!=='wait')?.id??actions[0].id,source:'fallback',reason:String(e.message).slice(0,140)};}
+  catch(e){
+    const safeFallback=actions.find(a=>!a.id.startsWith('clear_')&&a.id!=='wait')?.id
+      ??actions.find(a=>!a.id.startsWith('clear_'))?.id
+      ??actions[0].id;
+    return {id:safeFallback,source:'fallback',reason:String(e.message).slice(0,140)};
+  }
 }
+
