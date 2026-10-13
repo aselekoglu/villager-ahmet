@@ -70,7 +70,6 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private int protectHomeRadius=10;
   private boolean woodProtectionStateValid=true;
   private boolean deciding=false;
-  private long jobGeneration=0;
   private int waitDecisions=0;
   private final DecisionRetry decisionRetry=new DecisionRetry(2_000);
   private final PartialDeliveryPolicy partialDeliveryPolicy=new PartialDeliveryPolicy();
@@ -212,7 +211,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       if(!player.getWorld().equals(npc.getEntity().getWorld())||player.getLocation().distanceSquared(npc.getEntity().getLocation())>18*18){player.sendMessage("§cGörev vermek için Ahmet'e yaklaş.");return true;}
       if(chestLocation==null||!chestLocation.getWorld().equals(npc.getEntity().getWorld())){player.sendMessage("§cÖnce aynı dünyadaki teslimat sandığını /ahmet chest ile bağla.");return true;}
       if(task.active||task.cargo>0){player.sendMessage("§cÖnce mevcut görevi bitir veya /ahmet deliver ile taşıdığı yükü boşalt.");return true;}
-      task.start(player.getUniqueId(),request.amount(),request.preference());treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();jobGeneration=controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Task started via command");controller.clearHelp();persist();event("task_started",request.amount());
+      task.start(player.getUniqueId(),request.amount(),request.preference());treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Task started via command");controller.clearHelp();persist();event("task_started",request.amount());
       say("Tamam, "+request.amount()+" "+request.itemName()+" toplamaya başlıyorum.");
       return true;
     }
@@ -256,7 +255,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       if(task.cargo<=0){player.sendMessage("§eTaşınan kaynak yok.");return true;}
       if(task.active){player.sendMessage("§eÖnce görevi bitir veya iptal et.");return true;}
       if(!player.hasPermission("ahmet.admin") && !task.owner.equals(player.getUniqueId().toString())){player.sendMessage("§cYetkin yok.");return true;}
-      task.resumeDelivery();treeTarget=null;jobGeneration++;persist();say("Kalan kaynakları sandığa götürüyorum.");return true;
+      task.resumeDelivery();treeTarget=null;controller.nextGeneration();controller.clearHelp();controller.transitionTo(AgentState.PLANNING,"Cargo delivery resumed");persist();say("Kalan kaynakları sandığa götürüyorum.");return true;
     }
     if(op.equals("cancel")){
       if(TaskAuthorization.mayControl(player.getUniqueId().toString(),task.owner,player.hasPermission("ahmet.admin"),task.active) && task.active){cancel();say("Görevi iptal ettim. Topladığım kaynaklar şimdilik bende.");}
@@ -391,7 +390,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         if(preference!=null&&amount>=1&&amount<=64&&WoodMaterials.isPreference(preference)
             &&!task.active&&task.cargo==0&&!journal.hasOperations()&&chestLocation!=null
             &&chestLocation.getWorld().equals(npc.getEntity().getWorld())){
-          task.start(player.getUniqueId(),amount,preference);treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;jobGeneration=controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Task started via chat");controller.clearHelp();persist();event("task_started",amount);
+          task.start(player.getUniqueId(),amount,preference);treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Task started via chat");controller.clearHelp();persist();event("task_started",amount);
         }else{
           answer="Bu item kataloğumda tanımlı, ancak güvenli toplama yeteneğim henüz yok. Şimdilik yaygın odun, toprak, kum, taş, kömür, demir ve altın kaynaklarını isteyebilirsin.";
         }
@@ -399,7 +398,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       say(answer);
     }));
   }
-  private void cancel(){event("task_cancelled",task.requested);task.cancel();jobGeneration=controller.nextGeneration();controller.transitionTo(AgentState.IDLE,"Task cancelled");controller.clearHelp();treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;clearNavigation();explorationAttempts=0;returningHome=task.cargo==0;persist();}
+  private void cancel(){event("task_cancelled",task.requested);task.cancel();controller.nextGeneration();controller.transitionTo(AgentState.IDLE,"Task cancelled");controller.clearHelp();treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;clearNavigation();explorationAttempts=0;returningHome=task.cargo==0;persist();}
 
   private void step(){
     if(recoveryBlocked || journal.pendingHarvest().isPresent() || journal.pendingDeposit().isPresent()
@@ -580,9 +579,9 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     observation.addProperty("chestBound",chestLocation!=null);observation.addProperty("position",coords(current));
     req.add("observation",observation);req.add("actions",options);
     deciding=true;
-    final long generation=jobGeneration;
+    final long generation=controller.jobGeneration();
     brain.post("/api/decide",req).whenComplete((response,error)->Bukkit.getScheduler().runTask(this,()->{
-      deciding=false;if(!task.active || npc==null || !npc.isSpawned() || jobGeneration!=generation)return;
+      deciding=false;if(!task.active || npc==null || !npc.isSpawned() || controller.jobGeneration()!=generation)return;
       // JEV may select only an offered target ID. Java retains each real block location.
       String selected=error==null&&response.has("id")?response.get("id").getAsString():"wait";
       String source=error==null&&response.has("source")?response.get("source").getAsString():"fallback";
@@ -660,10 +659,10 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     req.add("observation",observation);req.add("actions",options);
 
     deciding=true;
-    final long generation=jobGeneration;
+    final long generation=controller.jobGeneration();
     brain.post("/api/decide",req).whenComplete((response,error)->Bukkit.getScheduler().runTask(this,()->{
       deciding=false;
-      if(!task.active||npc==null||!npc.isSpawned()||jobGeneration!=generation)return;
+      if(!task.active||npc==null||!npc.isSpawned()||controller.jobGeneration()!=generation)return;
 
       String selected=error==null&&response.has("id")?response.get("id").getAsString():"wait";
       String source=error==null&&response.has("source")?response.get("source").getAsString():"fallback";
@@ -688,16 +687,22 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
 
         Block block=chosen.block();
         Location nowLoc=npc.getEntity().getLocation();
+        boolean currentlySupport=ActionPreconditions.isCurrentSupportLeaf(nowLoc,block);
         ExecutionResult preRes=controller.preconditions().validateClear(nowLoc,block,chosen.isSupportLeaf(),routeClears,task.cleared);
         if(!preRes.isSuccess()||!ObstructionPolicy.isEligibleLeaf(block,getProtectedHomeArea(),playerPlacedWood)){
           getLogger().warning("Obstruction block precondition/revalidation failed at "+coords(block.getLocation())+": "+preRes.message());
-          if(chosen.isSupportLeaf()){
+          if(currentlySupport){
             if(controller.recordHelpRequest(System.currentTimeMillis())){
               say("Altımdaki yaprağı güvenle kıramıyorum, düşme tehlikesi var. Yolu açmama yardım eder misin?");
             }else{
               warn("Altımdaki yaprağı güvenle kıramıyorum, düşme tehlikesi var.");
             }
           }
+          navigationRetry.schedule(System.currentTimeMillis());
+          return;
+        }
+        if(!ObstructionPolicy.matchesOfferedActor(chosen,nowLoc)||!ObstructionPolicy.matchesOfferedState(chosen,block)){
+          getLogger().warning("Obstruction changed after model selection; refusing to clear at "+coords(block.getLocation()));
           navigationRetry.schedule(System.currentTimeMillis());
           return;
         }
@@ -904,7 +909,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private void finishTaskIfReady(){
     if(!task.active||!task.readyToFinish())return;
     boolean partial=task.partialDelivery;int delivered=task.deposited;int requested=task.requested;
-    task.finish();jobGeneration=controller.nextGeneration();controller.transitionTo(AgentState.IDLE,"Task completed");controller.clearHelp();persist();event("task_delivered",task.deposited);
+    task.finish();controller.nextGeneration();controller.transitionTo(AgentState.IDLE,"Task completed");controller.clearHelp();persist();event("task_delivered",task.deposited);
     returningHome=true;homeStepAttempt=0;clearNavigation();
     if(partial)say("Şimdilik "+delivered+"/"+requested+" kaynak topladım ve sandığa bıraktım. Ulaşılabilir kaynağı bulamayınca durdum; yolu açınca kalanını tekrar isteyebilirsin.");
     else say("Bitti! "+task.deposited+" itemi sandığa bıraktım.");
@@ -1008,7 +1013,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     World world=origin.getWorld();int r=Math.min(24,Math.max(8,getConfig().getInt("options.search-radius",24)));
     long now=System.currentTimeMillis();
     if(targetScanner.complete()&&scanCompletedAtMs>0&&now-scanCompletedAtMs>=5000)invalidateTargetScan();
-    targetScanner.begin(world.getName(),preference,jobGeneration,origin.getBlockX(),origin.getBlockY(),origin.getBlockZ(),r,-8,12);
+    targetScanner.begin(world.getName(),preference,controller.jobGeneration(),origin.getBlockX(),origin.getBlockY(),origin.getBlockZ(),r,-8,12);
     if(targetScanner.visited()==0){scanCandidates.clear();scanEligible.clear();scanEligibilityCursor=0;scanEvaluated=false;}
     if(!targetScanner.complete()){
       for(IncrementalTargetScanner.Point point:targetScanner.advance(512)){

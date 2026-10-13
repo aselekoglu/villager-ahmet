@@ -48,18 +48,18 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 - `DescentSimulator`: Simulates safe vertical landing ($\le 2$ blocks drop) before permitting removal of support leaves.
 - `OperationJournal.Clear`: Zero-cargo atomic journal operation ensuring fail-closed recovery on crash.
 
-### I. Unified AgentLoop & Controller Harness
-- Modular state machine (`AgentState`, `AgentGoal`, `OfferedAction`, `ActionBudget`, `ExecutionResult`).
+### I. AgentController & Preconditions Harness
+- Modular controller model (`AgentState`, `AgentGoal`, `OfferedAction`, `ActionBudget`, `ExecutionResult`). The production task loop remains in `AhmetPlugin`; observation-based `evaluateGoal` is harness-only and not wired into production decisions.
 - Deterministic server main-thread validation via `ActionPreconditions` before any world/inventory mutation.
-- `ProtectionHook` SPI and `CompositeProtectionHook` providing fail-closed protection checks.
+- `ProtectionHook` SPI and `CompositeProtectionHook` providing fail-closed protection checks in production and harness paths.
 - Structured player help requests (`BLOCKED_AWAITING_HELP`) when route retries or safe clearance are exhausted.
 
 ---
 
 ## 3. Test Suites & Verification Evidence
 
-- **Java Maven Unit Tests**: **113 tests, 0 failures** (`mvn test` in `paper-plugin/`).
-  - Covers `AgentEvaluationHarnessTest` (7), `AgentControllerTest` (3), `AgentModelsTest` (4), `ActionPreconditionsTest` (3), `ProtectionHookTest` (5), `ObstructionPolicyTest` (7), `DescentSimulatorTest` (7), `HarvestApproachPlannerTest` (2), `OperationJournalTest` (5), `OperationRecoveryTest` (6), `WoodTaskTest` (12), `ExplorationPlannerTest` (9), `CargoDepositPlannerTest` (6), and all existing unit suites.
+- **Java Maven Unit Tests**: **117 tests, 0 failures** (`mvn test` in `paper-plugin/`).
+  - Covers `AgentEvaluationHarnessTest` (7), `AgentControllerTest` (3), `AgentModelsTest` (4), `ActionPreconditionsTest` (5), `ProtectionHookTest` (5), `ObstructionPolicyTest` (9), `DescentSimulatorTest` (7), `HarvestApproachPlannerTest` (2), `OperationJournalTest` (5), `OperationRecoveryTest` (6), `WoodTaskTest` (12), `ExplorationPlannerTest` (9), `CargoDepositPlannerTest` (6), and all existing unit suites.
 - **Node Brain Unit Tests**: **16 tests, 0 failures** (`npm test` in `brain/`).
   - Covers Turkish chat parsing, return-home intent, JEV model contract, OpenAI GPT-6 Luna contract, memory store, decision fallbacks, bounded item IDs, action allowlists, and fallback leaf clearing protection.
 - **Distribution Packages**:

@@ -21,10 +21,19 @@ public final class ActionPreconditions {
 
   private final ProtectionHook protectionHook;
   private final ActionBudget budget;
+  private final DescentCheck descentCheck;
+
+  @FunctionalInterface
+  interface DescentCheck { boolean isSafe(Location actor); }
 
   public ActionPreconditions(ProtectionHook protectionHook, ActionBudget budget) {
+    this(protectionHook,budget,actor->DescentSimulator.isSafeDescent(actor.getWorld(),actor.getBlockX(),actor.getBlockY(),actor.getBlockZ()));
+  }
+
+  ActionPreconditions(ProtectionHook protectionHook, ActionBudget budget, DescentCheck descentCheck) {
     this.protectionHook = Objects.requireNonNull(protectionHook, "protectionHook must not be null");
     this.budget = Objects.requireNonNull(budget, "budget must not be null");
+    this.descentCheck = Objects.requireNonNull(descentCheck,"descentCheck must not be null");
   }
 
   public ActionBudget budget() {
@@ -56,16 +65,21 @@ public final class ActionPreconditions {
     if (protectionHook.isProtected(block, actor)) {
       return ExecutionResult.preconditionFailed("Target block is protected against modification");
     }
-    if (materialPreference != null && !materialPreference.isBlank()) {
-      String expectedOutput = ResourceCatalog.outputMaterial(materialPreference);
-      if (expectedOutput == null && !block.getType().name().equalsIgnoreCase(materialPreference)) {
-        return ExecutionResult.preconditionFailed("Target block does not match requested preference: " + materialPreference);
-      }
+    if (materialPreference != null && !materialPreference.isBlank()
+        && !ResourceCatalog.matchesGatherTarget(block.getType().name(), materialPreference)) {
+      return ExecutionResult.preconditionFailed("Target block does not match requested preference: " + materialPreference);
     }
     return ExecutionResult.success("Gather preconditions satisfied");
   }
 
-  public ExecutionResult validateClear(Location actor, Block block, boolean isSupportLeaf, int routeClears, int jobClears) {
+  public static boolean isCurrentSupportLeaf(Location actor, Block block) {
+    return actor!=null&&block!=null&&actor.getWorld()!=null&&block.getWorld()!=null
+        &&actor.getWorld().getName().equals(block.getWorld().getName())
+        &&actor.getBlockX()==block.getX()&&actor.getBlockZ()==block.getZ()
+        &&block.getY()==actor.getBlockY()-1;
+  }
+
+  public ExecutionResult validateClear(Location actor, Block block, boolean offeredAsSupportLeaf, int routeClears, int jobClears) {
     if (actor == null || block == null) {
       return ExecutionResult.preconditionFailed("Actor location or block is null");
     }
@@ -84,14 +98,18 @@ public final class ActionPreconditions {
     if (distSq > MAX_REACH_SQ) {
       return ExecutionResult.preconditionFailed("Obstruction is out of reach");
     }
-    if (!ObstructionPolicy.isLeaf(block.getType())) {
-      return ExecutionResult.preconditionFailed("Only natural leaf obstructions may be cleared");
+    if (!ObstructionPolicy.isEligibleLeaf(block, null, null)) {
+      return ExecutionResult.preconditionFailed("Only loaded, dry, non-persistent natural leaf obstructions may be cleared");
     }
     if (protectionHook.isProtected(block, actor)) {
       return ExecutionResult.preconditionFailed("Obstruction is protected");
     }
-    if (isSupportLeaf && !DescentSimulator.isSafeDescent(block.getWorld(), actor.getBlockX(), actor.getBlockY(), actor.getBlockZ())) {
+    boolean currentlySupportsActor=isCurrentSupportLeaf(actor,block);
+    if (currentlySupportsActor && !descentCheck.isSafe(actor)) {
       return ExecutionResult.preconditionFailed("Support leaf descent simulation failed: unsafe drop");
+    }
+    if(offeredAsSupportLeaf!=currentlySupportsActor){
+      return ExecutionResult.preconditionFailed("Obstruction support relationship changed while awaiting decision");
     }
     return ExecutionResult.success("Clear preconditions satisfied");
   }

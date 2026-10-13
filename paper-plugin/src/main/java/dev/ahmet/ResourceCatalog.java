@@ -43,6 +43,19 @@ public final class ResourceCatalog {
         && resource.blockMaterials().contains(blockMaterial));
   }
 
+  /** Matches a supported gather preference using the same wood/resource rules as task planning. */
+  public static boolean matchesGatherTarget(String blockMaterial, String preference) {
+    if (blockMaterial == null || preference == null || preference.isBlank()) return false;
+    if (isPreference(preference)) return matchesBlockName(blockMaterial, preference);
+    if (WoodMaterials.isPreference(preference)) {
+      org.bukkit.Material woodMaterial = org.bukkit.Material.matchMaterial(blockMaterial);
+      return WoodMaterials.matchesPreference(woodMaterial, preference);
+    }
+    org.bukkit.Material material = org.bukkit.Material.matchMaterial(blockMaterial);
+    if (material != null && WoodMaterials.matchesPreference(material, preference)) return true;
+    return blockMaterial.equalsIgnoreCase(preference) && WoodMaterials.isAllowedName(blockMaterial);
+  }
+
   public static String outputMaterial(String preference) {
     if (!isPreference(preference)) return null;
     return BY_ITEM.values().stream().filter(resource -> preference.equals("item:" + resource.outputMaterial()))

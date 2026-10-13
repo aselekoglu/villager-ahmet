@@ -8,8 +8,8 @@ import java.util.Objects;
 import java.util.logging.Logger;
 
 /**
- * Controller orchestrating the AgentLoop lifecycle, goal evaluation,
- * typed action offering, decision validation, and state transitions.
+ * Deterministic controller and policy model used by production validation and the test harness.
+ * Observation-based goal evaluation is not wired into the production AhmetPlugin task loop.
  */
 public final class AgentController {
   private static final Logger LOGGER = Logger.getLogger(AgentController.class.getName());

@@ -22,7 +22,7 @@ The 1.21.6 vanilla item catalog and common-resource code path are implemented; v
 
 ## P1 — Real villager immersion & autonomy
 
-- [x] Unified AgentLoop / Controller harness: bounded observations, typed offered actions, deterministic server preconditions (`ActionPreconditions`), and replayable eval harness (`AgentEvaluationHarnessTest`).
+- [x] AgentController / precondition harness: typed offered actions, deterministic server preconditions (`ActionPreconditions`), and replayable evaluation tests (`AgentEvaluationHarnessTest`). `AgentObservation` and `evaluateGoal` remain harness-only; the production task loop remains in `AhmetPlugin`.
 - [x] Obstruction clearance & canopy navigation recovery: safe walkable approach, qualified leaf removal, safe descent simulation, and zero-cargo clear journal operation.
 - [x] External protection SPI (`ProtectionHook`, `CompositeProtectionHook`) with fail-closed safety.
 - [x] Structured player help requests (`BLOCKED_AWAITING_HELP`) when route retries or descent simulations fail.

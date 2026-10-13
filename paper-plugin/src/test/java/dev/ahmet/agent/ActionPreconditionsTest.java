@@ -37,6 +37,9 @@ public class ActionPreconditionsTest {
           case "getX" -> x;
           case "getY" -> y;
           case "getZ" -> z;
+          case "isSolid" -> material.isSolid();
+          case "isLiquid" -> false;
+          case "isPassable" -> !material.isSolid();
           default -> null;
         }
     );
@@ -84,6 +87,46 @@ public class ActionPreconditionsTest {
   }
 
   @Test
+  void gatherPreferenceMatchesWoodAndResourceCapabilitiesExactly() {
+    World world = mockWorld("world", true);
+    Location actor = new Location(world, 10.0, 64.0, 10.0);
+    ActionPreconditions pre = new ActionPreconditions((b, l) -> false, ActionBudget.DEFAULT);
+
+    assertTrue(pre.validateGather(actor, mockBlock(world, Material.OAK_LOG, 10, 64, 10), "any", 0).isSuccess());
+    assertTrue(pre.validateGather(actor, mockBlock(world, Material.BIRCH_LOG, 10, 64, 10), "any", 0).isSuccess());
+    assertTrue(pre.validateGather(actor, mockBlock(world, Material.OAK_LOG, 10, 64, 10), "oak", 0).isSuccess());
+    assertFalse(pre.validateGather(actor, mockBlock(world, Material.BIRCH_LOG, 10, 64, 10), "oak", 0).isSuccess());
+    assertTrue(pre.validateGather(actor, mockBlock(world, Material.DIRT, 10, 64, 10), "item:DIRT", 0).isSuccess());
+    assertFalse(pre.validateGather(actor, mockBlock(world, Material.OAK_LOG, 10, 64, 10), "item:DIRT", 0).isSuccess());
+  }
+
+
+  @Test
+  void clearRecomputesSupportRelationshipAndAlwaysSimulatesCurrentSupport() {
+    World world=mockWorld("world",true);
+    Location actor=new Location(world,10.2,64,10.2);
+    Block support=mockBlock(world,Material.OAK_LEAVES,10,63,10);
+    var safeCalls=new java.util.concurrent.atomic.AtomicInteger();
+    ActionPreconditions safePre=new ActionPreconditions((b,l)->false,ActionBudget.DEFAULT,loc->{safeCalls.incrementAndGet();return true;});
+    assertTrue(safePre.validateClear(actor,support,true,0,0).isSuccess(), "Current safe support may be cleared");
+    assertEquals(1,safeCalls.get());
+
+    var unsafeCalls=new java.util.concurrent.atomic.AtomicInteger();
+    ActionPreconditions unsafePre=new ActionPreconditions((b,l)->false,ActionBudget.DEFAULT,loc->{unsafeCalls.incrementAndGet();return false;});
+    assertFalse(unsafePre.validateClear(actor,support,true,0,0).isSuccess(), "Unsafe current support must be rejected");
+    assertFalse(unsafePre.validateClear(actor,support,false,0,0).isSuccess(),
+        "A stale false offer flag must not bypass current support simulation");
+    assertEquals(2,unsafeCalls.get());
+
+    Block sideLeaf=mockBlock(world,Material.OAK_LEAVES,10,65,10);
+    var sideCalls=new java.util.concurrent.atomic.AtomicInteger();
+    ActionPreconditions sidePre=new ActionPreconditions((b,l)->false,ActionBudget.DEFAULT,loc->{sideCalls.incrementAndGet();return true;});
+    assertFalse(sidePre.validateClear(actor,sideLeaf,true,0,0).isSuccess(),
+        "A stale true support offer must be rejected after it becomes a side leaf");
+    assertEquals(0,sideCalls.get(), "Current side leaves must not run descent simulation");
+  }
+
+  @Test
   void testClearObstructionBudgetPrecondition() {
     World world = mockWorld("world", true);
     Location actor = new Location(world, 10.0, 64.0, 10.0);
@@ -94,6 +137,11 @@ public class ActionPreconditionsTest {
     // Within budget
     ExecutionResult ok = pre.validateClear(actor, leaf, false, 0, 0);
     assertTrue(ok.isSuccess());
+    assertFalse(pre.validateClear(actor, mockBlock(world, Material.OAK_LOG, 10, 65, 10), false, 0, 0).isSuccess(),
+        "Unknown/non-leaf obstructions must fail closed");
+    ActionPreconditions protectedPre = new ActionPreconditions((b, l) -> true, ActionBudget.DEFAULT);
+    assertFalse(protectedPre.validateClear(actor, leaf, false, 0, 0).isSuccess(),
+        "Protected leaves must fail closed");
 
     // Route budget exhausted (max 3)
     ExecutionResult routeExhausted = pre.validateClear(actor, leaf, false, 3, 0);

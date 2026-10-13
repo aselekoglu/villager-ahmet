@@ -19,7 +19,35 @@ import org.bukkit.block.data.type.Leaves;
 public final class ObstructionPolicy {
   private ObstructionPolicy() {}
 
-  record CandidateObstruction(Block block, boolean isSupportLeaf, double distance) {}
+  record CandidateObstruction(Block block, boolean isSupportLeaf, double distance, String worldName,
+      int x, int y, int z, Material offeredMaterial, String offeredBlockData,
+      String actorWorldName, int actorBlockX, int actorBlockY, int actorBlockZ) {
+    CandidateObstruction(Block block, boolean isSupportLeaf, double distance) {
+      this(block,isSupportLeaf,distance,block.getWorld().getName(),block.getX(),block.getY(),block.getZ(),
+          block.getType(),block.getBlockData()==null?null:block.getBlockData().getAsString(),null,-1,-1,-1);
+    }
+    CandidateObstruction(Block block, boolean isSupportLeaf, double distance, Location actor) {
+      this(block,isSupportLeaf,distance,block.getWorld().getName(),block.getX(),block.getY(),block.getZ(),
+          block.getType(),block.getBlockData()==null?null:block.getBlockData().getAsString(),
+          actor.getWorld().getName(),actor.getBlockX(),actor.getBlockY(),actor.getBlockZ());
+    }
+  }
+
+  static boolean matchesOfferedActor(CandidateObstruction offered, Location actor) {
+    return offered!=null&&actor!=null&&actor.getWorld()!=null&&offered.actorWorldName()!=null
+        &&offered.actorWorldName().equals(actor.getWorld().getName())
+        &&offered.actorBlockX()==actor.getBlockX()&&offered.actorBlockY()==actor.getBlockY()
+        &&offered.actorBlockZ()==actor.getBlockZ();
+  }
+
+  static boolean matchesOfferedState(CandidateObstruction offered, Block current) {
+    return offered!=null&&current!=null&&current.getWorld()!=null
+        &&offered.worldName().equals(current.getWorld().getName())
+        &&offered.x()==current.getX()&&offered.y()==current.getY()&&offered.z()==current.getZ()
+        &&offered.offeredMaterial()==current.getType()
+        &&offered.offeredBlockData()!=null&&current.getBlockData()!=null
+        &&offered.offeredBlockData().equals(current.getBlockData().getAsString());
+  }
 
   public static boolean isLeaf(Material material) {
     if (material == null) return false;
@@ -31,7 +59,7 @@ public final class ObstructionPolicy {
     }
   }
 
-  static boolean isEligibleLeaf(Block block, ProtectedHomeArea protectedHome, PlayerPlacedWoodRegistry placedRegistry) {
+  public static boolean isEligibleLeaf(Block block, ProtectedHomeArea protectedHome, PlayerPlacedWoodRegistry placedRegistry) {
     if (block == null) return false;
     World world = block.getWorld();
     if (world == null || !world.isChunkLoaded(block.getX() >> 4, block.getZ() >> 4)) return false;
@@ -58,7 +86,7 @@ public final class ObstructionPolicy {
     // Check support leaf under feet
     Block floorBlock = world.getBlockAt(bx, by - 1, bz);
     if (isEligibleLeaf(floorBlock, protectedHome, placedRegistry) && DescentSimulator.isSafeDescent(world, bx, by, bz)) {
-      supportCandidate = new CandidateObstruction(floorBlock, true, 1.0);
+      supportCandidate = new CandidateObstruction(floorBlock, true, 1.0,npcLoc);
     }
 
     // Check horizontal neighbors at feet level and head level, plus directly above head
@@ -73,7 +101,7 @@ public final class ObstructionPolicy {
           Block b = world.getBlockAt(x, y, z);
           if (isEligibleLeaf(b, protectedHome, placedRegistry)) {
             double distToNpc = Math.sqrt(dx * dx + dy * dy + dz * dz);
-            sideObstructions.add(new CandidateObstruction(b, false, distToNpc));
+            sideObstructions.add(new CandidateObstruction(b, false, distToNpc,npcLoc));
           }
         }
       }

@@ -2,7 +2,7 @@
 
 ## Automated
 
-- [x] Regression tests for resource scans over wood materials, bounded incremental scan behavior, checked task-save failure locking, deposit replay conflicts and inventory shape, metadata-bearing stacks, authorization, hazard blocks, safe target centering, tree canopy clearance, descent simulation, protection SPI, and unified agent harness pass in the Java suite (113 tests, 0 failures).
+- [x] Regression tests for resource scans over wood materials, bounded incremental scan behavior, checked task-save failure locking, deposit replay conflicts and inventory shape, metadata-bearing stacks, authorization, hazard blocks, safe target centering, current-support descent checks and stale async obstruction state, tree canopy clearance, descent simulation, protection SPI, and controller/precondition harness pass in the Java suite (117 tests, 0 failures).
 - [ ] Paper runtime validation confirms per-tick scan budgeting remains responsive and candidate invalidation behaves correctly; unit tests do not establish scan timing.
 
 - [x] Node test suite: parse Turkish/English oak job, reject invalid quantity, busy or absent chest, persist chat, validate action allowlist, verify decision fallback never selects block clearing mutation (16 tests, 0 failures).
@@ -20,7 +20,7 @@
 - [x] Player-placed wood markers round-trip through config persistence; protected-home geometry and world boundaries have unit coverage. Live pre-existing-home exclusion verified in-game (house logs skipped, 8 placed logs dynamically recorded in config).
 - [x] Resource exploration planner searches 8 candidate directions within allowable home bounds outside protected structures; multi-step home return calculates 16-block waypoints with obstacle avoidance offsets. Node chat recognizes return-home intent.
 - [x] Tree canopy navigation recovery and safe leaf clearance: `HarvestApproachPlanner` checks walkable positions before mutations; `ObstructionPolicy` restricts candidate blocks to natural non-persistent leaves; `DescentSimulator` simulates falls $\le 2$ blocks to solid ground; `OperationJournal.Clear` logs atomic zero-cargo clearing.
-- [x] Unified AgentLoop/Controller harness with `ProtectionHook` SPI: evaluates observations, budgets, and typed offered actions; enforces deterministic server main-thread preconditions (`ActionPreconditions`); rejects stale, invalid, or fallback model mutations; supports structured player help (`BLOCKED_AWAITING_HELP`). Evaluated via `AgentEvaluationHarnessTest` (7 replayable scenarios passing).
+- [x] AgentController/precondition harness with `ProtectionHook` SPI tests budgets, typed offered actions, stale-decision rejection, preconditions, and structured player help (`BLOCKED_AWAITING_HELP`). `AgentObservation` and `evaluateGoal` are harness-only; the production task loop remains in `AhmetPlugin` and does not use observation-based goal evaluation. `AgentEvaluationHarnessTest` covers replayable scenarios.
 
 ## Real game (record results and logs, do not infer)
 

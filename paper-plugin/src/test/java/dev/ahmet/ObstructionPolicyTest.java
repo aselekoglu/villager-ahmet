@@ -3,6 +3,9 @@ package dev.ahmet;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import dev.ahmet.agent.ActionBudget;
+import dev.ahmet.agent.ActionPreconditions;
+
 import java.lang.reflect.Proxy;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -77,12 +80,18 @@ final class ObstructionPolicyTest {
   void persistentLeavesAreRejectedAsPlayerPlaced() {
     Block block = mockBlock(Material.OAK_LEAVES, true, false, true, "world", 10, 70, 15);
     assertFalse(ObstructionPolicy.isEligibleLeaf(block, null, null));
+    var actor=new org.bukkit.Location(block.getWorld(),block.getX(),block.getY(),block.getZ());
+    var result=new ActionPreconditions((b,l)->false,ActionBudget.DEFAULT).validateClear(actor,block,false,0,0);
+    assertFalse(result.isSuccess(), "Deterministic preconditions must reject persistent leaves too");
   }
 
   @Test
   void waterloggedLeavesAreRejected() {
     Block block = mockBlock(Material.OAK_LEAVES, false, true, true, "world", 10, 70, 15);
     assertFalse(ObstructionPolicy.isEligibleLeaf(block, null, null));
+    var actor=new org.bukkit.Location(block.getWorld(),block.getX(),block.getY(),block.getZ());
+    var result=new ActionPreconditions((b,l)->false,ActionBudget.DEFAULT).validateClear(actor,block,false,0,0);
+    assertFalse(result.isSuccess(), "Deterministic preconditions must reject waterlogged leaves too");
   }
 
   @Test
@@ -116,4 +125,31 @@ final class ObstructionPolicyTest {
 
     assertFalse(ObstructionPolicy.isEligibleLeaf(block, home, null));
   }
+  @Test
+  void asyncObstructionOfferRejectsChangedBlockStateAtSameLocation() {
+    var currentType=new java.util.concurrent.atomic.AtomicReference<>(Material.OAK_LEAVES);
+    World world=(World)Proxy.newProxyInstance(World.class.getClassLoader(),new Class<?>[]{World.class},
+        (p,m,a)->switch(m.getName()){case "getName"->"world";case "isChunkLoaded"->true;default->null;});
+    Object data=Proxy.newProxyInstance(org.bukkit.block.data.BlockData.class.getClassLoader(),
+        new Class<?>[]{org.bukkit.block.data.BlockData.class},(p,m,a)->switch(m.getName()){
+          case "getAsString"->"minecraft:"+currentType.get().name().toLowerCase();
+          case "getMaterial"->currentType.get();default->null;});
+    Block block=(Block)Proxy.newProxyInstance(Block.class.getClassLoader(),new Class<?>[]{Block.class},
+        (p,m,a)->switch(m.getName()){case "getWorld"->world;case "getType"->currentType.get();case "getX"->4;case "getY"->70;case "getZ"->2;case "getBlockData"->data;default->null;});
+    var candidate=new ObstructionPolicy.CandidateObstruction(block,false,1.0);
+    assertTrue(ObstructionPolicy.matchesOfferedState(candidate,block));
+    currentType.set(Material.SPRUCE_LEAVES);
+    assertFalse(ObstructionPolicy.matchesOfferedState(candidate,block));
+  }
+
+  @Test
+  void asynchronousOfferIsBoundToOriginalActorBlockPosition() {
+    Block block=mockBlock(Material.OAK_LEAVES,false,false,true,"world",10,63,10);
+    var offeredActor=new org.bukkit.Location(block.getWorld(),10.2,64,10.2);
+    var candidate=new ObstructionPolicy.CandidateObstruction(block,true,1.0,offeredActor);
+    assertTrue(ObstructionPolicy.matchesOfferedActor(candidate,offeredActor));
+    var movedActor=new org.bukkit.Location(block.getWorld(),11.2,64,10.2);
+    assertFalse(ObstructionPolicy.matchesOfferedActor(candidate,movedActor));
+  }
+
 }

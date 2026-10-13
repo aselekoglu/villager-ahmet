@@ -53,11 +53,11 @@ final class WoodMaterials {
   }
 
   static boolean matchesPreference(Material material, String preference) {
-    if (!isPreference(preference)) return false;
+    if (material == null || !isPreference(preference)) return false;
     if (ResourceCatalog.isPreference(preference)) return false;
-    if (!isCollectableWood(material)) return false;
-    if ("any".equals(preference)) return true;
     if ("bamboo".equals(preference)) return material == Material.BAMBOO;
+    if (!isWoodName(material.name())) return false;
+    if ("any".equals(preference)) return true;
     if (material == Material.BAMBOO) return false;
     String name = material.name().startsWith("STRIPPED_")
         ? material.name().substring("STRIPPED_".length()) : material.name();
