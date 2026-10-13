@@ -42,17 +42,26 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 ### G. Multi-Step Safe Home Return (Latest Addition)
 - `ExplorationPlanner.findStepTowardsHome(...)`: When Ahmet is far from home (or returning home when idle after delivery/cancellation), calculates 16-block intermediate waypoints along the direct vector towards home on safe ground.
 - Obstacle avoidance: Rotates angle offsets (0°, ±25°, ±45°) on successive retry attempts if straight lines are obstructed. Stops cleanly upon arrival within 2.5 blocks of home.
-- `/ahmet home` / `/ahmet return` command and Turkish chat intent (`"Ahmet, eve dön"`, `"Ahmet, evine git"`) via `isReturnHome`.
-- Updated `navigate()` check: destinations moving Ahmet closer to home or targeting chest/home are never blocked even if Ahmet was outdoor-summoned beyond 32 blocks.
+### H. Tree Canopy Navigation Recovery & Safe Leaf Clearing
+- `HarvestApproachPlanner`: Selects walkable approach block before attempting block mutations.
+- `ObstructionPolicy`: Restricts clearance to natural, non-persistent, non-waterlogged, non-hazard leaves.
+- `DescentSimulator`: Simulates safe vertical landing ($\le 2$ blocks drop) before permitting removal of support leaves.
+- `OperationJournal.Clear`: Zero-cargo atomic journal operation ensuring fail-closed recovery on crash.
+
+### I. Unified AgentLoop & Controller Harness
+- Modular state machine (`AgentState`, `AgentGoal`, `OfferedAction`, `ActionBudget`, `ExecutionResult`).
+- Deterministic server main-thread validation via `ActionPreconditions` before any world/inventory mutation.
+- `ProtectionHook` SPI and `CompositeProtectionHook` providing fail-closed protection checks.
+- Structured player help requests (`BLOCKED_AWAITING_HELP`) when route retries or safe clearance are exhausted.
 
 ---
 
 ## 3. Test Suites & Verification Evidence
 
-- **Java Maven Unit Tests**: **72 tests, 0 failures** (`mvn test` in `paper-plugin/`).
-  - Also covers `TaskAuthorizationTest` (2), `SafeGroundPolicyTest` (1), `NavigationTargetTest` (1), `IncrementalTargetScannerTest` (2), `TaskStateSaveFailureTest` (1), and `DecisionRetryTest` (1), in addition to the task, journal, catalog, and navigation suites.
-- **Node Brain Unit Tests**: **15 tests, 0 failures** (`npm test` in `brain/`).
-  - Covers Turkish chat parsing, return-home intent (`isReturnHome`), JEV model contract, OpenAI GPT-6 Luna contract, memory store, decision fallbacks, bounded item IDs, and action allowlists.
+- **Java Maven Unit Tests**: **113 tests, 0 failures** (`mvn test` in `paper-plugin/`).
+  - Covers `AgentEvaluationHarnessTest` (7), `AgentControllerTest` (3), `AgentModelsTest` (4), `ActionPreconditionsTest` (3), `ProtectionHookTest` (5), `ObstructionPolicyTest` (7), `DescentSimulatorTest` (7), `HarvestApproachPlannerTest` (2), `OperationJournalTest` (5), `OperationRecoveryTest` (6), `WoodTaskTest` (12), `ExplorationPlannerTest` (9), `CargoDepositPlannerTest` (6), and all existing unit suites.
+- **Node Brain Unit Tests**: **16 tests, 0 failures** (`npm test` in `brain/`).
+  - Covers Turkish chat parsing, return-home intent, JEV model contract, OpenAI GPT-6 Luna contract, memory store, decision fallbacks, bounded item IDs, action allowlists, and fallback leaf clearing protection.
 - **Distribution Packages**:
   - `server-live/plugins/VillagerAhmet.jar` (SHA-256: `400346320a4d55f36e12c608b0e12749db7aeebb80059d22f980f620be6690c7`)
   - `dist/villager-ahmet-plugins-paper-1.21.6.zip` (SHA-256: `39d182e9b81a5319affa07edf1b3883e1c14573ecb13a893bf189884cf67bfe0`)

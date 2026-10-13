@@ -2,10 +2,10 @@
 
 ## Automated
 
-- [x] Regression tests for resource scans over wood materials, bounded incremental scan behavior, checked task-save failure locking, deposit replay conflicts and inventory shape, metadata-bearing stacks, authorization, hazard blocks, safe target centering, and journal v3 compatibility pass in the Java suite (72 tests, 0 failures).
+- [x] Regression tests for resource scans over wood materials, bounded incremental scan behavior, checked task-save failure locking, deposit replay conflicts and inventory shape, metadata-bearing stacks, authorization, hazard blocks, safe target centering, tree canopy clearance, descent simulation, protection SPI, and unified agent harness pass in the Java suite (113 tests, 0 failures).
 - [ ] Paper runtime validation confirms per-tick scan budgeting remains responsive and candidate invalidation behaves correctly; unit tests do not establish scan timing.
 
-- [x] Node test suite: parse Turkish/English oak job, reject invalid quantity, busy or absent chest, persist chat, validate action allowlist.
+- [x] Node test suite: parse Turkish/English oak job, reject invalid quantity, busy or absent chest, persist chat, validate action allowlist, verify decision fallback never selects block clearing mutation (16 tests, 0 failures).
 - [ ] CI Node job passes in connected environment.
 - [x] Java 21 + Maven build succeeds using pinned Citizens and Paper dependencies.
 - [x] Local mock HTTP smoke test passes (loopback permission enabled for the run).
@@ -18,7 +18,9 @@
 - [x] Java task model preserves partial-delivery state across restart and only finishes after cargo is deposited; live unreachable-path fallback and chest delivery still require an in-game check.
 - [x] Paper 1.21.6 integration probe confirmed a double chest exposes 27 slots through `getBlockInventory()` but 54 through `getInventory()`; with the first half full, the plugin's planner successfully placed birch logs in the empty second half.
 - [x] Player-placed wood markers round-trip through config persistence; protected-home geometry and world boundaries have unit coverage. Live pre-existing-home exclusion verified in-game (house logs skipped, 8 placed logs dynamically recorded in config).
-- [x] Resource exploration planner searches 8 candidate directions within allowable home bounds outside protected structures; multi-step home return calculates 16-block waypoints with obstacle avoidance offsets. Unit test suite passes 72 tests with 0 failures; Node chat recognizes return-home intent.
+- [x] Resource exploration planner searches 8 candidate directions within allowable home bounds outside protected structures; multi-step home return calculates 16-block waypoints with obstacle avoidance offsets. Node chat recognizes return-home intent.
+- [x] Tree canopy navigation recovery and safe leaf clearance: `HarvestApproachPlanner` checks walkable positions before mutations; `ObstructionPolicy` restricts candidate blocks to natural non-persistent leaves; `DescentSimulator` simulates falls $\le 2$ blocks to solid ground; `OperationJournal.Clear` logs atomic zero-cargo clearing.
+- [x] Unified AgentLoop/Controller harness with `ProtectionHook` SPI: evaluates observations, budgets, and typed offered actions; enforces deterministic server main-thread preconditions (`ActionPreconditions`); rejects stale, invalid, or fallback model mutations; supports structured player help (`BLOCKED_AWAITING_HELP`). Evaluated via `AgentEvaluationHarnessTest` (7 replayable scenarios passing).
 
 ## Real game (record results and logs, do not infer)
 

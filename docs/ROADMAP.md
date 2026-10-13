@@ -20,13 +20,17 @@ The 1.21.6 vanilla item catalog and common-resource code path are implemented; v
 3. [x] Add common block/drop mappings, minimum tools, bounded target scans, mixed-item cargo, and journal output-item persistence.
 4. [ ] Finish runtime tests for the item search command, actual Paper drop results, and each common collection group in a disposable Paper world.
 
-## P1 — Real villager immersion
+## P1 — Real villager immersion & autonomy
 
-- Citizen NPC schedule: wake, wander, work, sleep at bed and village home.
-- Context-aware conversational memory; player relationships and session-scoped summaries.
-- Avatar gestures: look at players, arm swing while chopping, working sounds, speech proximity.
-- Perception: inventories/blocks in loaded chunks, player positions with privacy bounds.
-- Durable task queue, crafting, delivery, farm harvesting, replanning and action verification.
+- [x] Unified AgentLoop / Controller harness: bounded observations, typed offered actions, deterministic server preconditions (`ActionPreconditions`), and replayable eval harness (`AgentEvaluationHarnessTest`).
+- [x] Obstruction clearance & canopy navigation recovery: safe walkable approach, qualified leaf removal, safe descent simulation, and zero-cargo clear journal operation.
+- [x] External protection SPI (`ProtectionHook`, `CompositeProtectionHook`) with fail-closed safety.
+- [x] Structured player help requests (`BLOCKED_AWAITING_HELP`) when route retries or descent simulations fail.
+- [ ] Citizen NPC schedule: wake, wander, work, sleep at bed and village home.
+- [ ] Context-aware conversational memory; player relationships and session-scoped summaries.
+- [ ] Avatar gestures: look at players, arm swing while chopping, working sounds, speech proximity.
+- [ ] Perception: inventories/blocks in loaded chunks, player positions with privacy bounds.
+- [ ] Crafting, farm harvesting, multi-villager coordination.
 
 ## P2 — Multiple villagers
 
