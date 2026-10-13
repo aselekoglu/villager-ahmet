@@ -1,6 +1,7 @@
 package dev.ahmet;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -97,6 +98,49 @@ final class OperationJournalTest {
     assertTrue(afterSecondRestart.pendingClear().isEmpty());
     assertEquals(List.of(clear), afterSecondRestart.clears());
     assertTrue(afterSecondRestart.hasOperations());
+    assertTrue(afterSecondRestart.hasCommittedOperationsReadyForCheckpoint());
+    afterSecondRestart.clearAfterWorldSave();
+    assertFalse(afterSecondRestart.hasOperations());
+  }
+
+  @Test
+  void committedV3ClearOnlyJournalWithMultipleRecordsCanBeCheckpointed() throws Exception {
+    Path path=temp.resolve("committed-clear-only-v3.json");
+    Files.writeString(path,"""
+        {"version":3,"harvests":[],"clears":[
+          {"taskId":"task-clear","world":"world","x":5,"y":70,"z":10,"material":"OAK_LEAVES"},
+          {"taskId":"task-clear","world":"world","x":6,"y":70,"z":10,"material":"BIRCH_LEAVES"}
+        ]}
+        """);
+    OperationJournal journal=new OperationJournal(path);
+    journal.load();
+    assertEquals(2,journal.clears().size());
+    for(var clear:journal.clears())assertEquals(OperationRecovery.ClearDisposition.ALREADY_APPLIED,
+        OperationRecovery.classifyClear(clear,"task-clear","world","AIR"));
+    assertTrue(journal.hasCommittedOperationsReadyForCheckpoint());
+  }
+
+  @Test
+  void mixedCommittedHarvestAndClearHistoryCanBeCheckpointedAfterReconciliation() throws Exception {
+    Path path=temp.resolve("mixed-committed-history.json");
+    OperationJournal journal=new OperationJournal(path);
+    journal.load();
+    journal.prepareHarvest(new OperationJournal.Harvest("task-mixed","world",1,64,1,0,0));
+    journal.completeHarvest();
+    journal.prepareClear(new OperationJournal.Clear("task-mixed","world",2,65,2,"OAK_LEAVES"));
+    journal.completeClear();
+    assertTrue(journal.hasCommittedOperationsReadyForCheckpoint());
+    journal.clearAfterWorldSave();
+    assertFalse(journal.hasOperations());
+  }
+
+  @Test
+  void pendingClearCannotBeMistakenForCheckpointableCommittedJournal() throws Exception {
+    Path path=temp.resolve("pending-clear-only.json");
+    OperationJournal journal=new OperationJournal(path);
+    journal.load();
+    journal.prepareClear(new OperationJournal.Clear("task-clear","world",5,70,10,"OAK_LEAVES"));
+    assertFalse(journal.hasCommittedOperationsReadyForCheckpoint());
   }
 }
 

@@ -10,7 +10,13 @@ final class OperationRecovery {
   enum ClearDisposition { NOT_APPLIED, ALREADY_APPLIED, CONFLICT }
 
   static ClearDisposition classifyClear(OperationJournal.Clear operation, String taskId, String blockMaterial) {
-    if (operation == null || !Objects.equals(operation.taskId(), taskId) || blockMaterial == null) {
+    return classifyClear(operation,taskId,operation==null?null:operation.world(),blockMaterial);
+  }
+
+  static ClearDisposition classifyClear(OperationJournal.Clear operation, String taskId,
+      String worldName, String blockMaterial) {
+    if (operation == null || !Objects.equals(operation.taskId(), taskId)
+        || !Objects.equals(operation.world(),worldName) || blockMaterial == null) {
       return ClearDisposition.CONFLICT;
     }
     if (operation.material().equals(blockMaterial)) return ClearDisposition.NOT_APPLIED;

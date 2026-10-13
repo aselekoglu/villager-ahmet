@@ -8,7 +8,7 @@ import java.util.Optional;
 /** Small, explicit capability registry; most catalog items intentionally have no gather action. */
 public final class ResourceCatalog {
   private static final Map<String, Resource> BY_ITEM = Map.of(
-      "dirt", new Resource("minecraft:dirt", "DIRT", List.of("DIRT", "GRASS_BLOCK", "COARSE_DIRT"), null),
+      "dirt", new Resource("minecraft:dirt", "DIRT", List.of("DIRT", "GRASS_BLOCK"), null),
       "sand", new Resource("minecraft:sand", "SAND", List.of("SAND"), null),
       "red_sand", new Resource("minecraft:red_sand", "RED_SAND", List.of("RED_SAND"), null),
       "cobblestone", new Resource("minecraft:cobblestone", "COBBLESTONE", List.of("STONE"), "WOODEN_PICKAXE"),

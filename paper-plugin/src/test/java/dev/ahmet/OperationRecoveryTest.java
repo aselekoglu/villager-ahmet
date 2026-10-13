@@ -71,6 +71,8 @@ final class OperationRecoveryTest {
         OperationRecovery.classifyClear(clear, "task-c", "STONE"));
     assertEquals(OperationRecovery.ClearDisposition.CONFLICT,
         OperationRecovery.classifyClear(clear, "different-task", "AIR"));
+    assertEquals(OperationRecovery.ClearDisposition.CONFLICT,
+        OperationRecovery.classifyClear(clear, "task-c", "other-world", "AIR"));
   }
 }
 

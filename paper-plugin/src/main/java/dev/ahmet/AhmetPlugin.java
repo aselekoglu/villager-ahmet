@@ -387,12 +387,17 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
           else if(spec.get("type").getAsString().equals("collect_item")&&spec.has("itemId"))
             preference=ResourceCatalog.preferenceFor(spec.get("itemId").getAsString()).orElse(null);
         }
-        if(preference!=null&&amount>=1&&amount<=64&&WoodMaterials.isPreference(preference)
-            &&!task.active&&task.cargo==0&&!journal.hasOperations()&&chestLocation!=null
-            &&chestLocation.getWorld().equals(npc.getEntity().getWorld())){
-          task.start(player.getUniqueId(),amount,preference);treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Task started via chat");controller.clearHelp();persist();event("task_started",amount);
-        }else{
-          answer="Bu item kataloğumda tanımlı, ancak güvenli toplama yeteneğim henüz yok. Şimdilik yaygın odun, toprak, kum, taş, kömür, demir ve altın kaynaklarını isteyebilirsin.";
+        boolean validIntent=preference!=null&&amount>=1&&amount<=64&&WoodMaterials.isPreference(preference);
+        boolean chestBound=chestLocation!=null&&chestLocation.getWorld().equals(npc.getEntity().getWorld());
+        TaskAdmission.Result admission=TaskAdmission.evaluate(validIntent,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound);
+        switch(admission){
+          case ACCEPT -> {
+            task.start(player.getUniqueId(),amount,preference);treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Task started via chat");controller.clearHelp();persist();event("task_started",amount);
+          }
+          case UNSUPPORTED -> answer="Bu item kataloğumda tanımlı, ancak güvenli toplama yeteneğim henüz yok. Şimdilik yaygın odun, toprak, kum, taş, kömür, demir ve altın kaynaklarını isteyebilirsin.";
+          case RECOVERY_REQUIRED -> {getLogger().warning("Chat task request rejected because operation recovery/checkpoint is pending.");answer="Görev günlüğü kurtarma veya dünya kaydı bekliyor; güvenli duruma gelince tekrar dene.";}
+          case BUSY -> answer="Önce mevcut görevi bitir veya taşıdığım kaynakları /ahmet deliver ile teslim et.";
+          case CHEST_REQUIRED -> answer="Önce Ahmet'le aynı dünyada bir teslimat sandığı bağla: sandığa bakıp /ahmet chest kullan.";
         }
       }
       say(answer);
@@ -708,10 +713,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         }
 
         controller.transitionTo(AgentState.EXECUTING,"Clearing obstruction: "+block.getType().name());
-        clearObstruction(block);
+        if(!clearObstruction(block))return;
         routeClears++;
-        task.recordClear();
-        persist();
         getLogger().info("Obstruction cleared by JEV ("+model+"): "+block.getType().name()+" at "+coords(block.getLocation())+", routeClears="+routeClears+", jobClears="+task.cleared);
         controller.transitionTo(AgentState.NAVIGATING,"Resuming navigation after clear");
         if(navigationGoal!=null){
@@ -724,16 +727,17 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     }));
     return true;
   }
-  private void clearObstruction(Block block){
+  private boolean clearObstruction(Block block){
     OperationJournal.Clear operation=new OperationJournal.Clear(task.taskId,block.getWorld().getName(),
         block.getX(),block.getY(),block.getZ(),block.getType().name());
-    try{
-      journal.prepareClear(operation);
-      block.setType(Material.AIR,false);
-      journal.completeClear();
-    }catch(Exception e){
-      blockRecovery("Clear transaction is pending; the job is paused",e);
-    }
+    return ClearTransaction.execute(
+        ()->{task.recordClear();persist();},
+        ()->journal.prepareClear(operation),
+        ()->block.setType(Material.AIR,false),
+        journal::completeClear,
+        ()->saveJournalWorlds(block.getWorld()),
+        journal::clearAfterWorldSave,
+        failure->blockRecovery("Clear transaction failed; recovery is locked and its journal is retained",failure));
   }
   private JsonObject candidate(String id,String description){JsonObject result=new JsonObject();result.addProperty("id",id);result.addProperty("description",description);return result;}
 
@@ -839,7 +843,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         World world=Bukkit.getWorld(operation.world());
         if(world==null){blockRecovery("Clear journal world is unavailable: "+operation.world(),null);return;}
         Block block=world.getBlockAt(operation.x(),operation.y(),operation.z());
-        var disposition=OperationRecovery.classifyClear(operation,task.taskId,block.getType().name());
+        var disposition=OperationRecovery.classifyClear(operation,task.taskId,world.getName(),block.getType().name());
         switch(disposition){
           case NOT_APPLIED -> journal.discardPendingClear();
           case ALREADY_APPLIED -> journal.completeClear();
@@ -899,6 +903,10 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         if(disposition==OperationRecovery.DepositDisposition.APPLY)task.deposit(operation.effectiveMaterial(),operation.moved());
         persist();
         saveJournalWorlds(world);
+        journal.clearAfterWorldSave();
+      }
+      if(journal.hasCommittedOperationsReadyForCheckpoint()){
+        saveJournalWorlds(null);
         journal.clearAfterWorldSave();
       }
       finishTaskIfReady();

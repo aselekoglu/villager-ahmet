@@ -214,3 +214,44 @@ The current copied LAN server has `online-mode=false` by explicit request and `w
 - TypeSafe API schema: <https://api.typesafe.ai/openapi.json>
 - OpenAI GPT-6 Luna model page: <https://developers.openai.com/api/docs/models/gpt-6-luna>
 - OpenAI Chat Completions reference: <https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create>
+
+## Disposable Paper item catalog and drop verification — 2026-10-13
+
+- Created `/private/tmp/villager-ahmet-runtime-verify-20261013` with no copied world data. It ran the verified remediated plugin JAR (SHA-256 `9f3593a80f215fb4158cfc05329e97a2fac93c2734e0753f0852f984e2bc0e64`), Paper 1.21.6 build 48, and Citizens 2.0.41 build 4138. Startup completed with `Done (18.853s)`.
+- The disposable Paper server bound only to `127.0.0.1:58828`, with `online-mode=true` and whitelist enabled. Its separate brain bound to `127.0.0.1:3199`, used `mock` chat/decision modes, a fresh test-only bridge token, and a sanitized environment without model API credentials. No live server or user world was accessed. Both processes stopped cleanly.
+- Console `/ahmet items raw_iron` showed `minecraft:raw_iron` as `collect_resource`; `/ahmet items dirt`, `cobblestone`, `coal`, and `raw_gold` showed their supported output entries. `/ahmet items diamond` listed diamond as not gatherable. The catalog reported 1,414 entries. `/ahmet items coarse_dirt` listed the item as not gatherable.
+- A temporary main-thread probe set each source block in the disposable world, called the pinned Paper runtime `Block.getDrops` with the configured minimum tool, recorded the exact drops, then restored each position to air:
+
+  | Source block | Tool | Paper drop |
+  |---|---|---|
+  | DIRT | none | DIRT ×1 |
+  | GRASS_BLOCK | none | DIRT ×1 |
+  | COARSE_DIRT | none | COARSE_DIRT ×1 |
+  | SAND | none | SAND ×1 |
+  | RED_SAND | none | RED_SAND ×1 |
+  | STONE | WOODEN_PICKAXE | COBBLESTONE ×1 |
+  | COAL_ORE | WOODEN_PICKAXE | COAL ×1 |
+  | DEEPSLATE_COAL_ORE | WOODEN_PICKAXE | COAL ×1 |
+  | IRON_ORE | STONE_PICKAXE | RAW_IRON ×1 |
+  | DEEPSLATE_IRON_ORE | STONE_PICKAXE | RAW_IRON ×1 |
+  | GOLD_ORE | IRON_PICKAXE | RAW_GOLD ×1 |
+  | DEEPSLATE_GOLD_ORE | IRON_PICKAXE | RAW_GOLD ×1 |
+
+- **Mapping discrepancy observed at probe time:** `ResourceCatalog` then included `COARSE_DIRT` in the dirt input group, but Paper dropped `COARSE_DIRT`, not the configured `DIRT` output. The plugin’s exact-output check rejected it as a target. The 2026-10-13 follow-up removed `COARSE_DIRT` from the dirt candidate list; other probed mappings produced the configured single-item result.
+- This was a console/catalog and direct API drop probe only. No player connected, and `/ahmet collect`, NPC movement, harvesting, and delivery were not tested; their manual acceptance items remain unchecked.
+- Separately, the live deployment was verified on 2026-10-13: `server-live/plugins/VillagerAhmet.jar` SHA-256 `9f3593a80f215fb4158cfc05329e97a2fac93c2734e0753f0852f984e2bc0e64`; Paper startup logged `Done (10.676s)`. This deployment evidence does not establish common-resource gameplay.
+
+## Clear-journal admission recovery fix — 2026-10-13
+
+- Sol review evidence identified a live admission lock: `operations.json` had two committed v3 clear records for the inactive task (cargo 0, chest bound). Since `hasOperations()` correctly treats uncheckpointed committed records as blocking, chat task admission rejected the otherwise valid request through its generic unsupported-item reply. Clear execution also previously returned no success result and did not checkpoint the changed world before journal retirement.
+- Clear transactions now persist/reserve the task-wide clear budget, write the clear intent, mutate the block, commit the journal, save every journal-referenced world, and only then retire the journal. Failures return false, lock recovery, retain the outstanding journal when one exists, and skip route-budget increments, success logging, and navigation resume.
+- Startup recovery validates clear task IDs, world identity and AIR block state. A clear-only committed journal (including multiple v3 clear records) is saved and retired only after validation; mismatches remain fail-closed. No live journal or world was manually edited during this change.
+- Task admission now distinguishes unsupported intent, pending recovery, existing task/cargo, and missing chest. `COARSE_DIRT` was removed from the dirt target list because the disposable Paper probe returned `COARSE_DIRT`, not the required `DIRT`; exact-output validation remains in place.
+- Verification: isolated Maven package passed **124 Java tests, 0 failures**; `npm test` passed **16/16**. No live server restart or deployment was performed; the live player remains connected. Disposable drop-probe evidence is in the preceding section. Player `/ahmet collect`, movement, harvesting, and delivery remain unchecked.
+
+
+## Mixed committed clear/harvest recovery checkpoint — 2026-10-13
+
+- Moved journal checkpointing to the end of startup reconciliation. After all pending operations are reconciled and every committed harvest/clear task ID, world, and AIR state validates, the plugin now saves referenced worlds and retires any committed-history-only journal, including mixed harvest+clear histories. Any pending operation or conflict prevents this checkpoint.
+- Added a v3 mixed clear/harvest journal regression, plus checkpoint admission and pending-record guards. Focused journal tests and the complete Maven package passed; total Java tests: **124/124**. Node tests passed **16/16**.
+- No restart or deployment was performed; the connected live server and its world/journal were not touched.

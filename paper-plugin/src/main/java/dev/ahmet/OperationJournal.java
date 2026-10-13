@@ -81,6 +81,11 @@ final class OperationJournal {
         || !data.harvests.isEmpty() || !data.clears.isEmpty();
   }
 
+  synchronized boolean hasCommittedOperationsReadyForCheckpoint() {
+    return data.pendingHarvest == null && data.pendingDeposit == null && data.pendingClear == null
+        && (!data.harvests.isEmpty() || !data.clears.isEmpty());
+  }
+
   synchronized void prepareHarvest(Harvest operation) throws IOException {
     if (operation == null || data.pendingHarvest != null || data.pendingDeposit != null
         || data.pendingClear != null || data.harvests.size() >= 64) {

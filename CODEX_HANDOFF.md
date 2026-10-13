@@ -58,12 +58,12 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 
 ## 3. Test Suites & Verification Evidence
 
-- **Java Maven Unit Tests**: **117 tests, 0 failures** (`mvn test` in `paper-plugin/`).
-  - Covers `AgentEvaluationHarnessTest` (7), `AgentControllerTest` (3), `AgentModelsTest` (4), `ActionPreconditionsTest` (5), `ProtectionHookTest` (5), `ObstructionPolicyTest` (9), `DescentSimulatorTest` (7), `HarvestApproachPlannerTest` (2), `OperationJournalTest` (5), `OperationRecoveryTest` (6), `WoodTaskTest` (12), `ExplorationPlannerTest` (9), `CargoDepositPlannerTest` (6), and all existing unit suites.
+- **Java Maven Unit Tests**: **124 tests, 0 failures** (`mvn test` in `paper-plugin/`).
+  - Covers `AgentEvaluationHarnessTest` (7), `AgentControllerTest` (3), `AgentModelsTest` (4), `ActionPreconditionsTest` (5), `ProtectionHookTest` (5), `ObstructionPolicyTest` (9), `DescentSimulatorTest` (7), `HarvestApproachPlannerTest` (2), `OperationJournalTest` (8), `OperationRecoveryTest` (6), `WoodTaskTest` (12), `ExplorationPlannerTest` (9), `CargoDepositPlannerTest` (6), `ClearTransactionTest` (2), `TaskAdmissionTest` (2), `ResourceCatalogTest` (3), and all existing unit suites.
 - **Node Brain Unit Tests**: **16 tests, 0 failures** (`npm test` in `brain/`).
   - Covers Turkish chat parsing, return-home intent, JEV model contract, OpenAI GPT-6 Luna contract, memory store, decision fallbacks, bounded item IDs, action allowlists, and fallback leaf clearing protection.
 - **Distribution Packages**:
-  - `server-live/plugins/VillagerAhmet.jar` (SHA-256: `400346320a4d55f36e12c608b0e12749db7aeebb80059d22f980f620be6690c7`)
+  - `server-live/plugins/VillagerAhmet.jar` (earlier build deployed 2026-10-13; SHA-256: `9f3593a80f215fb4158cfc05329e97a2fac93c2734e0753f0852f984e2bc0e64`). It does not contain the current uncommitted clear-journal/admission fix; current source changes are not deployed.
   - `dist/villager-ahmet-plugins-paper-1.21.6.zip` (SHA-256: `39d182e9b81a5319affa07edf1b3883e1c14573ecb13a893bf189884cf67bfe0`)
   - Validated by `dist/SHA256SUMS.txt`.
 
@@ -103,6 +103,6 @@ Historical review prompt for **sol 6.1** (the claims and deployment hashes above
 ## Remediation notes (2026-10-12)
 
 - Current source changes add bounded incremental scanning, stricter recovery and authorization, safe-ground hazards, plain-stack deposit planning, and checked temporary-file YAML persistence. These changes are not evidence of deployment or live-world verification.
-- Verification on 2026-10-12: Java 21 Maven package passed with 72 tests, Node tests passed 15/15, and mock HTTP smoke passed. The rebuilt JAR remains local and is not deployed to `server-live`.
+- Verification on 2026-10-13: Java 21 Maven package passed with 124 tests, Node tests passed 16/16, and mock HTTP smoke passed. The earlier deployed JAR has SHA-256 `9f3593a80f215fb4158cfc05329e97a2fac93c2734e0753f0852f984e2bc0e64`; its Paper startup logged `Done (10.676s)`. The current uncommitted clear-journal/admission changes are not deployed. Common-resource gameplay remains a manual unchecked acceptance item.
 - Animation/particles and duplicate Citizens registry-record cleanup remain follow-ups. No saved registry files were edited.
 - The manual acceptance matrix remains authoritative; do not mark any newly affected live-world or forced-crash scenario complete without observing it.

@@ -15,6 +15,7 @@ final class ResourceCatalogTest {
     assertEquals("IRON_PICKAXE", ResourceCatalog.forItemId("minecraft:raw_gold").orElseThrow().toolMaterial());
     assertEquals("RAW_IRON", ResourceCatalog.forItemId("minecraft:raw_iron").orElseThrow().outputMaterial());
     assertEquals("DIRT", ResourceCatalog.forItemId("minecraft:dirt").orElseThrow().outputMaterial());
+    assertFalse(ResourceCatalog.forItemId("minecraft:dirt").orElseThrow().blockMaterials().contains("COARSE_DIRT"));
   }
 
   @Test
