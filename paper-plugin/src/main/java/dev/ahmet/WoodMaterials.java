@@ -53,7 +53,9 @@ final class WoodMaterials {
   }
 
   static boolean matchesPreference(Material material, String preference) {
-    if (!isCollectableWood(material) || !isPreference(preference)) return false;
+    if (!isPreference(preference)) return false;
+    if (ResourceCatalog.isPreference(preference)) return false;
+    if (!isCollectableWood(material)) return false;
     if ("any".equals(preference)) return true;
     if ("bamboo".equals(preference)) return material == Material.BAMBOO;
     if (material == Material.BAMBOO) return false;

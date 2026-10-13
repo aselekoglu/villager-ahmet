@@ -49,8 +49,8 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 
 ## 3. Test Suites & Verification Evidence
 
-- **Java Maven Unit Tests**: **59 tests, 0 failures** (`mvn test` in `paper-plugin/`).
-  - Covers `ExplorationPlannerTest` (9 tests), `WoodTaskTest` (11 tests), `CargoDepositPlannerTest` (5 tests), `OperationJournalTest` (3 tests), `OperationRecoveryTest` (3 tests), `PlayerPlacedWoodRegistryTest` (2 tests), `ProtectedHomeAreaTest` (2 tests), `NavigationWatchdogTest` (2 tests), `NavigationRetryTest` (2 tests), `PartialDeliveryPolicyTest` (3 tests), `SummonTargetTest` (2 tests), `TaskRequestTest` (3 tests), `MaterialCatalogTest` (2 tests), `ResourceCatalogTest` (2 tests), `FailedTargetsTest` (2 tests), `SavedNpcReferenceTest` (3 tests), `AddressedChatTest` (3 tests).
+- **Java Maven Unit Tests**: **72 tests, 0 failures** (`mvn test` in `paper-plugin/`).
+  - Also covers `TaskAuthorizationTest` (2), `SafeGroundPolicyTest` (1), `NavigationTargetTest` (1), `IncrementalTargetScannerTest` (2), `TaskStateSaveFailureTest` (1), and `DecisionRetryTest` (1), in addition to the task, journal, catalog, and navigation suites.
 - **Node Brain Unit Tests**: **15 tests, 0 failures** (`npm test` in `brain/`).
   - Covers Turkish chat parsing, return-home intent (`isReturnHome`), JEV model contract, OpenAI GPT-6 Luna contract, memory store, decision fallbacks, bounded item IDs, and action allowlists.
 - **Distribution Packages**:
@@ -80,7 +80,7 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 
 ## 5. Codex Review Instructions (sol 6.1)
 
-Codex should perform a thorough multi-axis review of the codebase using **sol 6.1**:
+Historical review prompt for **sol 6.1** (the claims and deployment hashes above describe earlier states and must not be treated as evidence for current source or live packages):
 1. **Architectural Coherence & Concurrency Safety**: Verify that all Bukkit/Citizens mutations and reads remain strictly on the server main thread, and all Node/Brain HTTP communications remain non-blocking with bounded timeouts.
 2. **State & Transaction Atomicity**: Audit `OperationJournal`, `OperationRecovery`, and `CargoDepositPlanner` for edge cases in failure recovery or chest capacity exhaustion.
 3. **Exploration & Navigation Robustness**: Review `ExplorationPlanner.java` algorithms (`findExplorationWaypoint` and `findStepTowardsHome`) for pathfinding efficiency, boundary limits, and obstacle avoidance.
@@ -89,3 +89,11 @@ Codex should perform a thorough multi-axis review of the codebase using **sol 6.
    - Live gameplay validation of wandering exploration and multi-step home return with online player.
    - Enhanced visual feedback / particle effects or arm swinging during harvesting.
    - Clean up duplicate Citizens NPC template records if any exist in the saved world registry.
+
+
+## Remediation notes (2026-10-12)
+
+- Current source changes add bounded incremental scanning, stricter recovery and authorization, safe-ground hazards, plain-stack deposit planning, and checked temporary-file YAML persistence. These changes are not evidence of deployment or live-world verification.
+- Verification on 2026-10-12: Java 21 Maven package passed with 72 tests, Node tests passed 15/15, and mock HTTP smoke passed. The rebuilt JAR remains local and is not deployed to `server-live`.
+- Animation/particles and duplicate Citizens registry-record cleanup remain follow-ups. No saved registry files were edited.
+- The manual acceptance matrix remains authoritative; do not mark any newly affected live-world or forced-crash scenario complete without observing it.

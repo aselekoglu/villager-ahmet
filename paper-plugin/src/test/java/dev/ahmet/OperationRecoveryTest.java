@@ -19,11 +19,34 @@ final class OperationRecoveryTest {
   @Test
   void recognizesCommittedHarvestOnlyWhenBlockAndTaskAgree() {
     assertEquals(OperationRecovery.HarvestDisposition.ALREADY_APPLIED,
-        OperationRecovery.classifyHarvest(operation, "task-1", 3, 3, "AIR"));
+        OperationRecovery.classifyHarvest(operation, "task-1", 3, 3, 3, "AIR"));
     assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
-        OperationRecovery.classifyHarvest(operation, "task-1", 3, 3, "OAK_LOG"));
+        OperationRecovery.classifyHarvest(operation, "task-1", 3, 3, 3, "OAK_LOG"));
     assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
-        OperationRecovery.classifyHarvest(operation, "different-task", 3, 3, "AIR"));
+        OperationRecovery.classifyHarvest(operation, "task-1", 3, 3, 2, "AIR"));
+    assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
+        OperationRecovery.classifyHarvest(operation, "different-task", 3, 3, 3, "AIR"));
+  }
+
+  @Test
+  void harvestReplayRequiresPerMaterialCargoBaselineToAgree() {
+    var birch = new OperationJournal.Harvest("task-3", "world", 1, 64, 1, 0, 2,
+        "BIRCH_LOG", "BIRCH_LOG", 1);
+    assertEquals(OperationRecovery.HarvestDisposition.NOT_APPLIED,
+        OperationRecovery.classifyHarvest(birch, "task-3", 0, 2, 1, "BIRCH_LOG"));
+    assertEquals(OperationRecovery.HarvestDisposition.ALREADY_APPLIED,
+        OperationRecovery.classifyHarvest(birch, "task-3", 1, 3, 2, "AIR"));
+    assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
+        OperationRecovery.classifyHarvest(birch, "task-3", 0, 2, 2, "BIRCH_LOG"));
+  }
+
+  @Test
+  void depositReplayRequiresTaskCountersToAgreeExactly() {
+    var deposit = new OperationJournal.Deposit("task-1", "world", 0, 64, 0, 5, 2, 2,
+        java.util.List.of(new CargoDepositPlanner.Change(0, null, 0, 2)), "OAK_LOG");
+    assertEquals(OperationRecovery.DepositDisposition.APPLY, OperationRecovery.classifyDeposit(deposit, "task-1", 5, 2));
+    assertEquals(OperationRecovery.DepositDisposition.ALREADY_APPLIED, OperationRecovery.classifyDeposit(deposit, "task-1", 3, 4));
+    assertEquals(OperationRecovery.DepositDisposition.CONFLICT, OperationRecovery.classifyDeposit(deposit, "task-1", 3, 2));
   }
 
   @Test

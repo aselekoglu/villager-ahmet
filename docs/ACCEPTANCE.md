@@ -2,6 +2,9 @@
 
 ## Automated
 
+- [x] Regression tests for resource scans over wood materials, bounded incremental scan behavior, checked task-save failure locking, deposit replay conflicts and inventory shape, metadata-bearing stacks, authorization, hazard blocks, safe target centering, and journal v3 compatibility pass in the Java suite (72 tests, 0 failures).
+- [ ] Paper runtime validation confirms per-tick scan budgeting remains responsive and candidate invalidation behaves correctly; unit tests do not establish scan timing.
+
 - [x] Node test suite: parse Turkish/English oak job, reject invalid quantity, busy or absent chest, persist chat, validate action allowlist.
 - [ ] CI Node job passes in connected environment.
 - [x] Java 21 + Maven build succeeds using pinned Citizens and Paper dependencies.
@@ -15,7 +18,7 @@
 - [x] Java task model preserves partial-delivery state across restart and only finishes after cargo is deposited; live unreachable-path fallback and chest delivery still require an in-game check.
 - [x] Paper 1.21.6 integration probe confirmed a double chest exposes 27 slots through `getBlockInventory()` but 54 through `getInventory()`; with the first half full, the plugin's planner successfully placed birch logs in the empty second half.
 - [x] Player-placed wood markers round-trip through config persistence; protected-home geometry and world boundaries have unit coverage. Live pre-existing-home exclusion verified in-game (house logs skipped, 8 placed logs dynamically recorded in config).
-- [x] Resource exploration planner searches 8 candidate directions within allowable home bounds outside protected structures; multi-step home return calculates 16-block waypoints with obstacle avoidance offsets. Unit test suite passes 59 tests with 0 failures; Node chat recognizes return-home intent.
+- [x] Resource exploration planner searches 8 candidate directions within allowable home bounds outside protected structures; multi-step home return calculates 16-block waypoints with obstacle avoidance offsets. Unit test suite passes 72 tests with 0 failures; Node chat recognizes return-home intent.
 
 ## Real game (record results and logs, do not infer)
 
@@ -25,10 +28,11 @@
 - [x] After restart, the plugin recovered saved Citizens NPC id 1 after Citizens' delayed registry load; the task and 3-item birch cargo remained in YAML, bound chest was preserved, and protected-home sphere initialized to 10 blocks.
 - [x] One Minecraft 1.21.6 client joined the imported world; operator `/ahmet summon` visibly placed the named Citizens villager beside the player.
 - [x] `/ahmet chest` saved the delivery chest in plugin state.
-- [ ] Mixed-wood collection gameplay: the screenshot session started an 8-log job, but the old oak-only plugin found no eligible oak and collected 0. The generalized log/stem implementation is now deployed; it still needs an in-game job run.
+- [ ] Re-run all prior live scenarios against a package built from the remediated source; earlier staged/deployed package observations do not verify these changes.
+- [ ] Mixed-wood collection gameplay: the screenshot session started an 8-log job, but the old oak-only plugin found no eligible oak and collected 0. The generalized log/stem implementation has an earlier deployment record; the remediated source still needs an in-game job run.
 - [ ] Common-resource collection is verified through player chat and actual world harvesting/deposit. No gameplay collection test was run while the user was away.
 - [x] The second LAN client (`BebekYiyen_69`) connected from `10.0.0.11` to the private LAN server on 2026-10-12 at 19:13:43. It later timed out at 19:14:28; sustained connectivity remains unverified.
-- [ ] Duplicate Citizens NPC record cleanup: two `Ahmet` villager records are loaded; plugin uses saved id 1, but the other record has not been identified/deleted.
+- [ ] Duplicate Citizens NPC record cleanup: two `Ahmet` villager records were previously reported; the other record has not been identified/deleted. Leave saved registry records untouched until an explicit cleanup task with a verified backup.
 - [x] Admin runs `/ahmet spawn`: an **EntityType.VILLAGER** appears, not a player with a skin; `/ahmet status` reports active.
 - [x] Admin `/ahmet summon` moves an existing idle Ahmet to a safe loaded block next to them; it is rejected during active work or recovery.
 - [x] Admin binds a chest by looking at it and running `/ahmet chest`; binding survives a server restart.
@@ -50,9 +54,11 @@
 
 ## Remaining blockers
 
+- The remediated source passed Java 21 package (72 tests), Node tests (15/15), and mock HTTP smoke. It has not been installed in a Paper world; no live gameplay, forced-crash, chest-interference, or scan-timing result is claimed for this source.
+
 1. The user accepted the EULA. Minecraft 1.21.6 client joined the imported save; `/ahmet spawn`, `/ahmet summon`, chest binding across restarts, in-game JEV target execution, and 4-log double chest delivery were observed and confirmed.
 2. The local server is at `10.0.0.140:25565`, `online-mode=false`, whitelist enabled. The local offline `aselekoglu` profile joined successfully; the second `BebekYiyen_69` computer has not yet connected. The online UUID's player data remains preserved under the backup identity; the offline profile has a separate UUID and may start with different inventory/position.
 3. Java unit tests cover task bounds, cancellation, journal reload/replay, chest-slot planning and bounded navigation retries. Live failure safety during host disk exhaustion was verified: write-ahead journal prevented corruption, blocked unsafe mutations, and recovered cleanly with zero item loss.
-4. No Git remote is configured, so hosted GitHub Actions have not run. A local repository is being used for the handoff snapshot; equivalent Node, HTTP smoke, Maven and Java checks were run here.
+4. No hosted GitHub Actions result has been recorded. Local Node, mock HTTP smoke, Maven package and Java checks for the remediated source passed in this workspace.
 5. TypeSafe and OpenAI keys are stored in ignored `brain/.env`. Live wood/common-resource JEV calls and direct GPT-6 Luna structured task calls succeeded with their respective providers; in-game execution confirmed with live target selection and harvest.
-6. The full item catalog and common-resource gather path are compiled, tested, and installed on the running imported-world server. The tree marker is heuristic, and region-protection integration and native villager mining/item carrying are not implemented.
+6. An earlier package with the full item catalog and common-resource gather path is installed on the imported-world server; the remediated source has not been deployed. The tree marker is heuristic, and region-protection integration and native villager mining/item carrying are not implemented.

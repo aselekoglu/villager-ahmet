@@ -1,6 +1,7 @@
 package dev.ahmet;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.List;
@@ -76,4 +77,15 @@ final class CargoDepositPlannerTest {
     assertEquals(new CargoDepositPlanner.Slot("BIRCH_LOG", 7, 64), after.get(1));
     assertEquals(before.get(2), after.get(2));
   }
+  @Test
+  void metadataBearingStacksAreNeverMergedOrRecreated() {
+    var decorated = new CargoDepositPlanner.Slot("OAK_LOG", 60, 64, false);
+    var plan = CargoDepositPlanner.plan(List.of(decorated), "OAK_LOG", 4);
+    assertEquals(0, plan.moved());
+    assertTrue(plan.changes().isEmpty());
+    var pending = new CargoDepositPlanner.Plan("OAK_LOG", 4, 4, 0,
+        List.of(new CargoDepositPlanner.Change(0, "OAK_LOG", 60, 64)));
+    assertThrows(IllegalStateException.class, () -> CargoDepositPlanner.apply(List.of(decorated), pending));
+  }
+
 }

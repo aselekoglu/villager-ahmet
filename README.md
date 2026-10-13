@@ -2,7 +2,7 @@
 
 An AI-assisted **real villager NPC** for a private Minecraft Java Edition multiplayer world. Not a player bot wearing a villager skin.
 
-**Status: full Paper 1.21.6 item catalog, common-resource gathering, help/cargo/direct-collect commands, partial-delivery recovery, full double-chest inventory handling, player-placed wood tracking, and protected-home filtering are implemented.** The Java 21 build passes 50 tests. Disposable Paper checks confirmed the 54-slot chest behavior and plugin startup. The live JAR is staged; restart only after players disconnect to activate this latest code. Historical block placement outside the protected home radius cannot be recovered from vanilla world data. Use `/ahmet protecthome 10` as OP while standing in the center of the existing build. Ahmet is a real Citizens villager.
+**Status: full Paper 1.21.6 item catalog, common-resource gathering, help/cargo/direct-collect commands, partial-delivery recovery, full double-chest inventory handling, player-placed wood tracking, and protected-home filtering are implemented.** The remediated source builds under Java 21; all 72 Java tests and 15 Node tests pass. The local mock HTTP smoke test passes. The rebuilt plugin has not been deployed to `server-live`; its staged JAR remains an earlier build. Historical block placement outside the protected home radius cannot be recovered from vanilla world data. Use `/ahmet protecthome 10` as OP while standing in the center of the existing build. Ahmet is a real Citizens villager.
 
 ## Architecture
 
@@ -26,7 +26,7 @@ Minecraft Java clients (same game version, unmodified)
         └── deterministic mock/fallback mode
 ```
 
-The code is original and does not incorporate files from `rmalde/minecraft-agent`; that repo does not currently show a license. The system borrows the **concept** of high-level planning + JEV typed action selection. Minecraft entity control is implemented with Citizens rather than Mineflayer.
+The code is original and does not incorporate files from `rmalde/minecraft-agent`; that repo does not currently show a license. The system borrows the **concept** of high-level planning + JEV typed action selection. Minecraft entity control is implemented with Citizens rather than Mineflayer. Resource discovery advances incrementally on the Paper main thread, with a bounded coordinate budget per tick; a scan is not treated as empty until its cursor completes.
 
 ## Setup (macOS or Linux)
 
@@ -73,7 +73,7 @@ Wood protection distinguishes new player edits from natural targets by recording
 
 The plugin also exports Paper 1.21.6's complete obtainable vanilla item-material catalog to `plugins/VillagerAhmet/item-catalog-1.21.6.json`. In game, `/ahmet items <ad>` searches that catalog. Catalog presence means Ahmet can identify and validate the vanilla item ID; it does **not** mean every item has a gather action. The executable collection registry currently supports logs/stems and natural bamboo, dirt, sand/red sand, stone-to-cobblestone, coal ore, iron ore and gold ore; unsupported items are listed as not yet gatherable.
 
-**MVP realism caveat:** Harvesting is performed by the *Paper server plugin* removing an eligible physical block and crediting the exact checked output to virtual cargo; it is **not** native villager mining or item pickup. Ahmet visibly walks, changes the real world, and deposits real items. Tool durability is not consumed, and the plugin's natural-tree marker is a heuristic. Animation, actual carried-item render, protected-region hooks, advanced navigation and autonomous routines are next milestones.
+**MVP realism caveat:** Harvesting is performed by the *Paper server plugin* removing an eligible physical block and crediting the exact checked output to virtual cargo; it is **not** native villager mining or item pickup. Ahmet visibly walks, changes the real world, and deposits real items. Tool durability is not consumed, and the plugin's natural-tree marker is a heuristic. Animation, actual carried-item render, protected-region hooks, advanced navigation and autonomous routines are next milestones. The new persistence/recovery and incremental-scan changes have not yet been verified in a live Paper world. Keep animation/particles and duplicate Citizens record cleanup as follow-ups; saved registry files were not edited.
 
 ## Model modes
 
@@ -100,7 +100,7 @@ Then perform the **manual multiplayer acceptance scenario** in `docs/ACCEPTANCE.
 - The NPC is a *Citizens-managed villager* (not a vanilla villager with naturally modified brain). Commands, movement and inventory changes are server controlled.
 - At most 64 output items per job. GPT-6 Luna may classify a bounded wood preference or canonical item ID; Paper accepts only the explicit common-resource registry. JEV may choose only among loaded, nearby, Java-validated candidate blocks. JEV runs at target selection, while Paper deterministically handles navigation and item transactions. Neither model can supply coordinates, teleport, create inventory, run commands, cheat, or place blocks. Only an explicit operator `/ahmet summon` can reposition the NPC, and never during task navigation.
 - Server plugin exclusively authorizes block deletion and chest deposit, on the Paper main thread. Async model calls never touch Bukkit world state.
-- Task state persists in `plugins/VillagerAhmet/config.yml`; `plugins/VillagerAhmet/operations.json` journals harvest and chest-slot changes for restart reconciliation; conversational events persist separately in `brain/data/memory.json`. Unit tests cover replay and conflict detection, but a forced-crash Paper-world test is still required before using valuable items. Conflicting world/chest state pauses recovery for manual inspection.
+- Task state persists through a same-directory temporary YAML file and replacement; failures propagate to the transaction and prevent journal completion. `plugins/VillagerAhmet/operations.json` uses journal format v3 for harvest and chest-slot changes; legacy v1 oak harvests remain readable, while older entries without recovery fields fail closed for manual inspection. Deposit recovery checks the recorded inventory shape and requires every changed slot to match the recorded after-state before reconciling task counters. Unit tests do not establish power-loss durability or world-level crash safety; a forced-crash Paper-world test remains required. Conflicting world/chest state pauses recovery for manual inspection.
 - Keep Paper and Citizens versions pinned and tested together; never automatically update Minecraft on a running persistent world.
 
 ## Main design documents

@@ -44,6 +44,7 @@ final class WoodTask {
     cargo-=moved;deposited+=moved;
   }
   Map<String,Integer> cargoItems(){return Map.copyOf(cargoItems);}
+  int cargoCount(String material){return cargoItems.getOrDefault(material,0);}
   String nextCargoMaterial(){return cargoItems.keySet().stream().findFirst().orElse(null);}
   boolean readyToFinish(){return (collected>=requested||partialDelivery)&&cargo==0;}
   boolean readyToDeliver(){return collected>=requested||partialDelivery;}
@@ -60,6 +61,8 @@ final class WoodTask {
     collected=c.getInt("task.collected");deposited=c.getInt("task.deposited");cargo=c.getInt("task.cargo");
     materialPreference=c.getString("task.materialPreference","any");
     if(!WoodMaterials.isPreference(materialPreference))throw new IllegalStateException("Saved wood preference is unsupported");
+    if(requested<0||requested>64||collected<0||collected>requested||deposited<0||deposited>64||cargo<0||cargo>64
+        ||collected!=deposited+cargo)throw new IllegalStateException("Saved task counters violate cargo conservation");
     cargoItems.clear();
     Object stored=c.get("task.cargoItems");
     int itemsTotal=0;

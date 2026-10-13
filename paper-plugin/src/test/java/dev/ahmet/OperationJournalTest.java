@@ -1,6 +1,7 @@
 package dev.ahmet;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
@@ -19,6 +20,7 @@ final class OperationJournalTest {
     journal.load();
     OperationJournal.Harvest harvest = new OperationJournal.Harvest("task-1", "world", 4, 65, -2, 2, 2);
     journal.prepareHarvest(harvest);
+    assertTrue(Files.readString(path).contains("\"version\":3"));
 
     OperationJournal afterRestart = new OperationJournal(path);
     afterRestart.load();
@@ -47,6 +49,18 @@ final class OperationJournalTest {
     OperationJournal journal = new OperationJournal(path);
     journal.load();
     assertEquals("OAK_LOG", journal.pendingHarvest().orElseThrow().effectiveMaterial());
+  }
+
+  @Test
+  void versionTwoJournalMissingSafetyFieldsFailsClosedAndIsPreserved() throws Exception {
+    Path path = temp.resolve("version-two-operations.json");
+    String contents = """
+        {"version":2,"harvests":[],"pendingHarvest":{"taskId":"legacy-v2","world":"world","x":1,"y":2,"z":3,"beforeCollected":0,"beforeCargo":0,"material":"OAK_LOG","outputMaterial":"OAK_LOG"}}
+        """;
+    Files.writeString(path, contents);
+
+    assertThrows(java.io.IOException.class, () -> new OperationJournal(path).load());
+    assertEquals(contents, Files.readString(path));
   }
 
   @Test
