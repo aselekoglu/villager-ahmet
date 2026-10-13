@@ -6,7 +6,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /** Small, explicit capability registry; most catalog items intentionally have no gather action. */
-final class ResourceCatalog {
+public final class ResourceCatalog {
   private static final Map<String, Resource> BY_ITEM = Map.of(
       "dirt", new Resource("minecraft:dirt", "DIRT", List.of("DIRT", "GRASS_BLOCK", "COARSE_DIRT"), null),
       "sand", new Resource("minecraft:sand", "SAND", List.of("SAND"), null),
@@ -43,7 +43,7 @@ final class ResourceCatalog {
         && resource.blockMaterials().contains(blockMaterial));
   }
 
-  static String outputMaterial(String preference) {
+  public static String outputMaterial(String preference) {
     if (!isPreference(preference)) return null;
     return BY_ITEM.values().stream().filter(resource -> preference.equals("item:" + resource.outputMaterial()))
         .map(Resource::outputMaterial).findFirst().orElse(null);

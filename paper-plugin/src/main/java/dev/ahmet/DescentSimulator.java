@@ -10,7 +10,7 @@ import org.bukkit.block.Block;
  * A support block (floor under NPC) may only be removed if the NPC falls at most
  * two blocks to a solid, non-liquid, non-hazard landing floor with safe clearance.
  */
-final class DescentSimulator {
+public final class DescentSimulator {
   private DescentSimulator() {}
 
   record BlockView(Material material, boolean isSolid, boolean isLiquid, boolean isPassable, boolean isHazard) {
@@ -92,7 +92,7 @@ final class DescentSimulator {
     return false;
   }
 
-  static boolean isSafeDescent(World world, int x, int npcFeetY, int z) {
+  public static boolean isSafeDescent(World world, int x, int npcFeetY, int z) {
     if (world == null || !world.isChunkLoaded(x >> 4, z >> 4)) return false;
     return isSafeDescent(npcFeetY, world.getMinHeight(), y -> {
       if (y < world.getMinHeight() || y >= world.getMaxHeight()) return null;

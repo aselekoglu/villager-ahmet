@@ -42,6 +42,7 @@ public record ActionBudget(
   }
 
   public boolean canRequestHelp(long lastHelpMs, long nowMs) {
+    if (lastHelpMs <= 0) return true;
     return (nowMs - lastHelpMs) >= helpCooldownMs;
   }
 }

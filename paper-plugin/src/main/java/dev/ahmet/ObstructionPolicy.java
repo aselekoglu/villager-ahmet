@@ -16,12 +16,12 @@ import org.bukkit.block.data.type.Leaves;
  * Strict material and provenance policy for identifying safe obstruction candidates
  * to clear when navigation is stuck.
  */
-final class ObstructionPolicy {
+public final class ObstructionPolicy {
   private ObstructionPolicy() {}
 
   record CandidateObstruction(Block block, boolean isSupportLeaf, double distance) {}
 
-  static boolean isLeaf(Material material) {
+  public static boolean isLeaf(Material material) {
     if (material == null) return false;
     if (material.name().endsWith("_LEAVES")) return true;
     try {
