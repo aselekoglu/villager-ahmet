@@ -76,6 +76,20 @@
 - Player subsequently ran `/ahmet cancel` and checked `/ahmet cargo` (`Ahmet'in taşıdığı kaynak yok`).
 - Console status confirmed: `Ahmet: boşta (taşınan kaynak: 0) | Sandık: bağlı | NPC: aktif | Korunan ev: 10 blok | Yerleştirilmiş odun işareti: 8`.
 
+## Crash protection, disk recovery, and live chest delivery verification — 2026-10-12 22:38 EDT
+
+- **Host disk exhaustion incident**: When harvesting block 4 (`world (-4, 81, 104)`), the host APFS volume reached 100% capacity (641 MiB free), causing `AhmetPlugin.persist()` to encounter `FileNotFoundException: plugins/VillagerAhmet/config.yml (No space left on device)`.
+- **Transaction safety verified under failure**: The write-ahead journal (`operations.json`) successfully retained the `pendingHarvest` entry for `(-4, 81, 104)`, `recoveryBlocked` was automatically engaged, and Ahmet safely halted the task (`Kurtarma: manuel inceleme gerekli`) without item duplication or silent world corruption.
+- **Disk cleanup**: Safely removed ~1.6 GB of ephemeral scratch test directories from `/private/tmp`, restoring host disk free space to **2.3 GiB**.
+- **Zero-player clean restart**: Verified zero players online (`/list`), cleanly stopped the running server with full dimension and chunk saves (`flushJournalOnShutdown()` cleanly flushed chunk I/O and preserved journal integrity), and restarted Paper 1.21.6 build 48 and Node brain daemon (`127.0.0.1:3197`).
+- **Startup restoration**: Citizens restored NPC id 1; `recoveryBlocked` cleared; `operations.json` and `config.yml` cleanly restored Ahmet with **4 carried birch logs** in virtual cargo (`Ahmet'in taşıdığı kaynaklar (4): • 4 × birch_log`) with zero item loss.
+- **In-game operator summon and chest delivery**:
+  - Operator `aselekoglu` connected in-game. Because Ahmet's previous outdoor position was 46 blocks away from the chest (exceeding the safety limit `max-distance-from-home: 32`), the operator ran `/ahmet summon` near the house to safely reposition Ahmet and reset home coordinates.
+  - Operator ran `/ahmet deliver`. Ahmet navigated autonomously to the bound double chest at `world (3, 73, 144)` (entity location `[4.5, 73.0, 141.5]`), deposited all 4 birch logs using the 54-slot `Chest.getInventory()` view, and triggered a clean world save.
+  - Final console inspection confirmed: `Ahmet: boşta (taşınan kaynak: 0) | Sandık: bağlı | NPC: aktif | Korunan ev: 10 blok | Yerleştirilmiş odun işareti: 8` and `Ahmet'in taşıdığı kaynak yok.`
+  - Persisted `config.yml` confirmed: `requested: 4, collected: 4, deposited: 4, cargo: 0, cargoItems: {}`.
+- **Brain service status**: Node brain verified active on loopback `http://127.0.0.1:3197`; `GET /health` returned `{"ok":true,"service":"villager-ahmet-brain","decisionMode":"jev","chatMode":"llm"}`.
+
 ## Verified
 
 - `./scripts/doctor.sh` identifies Java 21.0.12.1, Maven 3.10.0 and Node.js 22.19.0 when Homebrew Java/Maven are on `PATH`. Paper is pinned to 1.21.6 build 48; Citizens is pinned to 2.0.41 build 4138 with the 1.21_R5 adapter.

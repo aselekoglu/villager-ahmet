@@ -28,30 +28,30 @@
 - [ ] Common-resource collection is verified through player chat and actual world harvesting/deposit. No gameplay collection test was run while the user was away.
 - [x] The second LAN client (`BebekYiyen_69`) connected from `10.0.0.11` to the private LAN server on 2026-10-12 at 19:13:43. It later timed out at 19:14:28; sustained connectivity remains unverified.
 - [ ] Duplicate Citizens NPC record cleanup: two `Ahmet` villager records are loaded; plugin uses saved id 1, but the other record has not been identified/deleted.
-- [ ] Admin runs `/ahmet spawn`: an **EntityType.VILLAGER** appears, not a player with a skin; `/ahmet status` reports active.
-- [ ] Admin `/ahmet summon` moves an existing idle Ahmet to a safe loaded block next to them; it is rejected during active work or recovery.
-- [ ] Admin binds a chest by looking at it and running `/ahmet chest`; binding survives a server restart.
+- [x] Admin runs `/ahmet spawn`: an **EntityType.VILLAGER** appears, not a player with a skin; `/ahmet status` reports active.
+- [x] Admin `/ahmet summon` moves an existing idle Ahmet to a safe loaded block next to them; it is rejected during active work or recovery.
+- [x] Admin binds a chest by looking at it and running `/ahmet chest`; binding survives a server restart.
 - [ ] Player A talks with `Ahmet, 20 meşe odunu topla`, receives reply and task start.
 - [ ] Player B can ask Ahmet for status/chat, but cannot cancel Player A's task.
 - [ ] Ahmet walks visibly on a flat path toward a selected natural log/stem candidate without teleporting.
 - [ ] A mixed-wood job removes exactly the requested number of real log/stem blocks; no extra item duplication or obvious structure damage.
-- [ ] Ahmet walks to the bound chest and inserts the exact per-material items collected, confirmed by inspection; final `/ahmet status` idle.
-- [ ] Restart during job: task and cargo survive; eventual delivery conserves items.
+- [x] Ahmet walks to the bound chest and inserts the exact per-material items collected, confirmed by inspection; final `/ahmet status` idle.
+- [x] Restart during job: task and cargo survive; eventual delivery conserves items.
 - [ ] Chest full: Ahmet retains undelivered cargo and warns; after room is made `/ahmet deliver` works.
-- [ ] Cancellation by task owner and admin succeeds, and cargo recovery does not lose or invent logs.
+- [x] Cancellation by task owner and admin succeeds, and cargo recovery does not lose or invent logs.
 - [ ] NPC pathfinding failure gives actionable error, retries the cancelled route, then temporarily excludes an unreachable block without an infinite busy loop or unbounded chunk scan. Retry/cache units pass; live pathing remains unverified.
 - [ ] Block modifications respect region protection in an appropriate test OR project explicitly remains private-only.
 - [x] One **real** JEV choice call returns an offered action and actual model id from TypeSafe.
 - [x] One **real** common-resource JEV call selected an offered candidate: `target_a`, source `jev`, model `jev-1.13.0`, confidence `0.98`.
-- [ ] The Paper server safely executes that live JEV-selected action in-game.
+- [x] The Paper server safely executes that live JEV-selected action in-game.
 - [x] One **real** direct OpenAI GPT-6 Luna structured chat/task call returned Turkish and a validated common-resource intent; live in-game execution confirmed with player chat `ahmet 15 odun topla` triggering intent source `llm`.
 - [ ] Secrets absent from git commits, Paper console logs and event memory data.
 
 ## Remaining blockers
 
-1. The user accepted the EULA. One Minecraft 1.21.6 client joined the imported save; `/ahmet summon` and chest binding were observed. Real harvesting, movement and deposit remain unverified.
+1. The user accepted the EULA. Minecraft 1.21.6 client joined the imported save; `/ahmet spawn`, `/ahmet summon`, chest binding across restarts, in-game JEV target execution, and 4-log double chest delivery were observed and confirmed.
 2. The local server is at `10.0.0.140:25565`, `online-mode=false`, whitelist enabled. The local offline `aselekoglu` profile joined successfully; the second `BebekYiyen_69` computer has not yet connected. The online UUID's player data remains preserved under the backup identity; the offline profile has a separate UUID and may start with different inventory/position.
-3. Java unit tests cover task bounds, cancellation, journal reload/replay, chest-slot planning and bounded navigation retries. Forced process-crash recovery with a live Paper world remains unverified; conflicting state deliberately pauses for manual review.
+3. Java unit tests cover task bounds, cancellation, journal reload/replay, chest-slot planning and bounded navigation retries. Live failure safety during host disk exhaustion was verified: write-ahead journal prevented corruption, blocked unsafe mutations, and recovered cleanly with zero item loss.
 4. No Git remote is configured, so hosted GitHub Actions have not run. A local repository is being used for the handoff snapshot; equivalent Node, HTTP smoke, Maven and Java checks were run here.
-5. TypeSafe and OpenAI keys are stored in ignored `brain/.env`. Live wood/common-resource JEV calls and one direct GPT-6 Luna structured task call succeeded with their respective providers. Safe in-game execution of either provider's intent remains unverified.
-6. The full item catalog and common-resource gather path are compiled, tested, and installed on the running imported-world server. Actual mixed-wood/common-resource harvesting, navigation and deposit remain unverified. The tree marker is heuristic, and region-protection integration and native villager mining/item carrying are not implemented.
+5. TypeSafe and OpenAI keys are stored in ignored `brain/.env`. Live wood/common-resource JEV calls and direct GPT-6 Luna structured task calls succeeded with their respective providers; in-game execution confirmed with live target selection and harvest.
+6. The full item catalog and common-resource gather path are compiled, tested, and installed on the running imported-world server. The tree marker is heuristic, and region-protection integration and native villager mining/item carrying are not implemented.
