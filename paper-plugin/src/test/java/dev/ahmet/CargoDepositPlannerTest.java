@@ -49,6 +49,22 @@ final class CargoDepositPlannerTest {
   }
 
   @Test
+  void largeChestCanUseEmptySecondHalfWhenBoundHalfHasNoSpace() {
+    java.util.ArrayList<CargoDepositPlanner.Slot> largeChest = new java.util.ArrayList<>(54);
+    for (int i = 0; i < 27; i++) largeChest.add(new CargoDepositPlanner.Slot("COBBLESTONE", 64, 64));
+    for (int i = 0; i < 27; i++) largeChest.add(CargoDepositPlanner.Slot.empty(64));
+
+    CargoDepositPlanner.Plan plan = CargoDepositPlanner.plan(largeChest, "BIRCH_LOG", 5);
+    List<CargoDepositPlanner.Slot> after = CargoDepositPlanner.apply(largeChest, plan);
+
+    assertEquals(5, plan.moved());
+    assertEquals(0, plan.remaining());
+    assertEquals(27, plan.changes().getFirst().slot());
+    assertEquals(new CargoDepositPlanner.Slot("BIRCH_LOG", 5, 64), after.get(27));
+    assertEquals(new CargoDepositPlanner.Slot("COBBLESTONE", 64, 64), after.get(0));
+  }
+
+  @Test
   void depositsOnlyTheSelectedWoodSpeciesIntoMatchingStacks() {
     List<CargoDepositPlanner.Slot> before = List.of(
         new CargoDepositPlanner.Slot("OAK_LOG", 10, 64),

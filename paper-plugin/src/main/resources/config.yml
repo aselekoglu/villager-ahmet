@@ -8,5 +8,11 @@ task: {}
 options:
   search-radius: 24
   max-distance-from-home: 32
-  # Only harvest log/stem blocks with nearby tree leaves or Nether-fungus indicators.
+  protect-home-radius: 10
+  # Only harvest unmarked log/stem blocks with nearby tree leaves or Nether-fungus indicators.
   only-natural-wood: true
+protection:
+  # Operators can relocate this center with /ahmet protecthome <radius>.
+  home: {}
+  # Coordinates of player-placed logs/stems observed since tracking was enabled.
+  playerPlacedWood: []

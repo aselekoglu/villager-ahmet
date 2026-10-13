@@ -11,18 +11,22 @@
 - [x] Paper runtime exports every obtainable non-legacy 1.21.6 item as a canonical ID; live startup produced 1,414 unique item entries with no air entries. `/ahmet items <name>` was verified through Paper console dispatch; the player's in-game display has not been observed.
 - [x] Common-resource chat intents validate canonical Minecraft IDs and bounded quantities; Paper's tested capability registry rejects unsupported IDs.
 - [x] Common output/block/tool mappings, mixed cargo and harvest journal persistence pass Java unit tests; actual Paper drop-table/gameplay and forced restart behavior remain unverified.
+- [x] Direct bounded `/ahmet collect <item|odun> <1-64>` request parser accepts only supported common resources/logs and rejects unsupported IDs or amounts; help, cargo display, and tab completion are registered.
+- [x] Java task model preserves partial-delivery state across restart and only finishes after cargo is deposited; live unreachable-path fallback and chest delivery still require an in-game check.
+- [x] Paper 1.21.6 integration probe confirmed a double chest exposes 27 slots through `getBlockInventory()` but 54 through `getInventory()`; with the first half full, the plugin's planner successfully placed birch logs in the empty second half.
+- [x] Player-placed wood markers round-trip through config persistence; protected-home geometry and world boundaries have unit coverage. Live pre-existing-home exclusion verified in-game (house logs skipped, 8 placed logs dynamically recorded in config).
 
 ## Real game (record results and logs, do not infer)
 
 - [x] Fresh Paper 1.21.6 test world boots the final plugin with Citizens 2.0.41 build 4138; `/ahmet items raw_iron` and `/ahmet status` return successfully without plugin exceptions.
 - [x] User save copied with a SHA-256 manifest to a separate Paper 1.21.6 server directory; source save preserved; imported-world boot completed; official account `aselekoglu` whitelisted and opped.
 - [x] At the user's explicit request, the private LAN copy runs `online-mode=false` with whitelist enabled. The local `aselekoglu` offline UUID connected and can operate Ahmet; the identity backup is in `server-live/identity-backup-2026-10-12/`.
-- [x] After restart, the plugin recovered saved Citizens NPC id 1 after Citizens' delayed registry load; the task and 2-item birch cargo remained in YAML.
+- [x] After restart, the plugin recovered saved Citizens NPC id 1 after Citizens' delayed registry load; the task and 3-item birch cargo remained in YAML, bound chest was preserved, and protected-home sphere initialized to 10 blocks.
 - [x] One Minecraft 1.21.6 client joined the imported world; operator `/ahmet summon` visibly placed the named Citizens villager beside the player.
 - [x] `/ahmet chest` saved the delivery chest in plugin state.
 - [ ] Mixed-wood collection gameplay: the screenshot session started an 8-log job, but the old oak-only plugin found no eligible oak and collected 0. The generalized log/stem implementation is now deployed; it still needs an in-game job run.
 - [ ] Common-resource collection is verified through player chat and actual world harvesting/deposit. No gameplay collection test was run while the user was away.
-- [ ] The second LAN client (`BebekYiyen_69`) connects on Java 1.21.6; it has been added to the offline UUID whitelist, but its join has not yet been observed.
+- [x] The second LAN client (`BebekYiyen_69`) connected from `10.0.0.11` to the private LAN server on 2026-10-12 at 19:13:43. It later timed out at 19:14:28; sustained connectivity remains unverified.
 - [ ] Duplicate Citizens NPC record cleanup: two `Ahmet` villager records are loaded; plugin uses saved id 1, but the other record has not been identified/deleted.
 - [ ] Admin runs `/ahmet spawn`: an **EntityType.VILLAGER** appears, not a player with a skin; `/ahmet status` reports active.
 - [ ] Admin `/ahmet summon` moves an existing idle Ahmet to a safe loaded block next to them; it is rejected during active work or recovery.
@@ -40,7 +44,7 @@
 - [x] One **real** JEV choice call returns an offered action and actual model id from TypeSafe.
 - [x] One **real** common-resource JEV call selected an offered candidate: `target_a`, source `jev`, model `jev-1.13.0`, confidence `0.98`.
 - [ ] The Paper server safely executes that live JEV-selected action in-game.
-- [x] One **real** direct OpenAI GPT-6 Luna structured chat/task call returned Turkish and a validated common-resource intent. Actual in-game chat/task execution remains unverified.
+- [x] One **real** direct OpenAI GPT-6 Luna structured chat/task call returned Turkish and a validated common-resource intent; live in-game execution confirmed with player chat `ahmet 15 odun topla` triggering intent source `llm`.
 - [ ] Secrets absent from git commits, Paper console logs and event memory data.
 
 ## Remaining blockers

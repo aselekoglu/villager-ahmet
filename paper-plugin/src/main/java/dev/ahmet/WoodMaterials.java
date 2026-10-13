@@ -18,7 +18,20 @@ final class WoodMaterials {
   private WoodMaterials() {}
 
   static boolean isPreference(String preference) {
-    return "any".equals(preference) || PREFIX.containsKey(preference) || ResourceCatalog.isPreference(preference);
+    return preference != null && ("any".equals(preference) || PREFIX.containsKey(preference) || ResourceCatalog.isPreference(preference));
+  }
+
+  static String preferenceForItemId(String id) {
+    String name = MaterialCatalog.normalizeId(id);
+    if (name == null) return null;
+    if ("wood".equals(name) || "logs".equals(name) || "log".equals(name)
+        || "odun".equals(name) || "kutuk".equals(name) || "kütük".equals(name)) return "any";
+    String material = name.toUpperCase(java.util.Locale.ROOT);
+    if (!isWoodName(material)) return null;
+    if ("BAMBOO".equals(material)) return "bamboo";
+    String base = material.startsWith("STRIPPED_") ? material.substring("STRIPPED_".length()) : material;
+    return PREFIX.entrySet().stream().filter(entry -> base.startsWith(entry.getValue()))
+        .map(Map.Entry::getKey).findFirst().orElse(null);
   }
 
   static boolean isAllowedName(String name) {

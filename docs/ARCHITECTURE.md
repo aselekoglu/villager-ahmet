@@ -66,6 +66,12 @@ IDLE -> FIND_TREE -> WALK_TREE -> HARVEST -> [repeat until requested]
 
 Each harvest writes an atomic `operations.json` intent including the exact block and expected output item before changing the block, then updates per-item cargo in `config.yml` and commits the journal entry. Deposits plan exact slots for one output item at a time, write that item and slot plan before changing inventory, persist task state, flush the world, and only then clear the journal. Version 1 oak journals remain readable as oak. Startup replays pending operations idempotently; a changed task, block, chest, or slot pauses work and preserves the journal for manual inspection. This reduces silent duplication/loss, but full forced-crash behavior still needs an in-game Paper restart test.
 
+Chest transactions use `Chest.getInventory()` so a double chest is treated as one 54-slot inventory. `getBlockInventory()` is intentionally not used: Paper documents that it returns only the bound half of a double chest, which can falsely appear full even when the other half is empty. Startup journal recovery uses the same full-inventory view so planned slot indices remain consistent.
+
+If three separate resource routes fail or two consecutive scans find no remaining eligible target after cargo was collected, the task switches to a persisted partial-delivery state. Ahmet tries to deliver the exact cargo and reports the collected/requested amount; it does not silently claim the full request succeeded. A full chest or unreachable chest still retains cargo and requires operator/player recovery.
+
+Wood provenance is conservative and local to this plugin. Main-thread `BlockPlaceEvent` handlers persist coordinates for player-placed logs/stems; eligible wood at those coordinates is never offered to JEV. A configurable spherical home exclusion protects pre-existing structures because vanilla world data has no historical placer metadata. The radius defaults to 10 blocks and operators can set its center/radius with `/ahmet protecthome <0-32>`. The existing leaf/fungus heuristic remains an additional natural-tree signal. Prior edits elsewhere, command edits, and edits made by other plugins cannot be identified retroactively and need an explicit protected area.
+
 ## Gameplay assumptions
 
 - Version pin: Minecraft Java 1.21.6 / Paper 1.21.6 / Java 21 / Citizens 2.0.41 build 4138 (1.21_R5 adapter).

@@ -120,4 +120,37 @@ final class WoodTaskTest {
     task.deposit("RAW_IRON", 2);
     assertTrue(task.readyToFinish());
   }
+
+  @Test
+  void unreachableContinuationCanDeliverCollectedCargoAsAnExplicitPartialResult() {
+    WoodTask task = new WoodTask();
+    task.start(UUID.randomUUID(), 64, "any");
+    for (int i = 0; i < 5; i++) task.harvestOne("BIRCH_LOG");
+
+    task.requestPartialDelivery();
+    assertTrue(task.partialDelivery);
+    assertEquals(64, task.requested, "keep the original requested amount for truthful reporting");
+    assertFalse(task.readyToFinish(), "cargo must be delivered before task completion");
+    task.deposit("BIRCH_LOG", 5);
+    assertTrue(task.readyToFinish());
+    task.finish();
+    assertFalse(task.active);
+    assertFalse(task.partialDelivery);
+  }
+
+  @Test
+  void partialDeliveryStateSurvivesRestart() {
+    WoodTask original = new WoodTask();
+    original.start(UUID.randomUUID(), 64, "any");
+    original.harvestOne("BIRCH_LOG");
+    original.requestPartialDelivery();
+    YamlConfiguration config = new YamlConfiguration();
+    original.save(config);
+
+    WoodTask restored = new WoodTask();
+    restored.load(config);
+    assertTrue(restored.partialDelivery);
+    assertEquals(64, restored.requested);
+    assertEquals(1, restored.cargo);
+  }
 }

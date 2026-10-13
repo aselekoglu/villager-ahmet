@@ -1,5 +1,81 @@
 # Validation results — 2026-10-12
 
+## Follow-up command implementation — 2026-10-12 19:28 EDT
+
+- Added `/ahmet help`, `/ahmet cargo`, direct bounded `/ahmet collect <item|odun> <1-64>`, and context-aware tab completion. Direct collection uses the same allowlisted resource preferences, chest/world checks, task state, persistence, event history, and JEV target selection as chat-created jobs; it cannot pass server commands or coordinates.
+- Java 21 `mvn -B -ntp -Dmaven.repo.local=/tmp/ahmet-m2 package` passed: **40 tests, 0 failures**. Added focused parser coverage for generic wood, species-specific logs/stems, supported common items, unsupported items, and quantity bounds.
+- `npm test` passed: **14 tests, 0 failures**. `./scripts/smoke.sh` passed all mock HTTP checks (chat, common-resource intent, offered JEV action validation, memory event, and bearer-token rejection).
+- A separate temporary Paper 1.21.6 + Citizens 2.0.41 build 4138 world booted on loopback port 25566 with the new plugin. Console dispatch ran `/ahmet help`, `/ahmet status`, `/ahmet cargo`, and `/ahmet items raw_iron`; the catalog had 1,414 entries and marked raw iron gatherable. The temporary world shut down cleanly. Player-only `/ahmet collect`, tab completion, and harvesting were not exercised in-game.
+- The imported-world server still had one online player at 19:29 EDT. The updated JAR is staged in `server-live/plugins`, but the running JVM has its previous plugin classes loaded; it was not restarted to avoid interrupting that player. Restart only after the server is empty.
+
+## Authorized LAN restart — 2026-10-12 20:11 EDT
+
+- The user confirmed disconnect. Server console showed 0 players before shutdown. Paper saved the imported world and stopped cleanly.
+- Restarted `server-live` on Java 21 / Paper 1.21.6 build 48 with Citizens 2.0.41 build 4138 and the updated VillagerAhmet JAR. The brain is listening on `127.0.0.1:3197`; Paper is listening on port 25565. Startup completed without plugin exceptions, Citizens loaded two saved NPC records, and VillagerAhmet restored saved NPC id 1.
+- Console `/ahmet help` and `/ahmet status` succeeded. Status reports the saved wood task at 0/8, chest bound, and NPC currently unspawned; an operator can use `/ahmet spawn` in-game to resume it at the saved home. This restart does not establish successful movement or harvesting.
+
+## Route-stall recovery — 2026-10-12 20:22 EDT
+
+- Live read-only status showed the player's current request was still gathering: `5/64` collected, `0` deposited, five `BIRCH_LOG` in cargo, chest bound. The server log showed repeated JEV target selections, and the screenshot showed three path-failure messages. This confirms the task had not reached the chest-delivery phase yet.
+- Added persisted partial-delivery state. After three distinct failed resource routes, or two consecutive scans with no eligible nearby targets while carrying cargo, Ahmet stops that request and tries to deposit the exact collected cargo; the completion message reports it as partial. Full/unreachable chest behavior still retains cargo.
+- Java 21 package build passed: **45 tests, 0 failures**. Tests cover the three-route/two-empty-scan thresholds, reset behavior after targets are found or harvested, partial-delivery state, exact cargo requirement, and restart persistence. A separate disposable Paper 1.21.6 + Citizens 2.0.41 build 4138 server loaded the updated plugin and executed `/ahmet help` and `/ahmet status`, then shut down cleanly.
+- Updated JAR is staged in the live plugin folder and transfer ZIP. The live server is still running with the previous plugin classes; do not restart while the player is connected. This patch has not yet been verified in gameplay.
+
+## Route recovery enabled on LAN server — 2026-10-12 20:25 EDT
+
+- Console confirmed 0 players before shutdown. Paper stopped cleanly; the imported world and plugin task state were saved.
+- Restarted with the final partial-delivery JAR. Paper 1.21.6 build 48, Citizens 2.0.41 build 4138, and VillagerAhmet all enabled without exceptions. Citizens loaded two records and the plugin restored saved NPC id 1.
+- Read-only `/ahmet status` reports the saved request preserved at `5/64`, 0 deposited, chest bound, NPC unspawned; `/list` reports 0 players. The player should join as operator and use `/ahmet spawn` to resume. Gameplay of the new partial-delivery fallback remains unverified.
+
+## Double-chest capacity fix — 2026-10-12 20:32 EDT
+
+- The user's GUI showed a `Large Chest` with most of its lower half empty while Ahmet said the chest was full. Live state at the time had a bound chest at `world (3,73,144)`, 5 birch logs carried, and a 5-item delivery task with 0 deposited. The deposit code used `Chest.getBlockInventory()`, which Paper 1.21.6 documents as only the bound 27-slot half of a double chest.
+- Switched normal deposit and journal recovery to `Chest.getInventory()`. Inspection of the pinned Paper 1.21.6 runtime's `CraftChest` bytecode confirms this returns `CraftInventoryDoubleChest` when its menu provider resolves a `DoubleInventory`. A no-room message now includes the number of slots checked.
+- Java 21 Maven package passed: **46 tests, 0 failures**. Added a planner regression for a full 27-slot first half plus empty second half.
+- A disposable Paper 1.21.6 + Citizens test world ran a ChestProbe: first-half inventory size 27, combined inventory size 54; after filling the first half with cobblestone, it wrote five birch logs into slot 27 of the empty second half. The probe server shut down cleanly. This integration check validates the API view and slot write; live-world delivery still needs player confirmation.
+- The live-world config still has the five birch logs and 5/5 delivery task saved. Do not lose or manually clear that cargo; activate the updated JAR only after confirming the server is empty.
+- Final JAR and ZIP are built and staged. At the latest console check (20:34 EDT), one player was online and the live server still had its previous plugin classes loaded; no restart was performed. The 5-item delivery remains active until a safe restart applies the fix.
+
+## Double-chest fix enabled — 2026-10-12 20:36 EDT
+
+- Console confirmed 0 players before the restart. Paper saved and shut down cleanly; the updated VillagerAhmet JAR loaded with Citizens on startup and restored NPC id 1.
+- Read-only console checks show the delivery task survived at 5/5, 0 delivered, cargo `BIRCH_LOG: 5`, chest bound, NPC unspawned, and 0 players online. The operator must reconnect and use `/ahmet spawn`; this will resume the saved chest delivery using the corrected 54-slot inventory view.
+- The double-chest API/slot integration probe passed in a separate disposable Paper world. Actual insertion into the user's chest still awaits the operator resuming Ahmet in-game.
+
+## Player-placed wood protection — 2026-10-12 20:43 EDT
+
+- Added a persistent registry of player-placed log/stem coordinates from `BlockPlaceEvent`; these blocks are excluded even when adjacent to natural leaves. Added a configurable protected-home sphere (default radius 10) for pre-existing builds and OP command `/ahmet protecthome <0-32>` to set its center/radius.
+- Registry and home-radius unit tests cover coordinate persistence, invalid registry data, radius boundaries, and world isolation. Full Java 21 package passed: **50 tests, 0 failures**. The updated plugin booted in a disposable Paper 1.21.6 + Citizens test world without exceptions.
+- Updated JAR and transfer ZIP are staged. The running LAN JVM still has previous classes loaded; activate only after confirming no player is online. Old edits outside the protected home area and changes made through commands/other plugins cannot be inferred from vanilla block state.
+
+## Wood protection enabled on LAN server — 2026-10-12 20:55 EDT
+
+- Confirmed zero players connected before restart via both server logs (player `aselekoglu` disconnected at 20:42:01) and a direct Minecraft Server List Ping handshake on `127.0.0.1:25565` (`0 / 6` players online).
+- Inspected and preserved live task/cargo state before restart: task idle (cancelled by user after harvesting 3 birch logs), cargo retained at `3` (`BIRCH_LOG: 3`), delivery chest bound at `world (3,73,144)`, home at `world (5,73,149)`. Backups saved to `config.yml.bak` and `operations.json.bak`.
+- Gracefully stopped the running server via SIGTERM: Paper flushed all chunk I/O, saved chunks across Overworld, Nether, and The End, and shut down cleanly.
+- Staged plugin JAR SHA-256 (`9d1b60f48c86693f9b5c727ff7d24a3be0ba637ad17d114382384e5c2c84e5b5`) matches the staged distribution ZIP, containing `PlayerPlacedWoodRegistry` and `ProtectedHomeArea`.
+- Restarted `server-live` with `ACCEPT_MINECRAFT_EULA=true` and `AHMET_SERVER_DIR=server-live`.
+- Node brain started on `127.0.0.1:3197`; `GET /health` probe confirmed `{"ok":true,"service":"villager-ahmet-brain","decisionMode":"jev","chatMode":"llm"}`.
+- Paper 1.21.6 build 48 initialized Citizens 2.0.41 build 4138 and VillagerAhmet 0.1.0 without exceptions (`Done (20.405s)`). Citizens loaded two saved NPC records; VillagerAhmet restored saved NPC id 1 after registry load.
+- Console `/ahmet status` responded: `Ahmet: boşta (taşınan kaynak: 3) | Sandık: bağlı | NPC: yok | Korunan ev: 10 blok | Yerleştirilmiş odun işareti: 0`.
+- Console `/ahmet cargo` responded: `Ahmet'in taşıdığı kaynaklar (3): • 3 × birch_log`.
+- Saved configuration verified: `options.protect-home-radius: 10`, `protection.home` defaulted to `world (5,73,149)`, `protection.playerPlacedWood: []`, bound chest `world (3,73,144)`.
+- Server is active on private LAN `10.0.0.140:25565` with `online-mode=false` and whitelist enabled.
+- Operator actions remaining in-game: operator joins as `aselekoglu`, runs `/ahmet protecthome 10` from the center of the build (if different from the default home), runs `/ahmet spawn` (or `/ahmet summon`) to bring Ahmet into the world, runs `/ahmet deliver` to deposit the 3 carried birch logs into the 54-slot chest, and issues a collection request to verify that house logs within the 10-block protection radius are skipped while natural logs outside the protected area are collected.
+
+## Live in-game wood protection and player-placed tracking verification — 2026-10-12 21:04 EDT
+
+- Operator `aselekoglu` connected to the live server at `[world] (-1.07, 73.0, 149.21)`.
+- Player ran `/ahmet deliver`, successfully depositing the 3 carried birch logs into the bound delivery chest (`Chest.getInventory()`) and triggering a clean world save.
+- Player placed replacement wood blocks into the house structure at `(1, 70-74, 146)` and `(-3, 70-72, 148)`. The `BlockPlaceEvent` handler dynamically recorded all 8 placements in real time (`Yerleştirilmiş odun işareti: 8`), verified in `config.yml` under `protection.playerPlacedWood`.
+- Natural-language Turkish gathering request `ahmet 15 odun topla` was processed via OpenAI GPT-6 Luna (`taskSource: llm`).
+- Target selection ran through TypeSafe JEV (`source: jev, model: jev-1.13.0`).
+- **Protected-home verification**: The house logs at `(1, 73, 146)`—which were previously targeted before the fix—were skipped because they fell within the 10-block home protection sphere around `(5, 73, 149)`. JEV selected natural tree targets outside the house:
+  - First target: `block=-3, 78, 153` (canopy log). When the watchdog determined the path could not reach Y=78, it cleanly timed out and selected `block=-1, 72, 157` at ground level outside the house.
+  - After the operator summoned Ahmet to outside coordinates `(-9, 67, 125)` and re-issued `ahmet 15 odun topla`, JEV selected target `block=-4, 72, 122` (ground-level birch log, well outside the house).
+- Player subsequently ran `/ahmet cancel` and checked `/ahmet cargo` (`Ahmet'in taşıdığı kaynak yok`).
+- Console status confirmed: `Ahmet: boşta (taşınan kaynak: 0) | Sandık: bağlı | NPC: aktif | Korunan ev: 10 blok | Yerleştirilmiş odun işareti: 8`.
+
 ## Verified
 
 - `./scripts/doctor.sh` identifies Java 21.0.12.1, Maven 3.10.0 and Node.js 22.19.0 when Homebrew Java/Maven are on `PATH`. Paper is pinned to 1.21.6 build 48; Citizens is pinned to 2.0.41 build 4138 with the 1.21_R5 adapter.

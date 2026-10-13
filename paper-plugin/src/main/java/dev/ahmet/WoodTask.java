@@ -6,6 +6,7 @@ import java.util.UUID;
 final class WoodTask {
   String taskId="";
   boolean active=false;
+  boolean partialDelivery=false;
   String owner="";
   String materialPreference="any";
   int requested=0,collected=0,deposited=0,cargo=0;
@@ -16,7 +17,7 @@ final class WoodTask {
     if(count<1||count>64)throw new IllegalArgumentException("Task amount must be between 1 and 64");
     if(!WoodMaterials.isPreference(preference))throw new IllegalArgumentException("Unsupported wood preference");
     if(active||cargo>0)throw new IllegalStateException("Finish or recover the current task before starting another");
-    taskId=UUID.randomUUID().toString();active=true;owner=user.toString();materialPreference=preference;requested=count;collected=0;deposited=0;cargo=0;cargoItems.clear();
+    taskId=UUID.randomUUID().toString();active=true;partialDelivery=false;owner=user.toString();materialPreference=preference;requested=count;collected=0;deposited=0;cargo=0;cargoItems.clear();
   }
   void harvestOne(){harvestOne("OAK_LOG");}
   void harvestOne(String material){
@@ -26,6 +27,10 @@ final class WoodTask {
     collected++;cargo++;cargoItems.merge(material,1,Integer::sum);
   }
   void cancel(){active=false;}
+  void requestPartialDelivery(){
+    if(!active||collected<=0||cargo<=0)throw new IllegalStateException("There is no collected cargo to deliver partially");
+    partialDelivery=true;
+  }
   void resumeDelivery(){
     if(active||cargo<=0)throw new IllegalStateException("There is no cancelled cargo to deliver");
     requested=collected;active=true;
@@ -40,17 +45,18 @@ final class WoodTask {
   }
   Map<String,Integer> cargoItems(){return Map.copyOf(cargoItems);}
   String nextCargoMaterial(){return cargoItems.keySet().stream().findFirst().orElse(null);}
-  boolean readyToFinish(){return collected>=requested&&cargo==0;}
+  boolean readyToFinish(){return (collected>=requested||partialDelivery)&&cargo==0;}
+  boolean readyToDeliver(){return collected>=requested||partialDelivery;}
   void finish(){
     if(!readyToFinish())throw new IllegalStateException("Task is not ready to finish");
-    active=false;
+    active=false;partialDelivery=false;
   }
   String describe(){
     String resource=materialPreference.startsWith("item:")?materialPreference.substring("item:".length()).toLowerCase(java.util.Locale.ROOT):"kütük";
-    return !active?"boşta (taşınan kaynak: "+cargo+")":resource+" "+collected+"/"+requested+" toplandı, "+deposited+" teslim";
+    return !active?"boşta (taşınan kaynak: "+cargo+")":resource+" "+collected+"/"+requested+" toplandı, "+deposited+" teslim"+(partialDelivery?" (kısmi teslimat)":"");
   }
   void load(FileConfiguration c){
-    active=c.getBoolean("task.active");owner=c.getString("task.owner","");requested=c.getInt("task.requested");
+    active=c.getBoolean("task.active");partialDelivery=c.getBoolean("task.partialDelivery",false);owner=c.getString("task.owner","");requested=c.getInt("task.requested");
     collected=c.getInt("task.collected");deposited=c.getInt("task.deposited");cargo=c.getInt("task.cargo");
     materialPreference=c.getString("task.materialPreference","any");
     if(!WoodMaterials.isPreference(materialPreference))throw new IllegalStateException("Saved wood preference is unsupported");
@@ -84,7 +90,7 @@ final class WoodTask {
     return amount;
   }
   void save(FileConfiguration c){
-    c.set("task.id",taskId);c.set("task.active",active);c.set("task.owner",owner);c.set("task.requested",requested);
+    c.set("task.id",taskId);c.set("task.active",active);c.set("task.partialDelivery",partialDelivery);c.set("task.owner",owner);c.set("task.requested",requested);
     c.set("task.collected",collected);c.set("task.deposited",deposited);c.set("task.cargo",cargo);
     c.set("task.materialPreference",materialPreference);c.set("task.cargoItems",new LinkedHashMap<>(cargoItems));
   }
