@@ -11,6 +11,8 @@ import org.bukkit.Location;
  * before falling back to navigating directly into the target block itself.
  */
 final class HarvestApproachPlanner {
+  private static final double CARDINAL_HARVEST_DIST_SQ = 1.01;
+  private static final double INNER_HARVEST_DIST_SQ = 1.5 * 1.5;
   private static final double MAX_HARVEST_DIST_SQ = 2.9 * 2.9;
 
   private HarvestApproachPlanner() {}
@@ -34,12 +36,21 @@ final class HarvestApproachPlanner {
 
     if (candidates.isEmpty()) return null;
 
+    Comparator<Location> comparator = Comparator.comparingInt((Location loc) -> {
+      double dSq = distSq(loc, targetReference);
+      if (dSq <= CARDINAL_HARVEST_DIST_SQ) return 0;
+      if (dSq <= INNER_HARVEST_DIST_SQ) return 1;
+      return 2;
+    });
     if (npcLoc != null) {
-      candidates.sort(Comparator.comparingDouble((Location loc) -> distSq(npcLoc, loc))
-          .thenComparingInt(Location::getBlockY)
-          .thenComparingInt(Location::getBlockX)
-          .thenComparingInt(Location::getBlockZ));
+      comparator = comparator.thenComparingDouble(loc -> distSq(npcLoc, loc));
+    } else {
+      comparator = comparator.thenComparingDouble(loc -> distSq(loc, targetReference));
     }
+    candidates.sort(comparator
+        .thenComparingInt(Location::getBlockY)
+        .thenComparingInt(Location::getBlockX)
+        .thenComparingInt(Location::getBlockZ));
 
     return candidates.getFirst();
   }

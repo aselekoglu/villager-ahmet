@@ -40,4 +40,17 @@ final class HarvestApproachPlannerTest {
     Location targetLoc = NavigationTarget.approachFor(targetBlock, npc, loc -> false);
     assertEquals(NavigationTarget.fromBlock(targetBlock), targetLoc);
   }
+
+  @Test
+  void prefersAdjacentStandingCellOverOuterRingCellWhenApproachingFromAfar() {
+    Location targetBlock = new Location(null, 4, 120, 0);
+    Location npc = new Location(null, 0.5, 120, 0.5);
+
+    Location outerRingCell = new Location(null, 2.5, 120, 0.5);
+    Location innerRingCell = new Location(null, 3.5, 120, 0.5);
+    Set<Location> safeCells = Set.of(outerRingCell, innerRingCell);
+
+    Location chosen = HarvestApproachPlanner.findApproach(npc, targetBlock, safeCells::contains);
+    assertEquals(innerRingCell, chosen);
+  }
 }

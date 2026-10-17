@@ -206,11 +206,12 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       if(args.length!=3){player.sendMessage("§eKullanım: /ahmet collect <item|odun> <1-64>");return true;}
       TaskRequest request=TaskRequest.parse(args[1],args[2]).orElse(null);
       if(request==null){player.sendMessage("§cBu kaynak desteklenmiyor veya miktar 1-64 arasında değil. Örnek aramalar: /ahmet items oak_log, /ahmet items raw_iron. Genel odun için 'odun' yaz.");return true;}
-      if(recoveryBlocked||journal.hasOperations()){player.sendMessage("§cKurtarma bekliyor; yeni görev güvenli değil.");return true;}
+      if(recoveryBlocked){player.sendMessage("§cKurtarma bekliyor; yeni görev güvenli değil.");return true;}
       if(npc==null||!npc.isSpawned()){player.sendMessage("§cÖnce /ahmet spawn ile Ahmet'i oluştur.");return true;}
       if(!player.getWorld().equals(npc.getEntity().getWorld())||player.getLocation().distanceSquared(npc.getEntity().getLocation())>18*18){player.sendMessage("§cGörev vermek için Ahmet'e yaklaş.");return true;}
-      if(chestLocation==null||!chestLocation.getWorld().equals(npc.getEntity().getWorld())){player.sendMessage("§cÖnce aynı dünyadaki teslimat sandığını /ahmet chest ile bağla.");return true;}
       if(task.active||task.cargo>0){player.sendMessage("§cÖnce mevcut görevi bitir veya /ahmet deliver ile taşıdığı yükü boşalt.");return true;}
+      if(journal.hasOperations()){player.sendMessage("§cKurtarma bekliyor; yeni görev güvenli değil.");return true;}
+      if(chestLocation==null||!chestLocation.getWorld().equals(npc.getEntity().getWorld())){player.sendMessage("§cÖnce aynı dünyadaki teslimat sandığını /ahmet chest ile bağla.");return true;}
       task.start(player.getUniqueId(),request.amount(),request.preference());treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Task started via command");controller.clearHelp();persist();event("task_started",request.amount());
       say("Tamam, "+request.amount()+" "+request.itemName()+" toplamaya başlıyorum.");
       return true;
@@ -416,8 +417,21 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       return;
     }
     if(navigationGoal!=null){
-      NavigationWatchdog.Outcome outcome=navigationWatchdog.observe(current.distanceSquared(navigationGoal),now);
+      boolean reachedHarvest=task.active&&!task.readyToDeliver()&&treeTarget!=null
+          &&treeTarget.getWorld().equals(current.getWorld())
+          &&current.distanceSquared(treeTarget.clone().add(.5,0,.5))<=2.9*2.9;
+      boolean reachedChest=task.active&&task.readyToDeliver()&&chestLocation!=null
+          &&chestLocation.getWorld().equals(current.getWorld())
+          &&current.distanceSquared(chestLocation.clone().add(.5,0,.5))<=3.2*3.2;
+      double watchdogDistSq=task.active&&!task.readyToDeliver()&&treeTarget!=null&&treeTarget.getWorld().equals(current.getWorld())
+          ? current.distanceSquared(treeTarget.clone().add(.5,0,.5))
+          : current.distanceSquared(navigationGoal);
+      NavigationWatchdog.Outcome outcome=(reachedHarvest||reachedChest)
+          ? NavigationWatchdog.Outcome.REACHED
+          : navigationWatchdog.observe(watchdogDistSq,now);
       if(outcome==NavigationWatchdog.Outcome.REACHED){
+        if((reachedHarvest||reachedChest)&&npc.getNavigator().isNavigating())npc.getNavigator().cancelNavigation();
+        navigationWatchdog.reset();
         navigationGoal=null;
         routeClears=0;
         controller.clearHelp();
@@ -775,6 +789,9 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       persist();
       journal.completeHarvest();
       treeTarget=null;
+      navigationGoal=null;
+      navigationWatchdog.reset();
+      routeClears=0;
       partialDeliveryPolicy.harvested();
       invalidateTargetScan();
       if(task.collected>=task.requested)say(task.collected+" kaynağı topladım, sandığa gidiyorum.");
@@ -805,7 +822,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       persist();
       saveJournalWorlds(chest.getWorld());
       journal.clearAfterWorldSave();
-      if(task.cargo>0){warn("Sandık dolu; "+task.cargo+" kaynak hâlâ yanımda.");return;}
+      if(plan.moved()<amount){warn("Sandık dolu; "+task.cargo+" kaynak hâlâ yanımda.");return;}
+      if(task.cargo>0)return;
       finishTaskIfReady();
     }catch(Exception e){
       blockRecovery("Deposit transaction is pending; the job is paused",e);
@@ -1002,9 +1020,10 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
   private void issueNavigationTarget(Location target){
     if(npc==null||!npc.isSpawned()||target==null)return;
+    npc.getNavigator().getDefaultParameters().destinationTeleportMargin(-1).stationaryTicks(-1).distanceMargin(0.75).pathDistanceMargin(0.75);
     npc.getNavigator().setTarget(target);
     // Citizens documents these per-target parameters; -1 disables destination and stuck teleports.
-    npc.getNavigator().getLocalParameters().destinationTeleportMargin(-1).stationaryTicks(-1);
+    npc.getNavigator().getLocalParameters().destinationTeleportMargin(-1).stationaryTicks(-1).distanceMargin(0.75).pathDistanceMargin(0.75);
   }
   private void clearNavigation(){
     if(npc!=null&&npc.isSpawned())npc.getNavigator().cancelNavigation();

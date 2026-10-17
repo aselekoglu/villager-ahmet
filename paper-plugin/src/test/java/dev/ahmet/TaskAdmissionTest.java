@@ -20,7 +20,15 @@ final class TaskAdmissionTest {
         TaskAdmission.evaluate(true,false,journal.hasOperations(),false,0,true));
   }
 
-  @Test void recoveryAndBusyReasonsAreNotMisreportedAsUnsupported() {
+  @Test void recoveryAndBusyReasonsAreNotMisreportedAsUnsupported() throws Exception {
+    var path=temp.resolve("harvest-operations.json");
+    var journal=new OperationJournal(path);
+    journal.load();
+    journal.prepareHarvest(new OperationJournal.Harvest("task","world",1,64,1,0,0));
+    journal.completeHarvest();
+    assertEquals(TaskAdmission.Result.BUSY,TaskAdmission.evaluate(true,false,journal.hasOperations(),true,1,true));
+    assertEquals(TaskAdmission.Result.BUSY,TaskAdmission.evaluate(true,false,journal.hasOperations(),false,1,true));
+    assertEquals(TaskAdmission.Result.RECOVERY_REQUIRED,TaskAdmission.evaluate(true,true,journal.hasOperations(),true,1,true));
     assertEquals(TaskAdmission.Result.RECOVERY_REQUIRED,TaskAdmission.evaluate(true,true,false,false,0,true));
     assertEquals(TaskAdmission.Result.BUSY,TaskAdmission.evaluate(true,false,false,true,0,true));
     assertEquals(TaskAdmission.Result.BUSY,TaskAdmission.evaluate(true,false,false,false,2,true));

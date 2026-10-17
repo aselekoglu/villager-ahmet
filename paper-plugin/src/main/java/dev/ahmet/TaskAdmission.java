@@ -8,8 +8,9 @@ final class TaskAdmission {
   static Result evaluate(boolean validIntent, boolean recoveryBlocked, boolean journalBusy,
       boolean taskActive, int cargo, boolean chestBound) {
     if(!validIntent)return Result.UNSUPPORTED;
-    if(recoveryBlocked||journalBusy)return Result.RECOVERY_REQUIRED;
+    if(recoveryBlocked)return Result.RECOVERY_REQUIRED;
     if(taskActive||cargo>0)return Result.BUSY;
+    if(journalBusy)return Result.RECOVERY_REQUIRED;
     if(!chestBound)return Result.CHEST_REQUIRED;
     return Result.ACCEPT;
   }

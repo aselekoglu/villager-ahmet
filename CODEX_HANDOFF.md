@@ -58,13 +58,13 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 
 ## 3. Test Suites & Verification Evidence
 
-- **Java Maven Unit Tests**: **124 tests, 0 failures** (`mvn test` in `paper-plugin/`).
-  - Covers `AgentEvaluationHarnessTest` (7), `AgentControllerTest` (3), `AgentModelsTest` (4), `ActionPreconditionsTest` (5), `ProtectionHookTest` (5), `ObstructionPolicyTest` (9), `DescentSimulatorTest` (7), `HarvestApproachPlannerTest` (2), `OperationJournalTest` (8), `OperationRecoveryTest` (6), `WoodTaskTest` (12), `ExplorationPlannerTest` (9), `CargoDepositPlannerTest` (6), `ClearTransactionTest` (2), `TaskAdmissionTest` (2), `ResourceCatalogTest` (3), and all existing unit suites.
+- **Java Maven Unit Tests**: **125 tests, 0 failures** (`mvn test` in `paper-plugin/`).
+  - Covers `AgentEvaluationHarnessTest` (7), `AgentControllerTest` (3), `AgentModelsTest` (4), `ActionPreconditionsTest` (5), `ProtectionHookTest` (5), `ObstructionPolicyTest` (9), `DescentSimulatorTest` (7), `HarvestApproachPlannerTest` (3), `OperationJournalTest` (8), `OperationRecoveryTest` (6), `WoodTaskTest` (12), `ExplorationPlannerTest` (9), `CargoDepositPlannerTest` (6), `ClearTransactionTest` (2), `TaskAdmissionTest` (2), `ResourceCatalogTest` (3), and all existing unit suites.
 - **Node Brain Unit Tests**: **16 tests, 0 failures** (`npm test` in `brain/`).
   - Covers Turkish chat parsing, return-home intent, JEV model contract, OpenAI GPT-6 Luna contract, memory store, decision fallbacks, bounded item IDs, action allowlists, and fallback leaf clearing protection.
 - **Distribution Packages**:
-  - `server-live/plugins/VillagerAhmet.jar` (commit `775ca1e`, pushed to `origin/main`; SHA-256: `57172d57df10eb13821fd9a907025d8422c3b7bb3dd3a5ec90618c7223eca83a`). Paper 1.21.6 build 48 + Citizens 2.0.41 build 4138 + Java 21 started with `Done (10.035s)`; brain is listening at `127.0.0.1:3197`. `/ahmet status`: IDLE, cargo 0, chest bound, recovery unblocked; NPC id 1 restored but unspawned (`NPC: yok`). Old startup/shutdown retired the pre-existing clear journal before this startup, so replay of those records was not exercised here.
-  - `dist/villager-ahmet-plugins-paper-1.21.6.zip` (SHA-256: `39d182e9b81a5319affa07edf1b3883e1c14573ecb13a893bf189884cf67bfe0`)
+  - `server-live/plugins/VillagerAhmet.jar` (commit `775ca1e`, pushed to `origin/main`; SHA-256: `57172d57df10eb13821fd9a907025d8422c3b7bb3dd3a5ec90618c7223eca83a`). Paper 1.21.6 build 48 + Citizens 2.0.41 build 4138 + Java 21 started with `Done (10.035s)`; brain is listening at `127.0.0.1:3197`. `/ahmet status`: IDLE, cargo 0, chest bound, recovery unblocked; NPC id 1 restored but unspawned (`NPC: yok`). Old startup/shutdown retired the pre-existing clear journal before this startup, so replay of those records was not exercised here. (Note: the 2026-10-16 source fixes in the working tree/next commit have not yet been deployed to `server-live`.)
+  - `dist/villager-ahmet-plugins-paper-1.21.6.zip` (SHA-256: `a4743a1d5dbe053f17385ab7a512013b65b1555e05b02e2d088b99566252970d`)
   - Validated by `dist/SHA256SUMS.txt`.
 
 ---
@@ -72,7 +72,7 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 ## 4. Live Server Environment (`server-live`)
 - **Server Version**: Paper 1.21.6 build 48 + Citizens 2.0.41 build 4138.
 - **Configured Locations**:
-  - Home: `world (4, 76, 125)`
+  - Home: `world (11, 71, 153)`
   - Protected Home: `world (5, 73, 149)` (radius 10)
   - Delivery Chest: `world (3, 73, 144)`
 - **Server Startup Command**:
@@ -82,8 +82,8 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
   AHMET_SERVER_DIR=server-live ACCEPT_MINECRAFT_EULA=true ./scripts/run.sh
   ```
 - **Rules of Engagement for Restarts**:
-  - Check `/list` before restarting. NEVER restart while players are connected.
-  - Shut down using `stop` command so all chunk I/O terminates cleanly and world dimensions save.
+  - Shut down using graceful `stop` (or clean SIGTERM save) so all chunk I/O and journals flush cleanly and world dimensions save.
+  - Per explicit user instruction, graceful restarts are permitted even when players are connected; connected players alone do not block an authorized deployment restart.
 
 ---
 
@@ -95,14 +95,15 @@ Historical review prompt for **sol 6.1** (the claims and deployment hashes above
 3. **Exploration & Navigation Robustness**: Review `ExplorationPlanner.java` algorithms (`findExplorationWaypoint` and `findStepTowardsHome`) for pathfinding efficiency, boundary limits, and obstacle avoidance.
 4. **Security & Input Validation**: Ensure bounded typed actions and strict validation of player chat and task inputs without any command injection or arbitrary coordinate passthrough.
 5. **Next Roadmap Objectives**:
+   - First open P1 item: Citizen NPC schedule (wake, wander, work, sleep at bed and village home).
    - Live gameplay validation of wandering exploration and multi-step home return with online player.
    - Enhanced visual feedback / particle effects or arm swinging during harvesting.
    - Clean up duplicate Citizens NPC template records if any exist in the saved world registry.
 
 
-## Remediation notes (2026-10-12)
+## Remediation notes (2026-10-12 .. 2026-10-16)
 
-- Current source changes add bounded incremental scanning, stricter recovery and authorization, safe-ground hazards, plain-stack deposit planning, and checked temporary-file YAML persistence. These changes are not evidence of deployment or live-world verification.
-- Verification on 2026-10-13: Java 21 Maven package passed with 124 tests, Node tests passed 16/16, and mock HTTP smoke passed. Commit `775ca1e` was pushed to `origin/main` and deployed in JAR SHA-256 `57172d57df10eb13821fd9a907025d8422c3b7bb3dd3a5ec90618c7223eca83a`; Paper startup logged `Done (10.035s)` and the brain is on `127.0.0.1:3197`. `/ahmet status` reports IDLE, cargo 0, chest bound, recovery unblocked; saved Citizens id 1 is restored but unspawned. The old server retired its existing clear journal before startup, so old-record replay was not tested by this deployment. Player gameplay remains a manual unchecked acceptance item.
+- Source changes add bounded incremental scanning, stricter recovery and authorization, safe-ground hazards, plain-stack deposit planning, checked temporary-file YAML persistence, truthful task-admission ordering (`BUSY` vs `RECOVERY_REQUIRED` when committed harvest journal entries accompany carried cargo), multi-material deposit warning fix, and cardinal/inner-ring harvest approach + arrival handling.
+- Verification on 2026-10-16: Java 21 Maven package passed with **125/125** tests, Node tests passed **16/16**, and the disposable Paper 1.21.6 runtime probe (`scripts/fixtures/RuntimeCommonResourceProbe.java`) verified `/ahmet items` console queries, all 11 source block drops (+ `COARSE_DIRT` negative control), scan behavior and invocation timing (the earlier probe used a synchronous loop, the corrected independent rerun subsequently verified 74 separate scheduler ticks plus next-tick invalidation; see VALIDATION_RESULTS.md), and end-to-end bounded collection + Citizens villager walking (`teleportDetected=false`) + virtual cargo + chest delivery across all 7 common-resource groups (`dirt`, `sand`, `red_sand`, `cobblestone`, `coal`, `raw_iron`, `raw_gold`, depositing 11/11 items into the bound chest) against the mock brain.
 - Animation/particles and duplicate Citizens registry-record cleanup remain follow-ups. No saved registry files were edited.
 - The manual acceptance matrix remains authoritative; do not mark any newly affected live-world or forced-crash scenario complete without observing it.

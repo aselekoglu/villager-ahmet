@@ -18,7 +18,7 @@ The 1.21.6 vanilla item catalog and common-resource code path are implemented; v
 1. [x] Export and search the complete Paper 1.21.6 item catalog; recognition is separate from executable capabilities.
 2. [x] Generalize chat intent to a bounded canonical item ID while retaining the separate TypeSafe JEV choice boundary.
 3. [x] Add common block/drop mappings, minimum tools, bounded target scans, mixed-item cargo, and journal output-item persistence.
-4. [ ] Finish runtime tests for the item search command, actual Paper drop results, and each common collection group in a disposable Paper world.
+4. [x] Finish runtime tests for the item search command, actual Paper drop results, and each common collection group in a disposable Paper world.
 
 ## P1 — Real villager immersion & autonomy
 
