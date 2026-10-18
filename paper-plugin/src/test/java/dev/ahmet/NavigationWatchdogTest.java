@@ -6,6 +6,12 @@ import org.junit.jupiter.api.Test;
 
 final class NavigationWatchdogTest {
   @Test
+  void scheduleSpecificThresholdCanDisableBroadArrivalSoAdapterChecksCenteredCell() {
+    NavigationWatchdog watchdog = new NavigationWatchdog(0.0);
+    assertEquals(NavigationWatchdog.Outcome.PROGRESS, watchdog.observe(1.0, 0));
+  }
+
+  @Test
   void progressResetsTheStallDeadlineAndNearbyTargetsComplete() {
     NavigationWatchdog watchdog = new NavigationWatchdog();
 

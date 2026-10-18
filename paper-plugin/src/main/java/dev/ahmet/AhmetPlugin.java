@@ -89,6 +89,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private Location homeStepTarget;
   private int homeStepAttempt=0;
   private boolean returningHome=false;
+  private Location scheduleBed;
+  private final ScheduleAdapter scheduleAdapter=new ScheduleAdapter();
 
   @Override public void onEnable() {
     saveDefaultConfig();brain=new BrainClient(this);
@@ -100,6 +102,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     int id=getConfig().getInt("npc-id",-1);
     savedNpcReference=new SavedNpcReference(id);
     chestLocation=loadLoc("chest"); home=loadLoc("home");
+    scheduleBed=loadLoc("schedule.bed");
     protectedHome=loadLoc("protection.home");if(protectedHome==null&&home!=null)protectedHome=home.clone();
     protectHomeRadius=getConfig().getInt("options.protect-home-radius",10);
     if(protectHomeRadius<0||protectHomeRadius>32){getLogger().warning("Invalid options.protect-home-radius; using 10 blocks.");protectHomeRadius=10;}
@@ -120,7 +123,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     if(savedNpcReference.pending())Bukkit.getScheduler().runTaskLater(this,this::restoreSavedNpc,1L);
     getLogger().info("Villager Ahmet ready. Run /ahmet spawn as an operator to summon Ahmet.");
   }
-  @Override public void onDisable(){persist();flushJournalOnShutdown();}
+  @Override public void onDisable(){scheduleAdapter.suspend(npc,"shutdown");persist();flushJournalOnShutdown();}
   private void persist(){
     Integer liveNpcId=npc==null?null:npc.getId();
     getConfig().set("npc-id",savedNpcReference==null?(liveNpcId==null?-1:liveNpcId):savedNpcReference.idForPersistence(liveNpcId));
@@ -173,7 +176,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     if(!cmd.getName().equalsIgnoreCase("ahmet"))return false;
     if(args.length==0||args[0].equalsIgnoreCase("help")){sendHelp(sender);return true;}
     String op=args[0].toLowerCase();
-    if(op.equals("status")){sender.sendMessage("§6Ahmet: §f"+task.describe()+" | Durum: "+controller.state()+" | Sandık: "+(chestLocation!=null?"bağlı":"bağlı değil")+" | NPC: "+(npc!=null&&npc.isSpawned()?"aktif":"yok")+" | Korunan ev: "+(protectedHome==null||protectHomeRadius==0?"yok":protectHomeRadius+" blok")+" | Yerleştirilmiş odun işareti: "+playerPlacedWood.size()+(recoveryBlocked?" | Kurtarma: manuel inceleme gerekli":""));return true;}
+    if(op.equals("status")){sender.sendMessage("§6Ahmet: §f"+task.describe()+" | Durum: "+controller.state()+" | Program: "+scheduleAdapter.status()+" | Yatak: "+(scheduleBed==null?"bağlı değil":coords(scheduleBed))+" | Sandık: "+(chestLocation!=null?"bağlı":"bağlı değil")+" | NPC: "+(npc!=null&&npc.isSpawned()?"aktif":"yok")+" | Korunan ev: "+(protectedHome==null||protectHomeRadius==0?"yok":protectHomeRadius+" blok")+" | Yerleştirilmiş odun işareti: "+playerPlacedWood.size()+(recoveryBlocked?" | Kurtarma: manuel inceleme gerekli":""));return true;}
     if(op.equals("cargo")){
       if(task.cargoItems().isEmpty())sender.sendMessage("§eAhmet'in taşıdığı kaynak yok.");
       else {
@@ -202,6 +205,14 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       protectedHome=player.getLocation().clone();protectHomeRadius=radius;persist();
       player.sendMessage(radius==0?"§aEv çevresi koruması kapatıldı.":"§aBu konumun "+radius+" blok çevresi korunacak; içindeki odunlar toplanmayacak.");return true;
     }
+    if(op.equals("bed")){
+      if(!player.hasPermission("ahmet.admin")){player.sendMessage("§cYetkin yok.");return true;}
+      Block target=player.getTargetBlockExact(6);
+      ScheduleAdapter.BedBinding binding=scheduleAdapter.bindBed(target,npc,home!=null?home:protectedHome,getConfig().getInt("options.max-distance-from-home",32),scheduleChunkAccess());
+      if(!binding.valid()){player.sendMessage("§cYatak bağlanamadı: "+binding.error());return true;}
+      scheduleAdapter.bedRebound();scheduleAdapter.suspend(npc,"bed rebound");scheduleBed=binding.foot();saveLoc("schedule.bed",scheduleBed);persist();
+      player.sendMessage("§aAhmet'in yatağı kaydedildi: "+coords(scheduleBed));return true;
+    }
     if(op.equals("collect")){
       if(args.length!=3){player.sendMessage("§eKullanım: /ahmet collect <item|odun> <1-64>");return true;}
       TaskRequest request=TaskRequest.parse(args[1],args[2]).orElse(null);
@@ -212,7 +223,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       if(task.active||task.cargo>0){player.sendMessage("§cÖnce mevcut görevi bitir veya /ahmet deliver ile taşıdığı yükü boşalt.");return true;}
       if(journal.hasOperations()){player.sendMessage("§cKurtarma bekliyor; yeni görev güvenli değil.");return true;}
       if(chestLocation==null||!chestLocation.getWorld().equals(npc.getEntity().getWorld())){player.sendMessage("§cÖnce aynı dünyadaki teslimat sandığını /ahmet chest ile bağla.");return true;}
-      task.start(player.getUniqueId(),request.amount(),request.preference());treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Task started via command");controller.clearHelp();persist();event("task_started",request.amount());
+      scheduleAdapter.suspend(npc,"task admitted");task.start(player.getUniqueId(),request.amount(),request.preference());treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Task started via command");controller.clearHelp();persist();event("task_started",request.amount());
       say("Tamam, "+request.amount()+" "+request.itemName()+" toplamaya başlıyorum.");
       return true;
     }
@@ -236,6 +247,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       Location destination=findSafeSummonLocation(player);
       if(destination==null){player.sendMessage("§cYakınında yüklü ve güvenli bir boş nokta bulamadım.");return true;}
       if(npc==null){npc=CitizensAPI.getNPCRegistry().createNPC(EntityType.VILLAGER,"Ahmet");savedNpcReference.created(npc.getId());}
+      scheduleAdapter.suspend(npc,"operator summon");
       if(npc.isSpawned()){
         npc.getNavigator().cancelNavigation();
         npc.teleport(destination,PlayerTeleportEvent.TeleportCause.PLUGIN);
@@ -256,7 +268,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       if(task.cargo<=0){player.sendMessage("§eTaşınan kaynak yok.");return true;}
       if(task.active){player.sendMessage("§eÖnce görevi bitir veya iptal et.");return true;}
       if(!player.hasPermission("ahmet.admin") && !task.owner.equals(player.getUniqueId().toString())){player.sendMessage("§cYetkin yok.");return true;}
-      task.resumeDelivery();treeTarget=null;controller.nextGeneration();controller.clearHelp();controller.transitionTo(AgentState.PLANNING,"Cargo delivery resumed");persist();say("Kalan kaynakları sandığa götürüyorum.");return true;
+      scheduleAdapter.suspend(npc,"delivery admitted");task.resumeDelivery();treeTarget=null;controller.nextGeneration();controller.clearHelp();controller.transitionTo(AgentState.PLANNING,"Cargo delivery resumed");persist();say("Kalan kaynakları sandığa götürüyorum.");return true;
     }
     if(op.equals("cancel")){
       if(TaskAuthorization.mayControl(player.getUniqueId().toString(),task.owner,player.hasPermission("ahmet.admin"),task.active) && task.active){cancel();say("Görevi iptal ettim. Topladığım kaynaklar şimdilik bende.");}
@@ -269,7 +281,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       if(effectiveHome==null){player.sendMessage("§cKayıtlı ev konumu yok.");return true;}
       if(!TaskAuthorization.mayControl(player.getUniqueId().toString(),task.owner,player.hasPermission("ahmet.admin"),task.active||task.cargo>0)){player.sendMessage("§cYetkin yok.");return true;}
       if(task.active)cancel();
-      returningHome=true;homeStepAttempt=0;clearNavigation();persist();
+      scheduleAdapter.suspend(npc,"operator return-home");returningHome=true;homeStepAttempt=0;clearNavigation();persist();
       player.sendMessage("§aAhmet eve doğru yönlendirildi.");
       say("Eve doğru yürüyorum.");return true;
     }
@@ -281,7 +293,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
   private void sendHelp(CommandSender sender){
     sender.sendMessage("§6Ahmet komutları");
-    sender.sendMessage("§e/ahmet status §7— görev ve NPC durumu");
+    sender.sendMessage("§e/ahmet status §7— görev, program ve NPC durumu");
     sender.sendMessage("§e/ahmet cargo §7— taşıdığı kaynakların tür ve adetleri");
     sender.sendMessage("§e/ahmet collect <item|odun> <1-64> §7— doğrudan toplama görevi");
     sender.sendMessage("§e/ahmet items [ara] §7— 1.21.6 item kataloğu ve toplama desteği");
@@ -289,13 +301,13 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     sender.sendMessage("§e/ahmet deliver §7— iptalden kalan yükü sandığa teslim et");
     sender.sendMessage("§e/ahmet cancel §7— kendi görevini iptal et");
     sender.sendMessage("§e/ahmet home §7— görevi bırakıp eve dön");
-    if(sender.hasPermission("ahmet.admin"))sender.sendMessage("§e/ahmet spawn | summon | chest | protecthome <0-32> §7— yönetici işlemleri");
+    if(sender.hasPermission("ahmet.admin"))sender.sendMessage("§e/ahmet spawn | summon | chest | bed | protecthome <0-32> §7— yönetici işlemleri");
     sender.sendMessage("§7Ahmet doğal ağaç adaylarını seçer; oyuncu tarafından konan odunları ve korunan ev alanını atlar.");
   }
   @Override public List<String> onTabComplete(CommandSender sender,Command command,String alias,String[] args){
     if(!command.getName().equalsIgnoreCase("ahmet")||args.length==0)return List.of();
     List<String> commands=new ArrayList<>(List.of("help","status","cargo","collect","items","ask","deliver","cancel","home"));
-    if(sender.hasPermission("ahmet.admin"))commands.addAll(List.of("spawn","summon","chest","protecthome"));
+    if(sender.hasPermission("ahmet.admin"))commands.addAll(List.of("spawn","summon","chest","bed","protecthome"));
     if(args.length==1)return commands.stream().filter(value->value.startsWith(args[0].toLowerCase(java.util.Locale.ROOT))).toList();
     if(args.length==2&&args[0].equalsIgnoreCase("protecthome")&&sender.hasPermission("ahmet.admin"))return List.of("0","8","10","12","16").stream().filter(value->value.startsWith(args[1])).toList();
     if(args.length==2&&args[0].equalsIgnoreCase("collect")){
@@ -376,7 +388,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       if(requestedCancel&&task.active)cancel();
       if(requestedHome){
         if(task.active)cancel();
-        returningHome=true;homeStepAttempt=0;clearNavigation();persist();
+        scheduleAdapter.suspend(npc,"chat return-home");returningHome=true;homeStepAttempt=0;clearNavigation();persist();
       }
       if(reply.has("task")&&reply.get("task").isJsonObject()){
         JsonObject spec=reply.getAsJsonObject("task");
@@ -393,7 +405,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         TaskAdmission.Result admission=TaskAdmission.evaluate(validIntent,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound);
         switch(admission){
           case ACCEPT -> {
-            task.start(player.getUniqueId(),amount,preference);treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Task started via chat");controller.clearHelp();persist();event("task_started",amount);
+            scheduleAdapter.suspend(npc,"task admitted");task.start(player.getUniqueId(),amount,preference);treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Task started via chat");controller.clearHelp();persist();event("task_started",amount);
           }
           case UNSUPPORTED -> answer="Bu item kataloğumda tanımlı, ancak güvenli toplama yeteneğim henüz yok. Şimdilik yaygın odun, toprak, kum, taş, kömür, demir ve altın kaynaklarını isteyebilirsin.";
           case RECOVERY_REQUIRED -> {getLogger().warning("Chat task request rejected because operation recovery/checkpoint is pending.");answer="Görev günlüğü kurtarma veya dünya kaydı bekliyor; güvenli duruma gelince tekrar dene.";}
@@ -407,6 +419,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private void cancel(){event("task_cancelled",task.requested);task.cancel();controller.nextGeneration();controller.transitionTo(AgentState.IDLE,"Task cancelled");controller.clearHelp();treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;clearNavigation();explorationAttempts=0;returningHome=task.cargo==0;persist();}
 
   private void step(){
+    advanceSchedule();
+    if(scheduleAdapter.ownsTurn())return;
     if(recoveryBlocked || journal.pendingHarvest().isPresent() || journal.pendingDeposit().isPresent()
         || journal.pendingClear().isPresent() || npc==null || !npc.isSpawned() || deciding)return;
     final Location current=npc.getEntity().getLocation();
@@ -625,6 +639,27 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       }
     }));
   }
+
+  private void advanceSchedule(){
+    boolean journalBusy=journal==null||journal.hasOperations()||(journal!=null&&(journal.pendingHarvest().isPresent()||journal.pendingDeposit().isPresent()||journal.pendingClear().isPresent()));
+    boolean allowed=VillagerSchedule.allowed(task.active,task.cargo,recoveryBlocked,journalBusy);
+    Location effectiveHome=home!=null?home:protectedHome;
+    scheduleAdapter.tick(npc,effectiveHome,scheduleBed,getConfig().getBoolean("options.schedule-enabled",true),!allowed,returningHome,
+        getConfig().getInt("options.max-distance-from-home",32),this::isSafeGround,
+        (current,targetHome)->ExplorationPlanner.findStepTowardsHome(current,targetHome,16.0,0,this::isSafeGround),scheduleChunkAccess());
+  }
+
+  private void clearScheduleNavigation(String reason){scheduleAdapter.suspend(npc,reason);}
+
+  private ScheduleAdapter.ChunkAccess scheduleChunkAccess(){
+    return new ScheduleAdapter.ChunkAccess(){
+      @Override public boolean loaded(World world,int x,int z){return world.isChunkLoaded(x>>4,z>>4);}
+      @Override public Material material(World world,int x,int y,int z){return world.getBlockAt(x,y,z).getType();}
+      @Override public org.bukkit.block.data.BlockData data(World world,int x,int y,int z){return world.getBlockAt(x,y,z).getBlockData();}
+      @Override public boolean safeStandingCell(Location location){return isSafeGround(location);}
+    };
+  }
+
   private boolean evaluateObstructionClearing(Location current,Location goal){
     if(deciding)return false;
     List<ObstructionPolicy.CandidateObstruction> candidates=ObstructionPolicy.findCandidates(current,goal,getProtectedHomeArea(),playerPlacedWood);

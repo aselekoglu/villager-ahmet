@@ -3,7 +3,7 @@ package dev.ahmet;
 final class NavigationWatchdog {
   private static final long STALL_TIMEOUT_MILLIS = 15_000;
   private static final double PROGRESS_EPSILON_SQUARED = 0.25;
-  private static final double ARRIVAL_DISTANCE_SQUARED = 6.25;
+  private final double arrivalDistanceSquared;
   private static final int MAX_STALLED_ATTEMPTS = 3;
 
   enum Outcome { PROGRESS, WAIT, RETRY, GIVE_UP, REACHED }
@@ -13,11 +13,20 @@ final class NavigationWatchdog {
   private int stalledAttempts;
   private boolean initialized;
 
+  NavigationWatchdog() { this(6.25); }
+
+  NavigationWatchdog(double arrivalDistanceSquared) {
+    if (!Double.isFinite(arrivalDistanceSquared) || arrivalDistanceSquared < 0) {
+      throw new IllegalArgumentException("Invalid navigation arrival threshold");
+    }
+    this.arrivalDistanceSquared = arrivalDistanceSquared;
+  }
+
   Outcome observe(double distanceSquared, long nowMillis) {
     if (!Double.isFinite(distanceSquared) || distanceSquared < 0 || nowMillis < 0) {
       throw new IllegalArgumentException("Invalid navigation observation");
     }
-    if (distanceSquared <= ARRIVAL_DISTANCE_SQUARED) {
+    if (distanceSquared <= arrivalDistanceSquared) {
       reset();
       return Outcome.REACHED;
     }

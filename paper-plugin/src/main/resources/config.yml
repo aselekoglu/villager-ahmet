@@ -4,10 +4,13 @@ brain:
   timeout-seconds: 14
 npc-id: -1
 chest: {}
+schedule:
+  bed: {}
 task: {}
 options:
   search-radius: 24
   max-distance-from-home: 32
+  schedule-enabled: true
   protect-home-radius: 10
   # Only harvest unmarked log/stem blocks with nearby tree leaves or Nether-fungus indicators.
   only-natural-wood: true

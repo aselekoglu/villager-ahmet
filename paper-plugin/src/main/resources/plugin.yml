@@ -8,8 +8,8 @@ description: AI villager with bounded world actions and a separate JEV/LLM brain
 commands:
   ahmet:
     description: Manage or speak with Villager Ahmet
-    usage: /ahmet <help|spawn|summon|chest|protecthome|ask|status|cargo|collect|cancel|deliver|items>
+    usage: /ahmet <help|spawn|summon|chest|protecthome|bed|ask|status|cargo|collect|cancel|deliver|items>
 permissions:
   ahmet.admin:
-    description: Create or summon Ahmet and set the delivery chest.
+    description: Create or summon Ahmet and manage schedule settings, chest, and bed.
     default: op
