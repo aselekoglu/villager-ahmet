@@ -1,0 +1,6 @@
+name: RuntimeScheduleProbe
+version: 1.0
+main: dev.ahmetprobe.RuntimeScheduleProbe
+api-version: '1.21'
+load: POSTWORLD
+depend: [Citizens, VillagerAhmet]
