@@ -2,7 +2,7 @@
 
 An AI-assisted **real villager NPC** for a private Minecraft Java Edition multiplayer world. Not a player bot wearing a villager skin.
 
-**Status:** common-resource gathering, the Paper 1.21.6 item catalog, cargo/recovery journaling, double-chest delivery, protected-home filtering, bounded Citizens navigation, and a deterministic Citizens day schedule are implemented. Latest Java source verification: **155 tests passed**; the existing Node suite has **16 passing tests**, and mock HTTP smoke passes. Current schedule JAR `4041f4bb…` passed fresh and same-world restart probes, plus all seven common-resource groups in a disposable Paper server. The same JAR is installed on the private server; Paper startup and `save-all` completed, though `/ahmet status` reported the saved NPC as unspawned (`NPC: yok`). Live player schedule behavior and live provider calls remain unverified. See [`docs/VALIDATION_RESULTS.md`](docs/VALIDATION_RESULTS.md) and [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md). Ahmet is a real Citizens villager.
+**Status:** common-resource gathering, the Paper 1.21.6 item catalog, cargo/recovery journaling, double-chest delivery, protected-home filtering, bounded Citizens navigation, deterministic Citizens scheduling, and bounded player/session memory are implemented in source. Latest Node source suite: **28 tests passed**; the latest Java source verification remains **155 tests passed** (Java was unchanged for M1). Mock HTTP validation passes. The Paper/Citizens release package is rebuilt and verified; source publication and live Node brain deployment remain pending. Current schedule JAR `4041f4bb…` passed fresh and same-world restart probes, plus all seven common-resource groups in a disposable Paper server. The same JAR is installed on the private server; Paper startup and `save-all` completed, though `/ahmet status` reported the saved NPC as unspawned (`NPC: yok`). Live player schedule behavior and live provider calls remain unverified. See [`docs/VALIDATION_RESULTS.md`](docs/VALIDATION_RESULTS.md) and [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md). Ahmet is a real Citizens villager.
 
 ## Architecture
 
@@ -22,9 +22,11 @@ Minecraft Java clients (same game version, unmodified)
       Node.js brain (127.0.0.1:3197)
         ├── chat/task intent (OpenAI chat/completions, GPT-6 Luna JSON)
         ├── JEV (TypeSafe System One, account alias `jev-latest`)
-        ├── JSON memory persisted to disk
+        ├── bounded player/session memory persisted to disk
         └── deterministic mock/fallback mode
 ```
+
+Memory is a bounded deterministic summary of each named player’s recent discussion and typed requests. It rolls sessions after 30 minutes idle, keeps the current and up to five prior summaries (each at most 1,000 characters), and uses interaction-count familiarity labels only; it does not infer personal facts or grant permissions. V1 history and audit rows migrate to v2. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for limits and isolation. This Node source feature is not included in the Paper/Citizens ZIP and has not yet been deployed to the live brain.
 
 The code is original and does not incorporate files from `rmalde/minecraft-agent`; that repo does not currently show a license. The system borrows the **concept** of high-level planning + JEV typed action selection. Minecraft entity control is implemented with Citizens rather than Mineflayer. Resource discovery advances incrementally on the Paper main thread, with a bounded coordinate budget per tick; a scan is not treated as empty until its cursor completes.
 
@@ -33,8 +35,8 @@ The code is original and does not incorporate files from `rmalde/minecraft-agent
 Prerequisites: Minecraft Java Edition 1.21.6 accounts/clients; **Java 21**, **Node.js 20+**, **Python 3**, **Maven 3.9+**, a few GB of RAM, outbound Internet for downloading Paper/Citizens/build dependencies and model calls. Test with a *new* private world, not an irreplaceable save. Both clients connect to the Paper server; they don't need client mods. Live JEV and chat use separate credentials: `TYPESAFE_API_KEY` for TypeSafe and `OPENAI_API_KEY` for OpenAI GPT-6 Luna. Missing keys produce clearly labelled heuristic/mock behavior.
 
 ```bash
-export JAVA_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"
-export PATH="/opt/homebrew/opt/openjdk@21/bin:/opt/homebrew/opt/maven/bin:$PATH"
+export JAVA_HOME="<Java 21 runtime>"
+export PATH="$JAVA_HOME/bin:<Maven runtime>/bin:$PATH"
 ./scripts/doctor.sh
 ./scripts/setup.sh
 # Set TYPESAFE_API_KEY and OPENAI_API_KEY in the ignored brain/.env for live calls.
@@ -44,7 +46,7 @@ ACCEPT_MINECRAFT_EULA=true ./scripts/run.sh
 
 This intentionally does **not** auto-consent to Mojang's EULA. The setup script downloads a checksummed stable Paper 1.21.6 build from the official PaperMC API and pinned Citizens 2.0.41 build 4138, creates a random local bridge token and compiles the plugin against the matching Citizens API. You can also download those exact official JARs yourself into `server/` and `server/plugins/` if the download endpoints fail.
 
-To preserve the default test server while hosting a copied world separately, set `AHMET_SERVER_DIR=server-live` for both setup and run. Relative paths are resolved under the project root; the source world should be copied into that directory's `world/` only after the server has been set up and stopped.
+To preserve the default test server while hosting a copied world separately, set `AHMET_SERVER_DIR="<private server directory>"` for both setup and run. Relative paths are resolved under the project root; the source world should be copied into that directory's `world/` only after the server has been set up and stopped.
 
 From the Minecraft server console, add every real Java username and make yourself operator:
 
@@ -53,7 +55,7 @@ whitelist add YourUsername
 op YourUsername
 ```
 
-Join Minecraft Java **1.21.6** with multiplayer server `localhost:25565` on the server computer, or the server computer's LAN IP (currently `10.0.0.140:25565`) on another computer on the same network. Per the user's request, this private LAN server uses `online-mode=false` and keeps the whitelist enabled so the offline TLauncher profile can join. Offline mode lets clients on that LAN claim usernames and changes UUID-based player identity; use only on the trusted LAN, do not configure port forwarding, and restore `online-mode=true` before any public/WAN exposure. Do not put the local brain API or Paper admin interfaces on the Internet.
+Join Minecraft Java **1.21.6** with multiplayer server `localhost:25565` on the server computer, or use the server host address from another computer on the same trusted LAN. Per the user's request, this private LAN server uses `online-mode=false` and keeps the whitelist enabled so the offline TLauncher profile can join. Offline mode lets clients on that LAN claim usernames and changes UUID-based player identity; use only on the trusted LAN, do not configure port forwarding, and restore `online-mode=true` before any public/WAN exposure. Do not put the local brain API or Paper admin interfaces on the Internet.
 
 ## In-game walkthrough
 

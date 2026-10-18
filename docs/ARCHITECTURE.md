@@ -17,7 +17,7 @@ All POSTs include `Authorization: Bearer <BRIDGE_TOKEN>` and JSON. Brain binds t
 Request:
 
 ```json
-{"actorUuid":"<Minecraft UUID>","actorName":"Ata","text":"Ahmet, 20 meşe odunu topla","context":{"busy":false,"chestBound":true}}
+{"actorUuid":"<Minecraft UUID>","actorName":"primary test player","text":"Ahmet, 20 meşe odunu topla","context":{"busy":false,"chestBound":true}}
 ```
 
 Response (the LLM may set a wood species or request a common resource item):
@@ -33,7 +33,7 @@ Wood requests use the existing `collect_wood` intent; common resources use `coll
 Request:
 
 ```json
-{"observation":{"task":"collect_wood","materialPreference":"any","requested":20,"collected":3,"cargo":3,"deposited":0,"requiredAction":"select_tree","chestBound":true,"position":"10,64,9"},"actions":[{"id":"target_a","description":"Walk to nearby BIRCH_LOG block, distance 5 blocks"},{"id":"target_b","description":"Walk to nearby OAK_LOG block, distance 8 blocks"},{"id":"wait","description":"Wait briefly"}]}
+{"observation":{"task":"collect_wood","materialPreference":"any","requested":20,"collected":3,"cargo":3,"deposited":0,"requiredAction":"select_tree","chestBound":true,"position":"<local position>"},"actions":[{"id":"target_a","description":"Walk to nearby BIRCH_LOG block, distance 5 blocks"},{"id":"target_b","description":"Walk to nearby OAK_LOG block, distance 8 blocks"},{"id":"wait","description":"Wait briefly"}]}
 ```
 
 Response:
@@ -51,6 +51,14 @@ Response:
 ```
 
 Acknowledge `{ "ok": true }`. Allowed types: `task_started`, `task_cancelled`, `task_delivered`. These events feed bounded conversation memory. Server can lose an event when the brain is offline; core task execution remains authoritative in Paper YAML.
+
+## Bounded conversational memory
+
+The Node brain persists schema v2 JSON and migrates valid v1 conversation history and audit rows on load. Memory is isolated by the exact actor UUID; actor maps use own-property-safe storage. Anonymous or malformed actors are never assigned to another player. The store retains at most 200 actors, 500 combined verified/audit events, 20 conversation turns per actor, and six turns of history per model request.
+
+Each actor profile stores a bounded display name, first/last-seen timestamps, and interaction count. `new` means fewer than two recorded turns, `familiar` means 2–9, and `established` means 10 or more. These are deterministic familiarity labels only; they confer no trust, permissions, or task authority.
+
+A session rolls over after 30 minutes idle. It stores deterministic compact snippets of player discussion and validated typed task requests, not semantic extraction of personal facts. The current summary and at most five prior session summaries are each capped at 1,000 characters. No additional LLM summarization call is made. Player requests and assistant claims stay distinct from server-reported task events. Only `task_started`, `task_cancelled`, and `task_delivered` events with a valid actor enter verified model context; legacy chat audit rows and unknown event types remain separately stored and are never promoted to verified outcomes. Model memory is explicitly labeled untrusted context, is bounded before serialization, and cannot bypass the existing task validator, busy/cargo state, or chest requirement.
 
 ### `GET /health`
 

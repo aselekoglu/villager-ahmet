@@ -7,7 +7,7 @@ function busyReply(req) {
   return 'Şu anda bir görevdeyim. Önce bitirmemi bekle ya da /ahmet cancel yaz.';
 }
 export async function chat(req,{store,models={chooseAction,conversationalReply,interpretTurn},key,chatMode}={}) {
-  const actor=String(req.actorUuid??'unknown').slice(0,80);
+  const actor=String(req.actorUuid??'').slice(0,80);
   const name=String(req.actorName??'oyuncu').slice(0,40);
   const message=String(req.text??'').slice(0,500);
   const busy=Boolean(req.context?.busy);
@@ -16,7 +16,8 @@ export async function chat(req,{store,models={chooseAction,conversationalReply,i
   if(returnHome)reply='Tamam, eve dönüyorum.';
   else if(isCancel(message))reply='Tamam, duruyorum. Görevi iptal ettim.';
   else {
-    const modelOptions={key,mode:chatMode,events:store.data.events.filter(e=>e.actor===actor).slice(-10)};
+    const memory=store.context(actor);
+    const modelOptions={key,mode:chatMode,memory,events:memory.verifiedEvents};
     let turn=null,modelFailed=false;
     try {turn=await models.interpretTurn(message,name,store.history(actor),modelOptions);}
     catch {modelFailed=true;}
@@ -42,7 +43,7 @@ export async function chat(req,{store,models={chooseAction,conversationalReply,i
       }
     }
   }
-  await store.record(actor,message,reply,task);
+  await store.record(actor,message,reply,task,name);
   return {reply,task,taskSource,cancel:isCancel(message)||returnHome,goHome:returnHome};
 }
 export async function decide(req,{models={chooseAction},key,decisionMode}={}) {

@@ -27,7 +27,7 @@ The 1.21.6 vanilla item catalog and common-resource code path are implemented; v
 - [x] External protection SPI (`ProtectionHook`, `CompositeProtectionHook`) with fail-closed safety.
 - [x] Structured player help requests (`BLOCKED_AWAITING_HELP`) when route retries or descent simulations fail.
 - [x] Deterministic Citizens NPC schedule: WAKE/WORK at home, bounded WANDER, and bed-directed SLEEP with safe adjacency, fail-closed fallback, retries, status reasons, persistence, and task/cargo/recovery preemption. WANDER radius recovery retains the home route through the six-to-2.5-block zone and resumes wandering at home. WORK means idle availability, not auto-harvest. See [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`ACCEPTANCE.md`](ACCEPTANCE.md); exact-binary runtime and player acceptance are tracked separately.
-- [ ] Context-aware conversational memory; player relationships and session-scoped summaries.
+- [x] Bounded player/session conversational memory (M1): v1→v2 migration, isolated profiles, count-only familiarity labels, 30-minute idle rollover, a current summary and up to five deterministic prior summaries capped at 1,000 characters each, and allowlisted verified-event context. This is not semantic personal-fact extraction or an authority/permission system. Source implementation, local verification, and Paper/Citizens package rebuild are complete; source publication and live Node deployment remain tracked in `tasks/todo.md`.
 - [ ] Avatar gestures: look at players, arm swing while chopping, working sounds, speech proximity.
 - [ ] Perception: inventories/blocks in loaded chunks, player positions with privacy bounds.
 - [ ] Crafting, farm harvesting, multi-villager coordination.

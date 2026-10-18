@@ -6,7 +6,7 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 ### Architectural Division of Responsibility
 - **Java Paper Plugin (`paper-plugin/`)**: Authoritative owner of world mutations, entity pathfinding, item transactions, task state, write-ahead journaling, and safe boundaries. All Bukkit/Citizens calls stay on the server main thread.
 - **Node Brain Daemon (`brain/`)**: Language understanding, structured task extraction, conversational memory, and decision candidate selection. Strictly distinguishes **TypeSafe JEV** (`POST https://api.typesafe.ai/v1/systemone` using model `jev-latest`) for bounded decision selection from **OpenAI GPT-6 Luna** (`POST https://api.openai.com/v1/chat/completions`) for conversational chat.
-- **Private LAN Network Policy**: Operating on private LAN (`10.0.0.140:25565`) with `online-mode=false` (to accommodate operator's offline TLauncher client profile) and whitelist enabled. Strictly private; never port-forwarded or exposed publicly.
+- **Private LAN Network Policy**: Operating on a private LAN with `online-mode=false` (to accommodate operator's offline TLauncher client profile) and whitelist enabled. Strictly private; never port-forwarded or exposed publicly.
 
 ### Deterministic Citizens schedule
 - `ScheduleAdapter` runs the real Citizens villager through WAKE `[0,1000)`, WORK `[1000,9000)`, WANDER `[9000,12000)`, and SLEEP `[12000,24000)` using world time modulo 24,000 ticks. WORK is idle availability at home, not automatic harvesting.
@@ -30,7 +30,7 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 ### C. Double-Chest & Single-Chest Delivery
 - Fixed double-chest inspection using `Chest.getInventory()` (Paper DoubleInventory view providing full 54 slots, avoiding the 27-slot single-half limitation of `getBlockInventory()`).
 - Atomic capacity planner (`CargoDepositPlanner`) fills existing partial stacks and empty slots up to stack limits.
-- Live in-game verified: Ahmet autonomously walked to double chest at `world (3, 73, 144)` and deposited carried birch logs cleanly into slot 27 of the empty second half.
+- Live in-game verified: Ahmet autonomously walked to the bound double chest in the test arena and deposited carried birch logs cleanly into slot 27 of the empty second half.
 
 ### D. Write-Ahead Operations Journal & Crash Recovery
 - Durable write-ahead journal (`OperationJournal` -> `operations.json`) logs every harvest and deposit before mutating world/chest state.
@@ -63,32 +63,36 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 - Schedule policy and adapter are integrated with the production task loop and expose phase/activity/reason in `/ahmet status`; `/ahmet bed` binds an existing bed.
 - Unit coverage includes time boundaries, eligibility, safe bounded wander, task/cargo/recovery/journal preemption, bed state transitions, current failure reporting, and retry cooldowns. Runtime-probe results and the live-play acceptance boundary are recorded in the docs.
 
+### K. Bounded player/session memory (M1)
+- The Node brain stores a bounded profile and deterministic session summaries per actor UUID. Familiarity is based only on turn counts: new (<2), familiar (2–9), established (10+); it is never authority or permission.
+- A 30-minute idle gap starts a session; the current summary and up to five previous summaries of at most 1,000 characters each are retained. Summaries contain discussion snippets, typed task requests, and separately labeled verified events; they do not infer arbitrary personal facts and use no additional LLM call.
+- Schema v1 migrates to v2 while preserving conversation history and audit rows. Actor maps are prototype-safe; limits are 200 actors, 500 combined events/audit rows, 20 stored turns per actor, and six turns in model history.
+- Only `task_started`, `task_cancelled`, and `task_delivered` with a valid actor reach verified model context. Unknown events and old chat audit rows remain separate. Model context is untrusted data and does not alter task validators, task/cargo ownership, or chest gates.
+- Local Node suite is **28/28**. The feature is not in the Paper/Citizens ZIP; source publication and live brain deployment are pending. No live provider or human gameplay with the new memory was run.
+
 ---
 
 ## 3. Test Suites & Verification Evidence
 
-- **Java Maven Unit Tests**: latest source **155 tests, 0 failures** (`mvn package` in `paper-plugin/`; controller log `/private/tmp/ahmet-release-java-20261018.log`). Earlier dated counts below remain historical snapshots.
+- **Java Maven Unit Tests**: latest source **155 tests, 0 failures** (`mvn package` in `paper-plugin/`; controller log `local scratch evidence`). Earlier dated counts below remain historical snapshots.
   - Covers `AgentEvaluationHarnessTest` (7), `AgentControllerTest` (3), `AgentModelsTest` (4), `ActionPreconditionsTest` (5), `ProtectionHookTest` (5), `ObstructionPolicyTest` (9), `DescentSimulatorTest` (7), `HarvestApproachPlannerTest` (3), `OperationJournalTest` (8), `OperationRecoveryTest` (6), `WoodTaskTest` (12), `ExplorationPlannerTest` (9), `CargoDepositPlannerTest` (6), `ClearTransactionTest` (2), `TaskAdmissionTest` (2), `ResourceCatalogTest` (3), and all existing unit suites.
-- **Node Brain Unit Tests**: **16 tests, 0 failures** (`npm test` in `brain/`).
+- **Node Brain Unit Tests**: current source **28 tests, 0 failures** (`node --test test/*.test.mjs` in `brain/`). Earlier dated counts below remain historical snapshots.
   - Covers Turkish chat parsing, return-home intent, JEV model contract, OpenAI GPT-6 Luna contract, memory store, decision fallbacks, bounded item IDs, action allowlists, and fallback leaf clearing protection.
 - **Distribution Packages**:
-  - Historical `server-live` package: commit `775ca1e`, SHA-256 `57172d57df10eb13821fd9a907025d8422c3b7bb3dd3a5ec90618c7223eca83a`; its 2026-10-12 startup does not verify the current schedule source. The exact current JAR was installed on 2026-10-18 and Paper startup plus `save-all` were verified; `/ahmet status` reported NPC id restored in Citizens but unspawned (`NPC: yok`). See the live deployment record in `docs/VALIDATION_RESULTS.md`.
-  - Current `dist/villager-ahmet-plugins-paper-1.21.6.zip` (SHA-256: `19066e4765a7f72cf91c6f50460afe9e38870c6e4911487a6e267c7797546493`), containing the tested plugin JAR SHA-256 `4041f4bb70a67d0abc2ae2cd9db226da98916d758d5605f8c65863ef6aebbda1` and pinned Citizens JAR. Package integrity and embedded checksums were verified; current JAR fresh, same-world restart, and common-resource disposable acceptance all pass.
-  - Validated by `dist/SHA256SUMS.txt`.
+  - Historical private server package: commit `775ca1e`, SHA-256 `57172d57df10eb13821fd9a907025d8422c3b7bb3dd3a5ec90618c7223eca83a`; its 2026-10-12 startup does not verify the current schedule source. The exact current JAR was installed on 2026-10-18 and Paper startup plus `save-all` were verified; `/ahmet status` reported NPC id restored in Citizens but unspawned (`NPC: yok`). See the live deployment record in `docs/VALIDATION_RESULTS.md`.
+  - Rebuilt M1 package `dist/villager-ahmet-plugins-paper-1.21.6.zip` SHA-256: `cb339161ed171957ad7f208895adade6c193ae8a2ffb24aedc1856dea4ab55d8`; four entries and archive/embedded hashes verified. It contains the unchanged Paper JAR SHA-256 `4041f4bb70a67d0abc2ae2cd9db226da98916d758d5605f8c65863ef6aebbda1` and pinned Citizens JAR SHA-256 `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158`; the Node brain is not bundled. The JAR’s prior disposable acceptance evidence is unchanged. Source publication and live Node deployment remain pending.
+  - Validated by `dist/SHA256SUMS.txt`. This archive contains the Paper plugin and Citizens dependency, not the Node brain; it does not include M1 memory code.
 
 ---
 
-## 4. Live Server Environment (`server-live`)
+## 4. Private Server Environment
 - **Server Version**: Paper 1.21.6 build 48 + Citizens 2.0.41 build 4138.
-- **Configured Locations**:
-  - Home: `world (11, 71, 153)`
-  - Protected Home: `world (5, 73, 149)` (radius 10)
-  - Delivery Chest: `world (3, 73, 144)`
-- **Server Startup Command**:
+- World locations and host addresses are omitted from public documentation. The supported private LAN configuration keeps the whitelist enabled and the brain bound to loopback.
+- **Generic startup command**:
   ```bash
-  export JAVA_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"
-  export PATH="$JAVA_HOME/bin:/opt/homebrew/opt/maven/bin:/Users/aselekoglu/.local/bin:$PATH"
-  AHMET_SERVER_DIR=server-live ACCEPT_MINECRAFT_EULA=true ./scripts/run.sh
+  export JAVA_HOME="<Java 21 runtime>"
+  export PATH="$JAVA_HOME/bin:<Maven runtime>/bin:$PATH"
+  AHMET_SERVER_DIR="<private server directory>" ACCEPT_MINECRAFT_EULA=true ./scripts/run.sh
   ```
 - **Rules of Engagement for Restarts**:
   - Shut down using graceful `stop` (or clean SIGTERM save) so all chunk I/O and journals flush cleanly and world dimensions save.
@@ -119,4 +123,4 @@ Historical review prompt for **sol 6.1** (the claims and deployment hashes above
 ## Schedule release status (2026-10-18)
 
 - Previous schedule checkpoint (superseded artifact): local JAR SHA-256 `d91ee295b59a46353e69154ac6a3969bc710f5b01adacea0f37d0c22ed0cd95e` with 153 Java tests. Its disposable common-resource, fresh schedule, and same-world restart results are historical evidence for that JAR only.
-- Current schedule fix: 155 Java tests pass. The new JAR `4041f4bb70a67d0abc2ae2cd9db226da98916d758d5605f8c65863ef6aebbda1` passed complete fresh and same-world restart schedule probes plus common-resource runtime acceptance. The outside-radius WANDER return took 48 ticks (8.855 blocks walked to within 2.5 blocks of home); movement probes recorded zero production teleports. On 2026-10-18 this exact JAR was installed on `server-live`; Paper startup and `save-all` were verified. The read-back showed NPC id 1 restored but no spawned entity, so no live NPC movement was observed. Live player schedule behavior and live provider calls remain unverified.
+- Current schedule fix: 155 Java tests pass. The new JAR `4041f4bb70a67d0abc2ae2cd9db226da98916d758d5605f8c65863ef6aebbda1` passed complete fresh and same-world restart schedule probes plus common-resource runtime acceptance. The outside-radius WANDER return took 48 ticks (8.855 blocks walked to within 2.5 blocks of home); movement probes recorded zero production teleports. On 2026-10-18 this exact JAR was installed on the private server copy; Paper startup and `save-all` were verified. The read-back showed NPC id 1 restored but no spawned entity, so no live NPC movement was observed. Live player schedule behavior and live provider calls remain unverified.
