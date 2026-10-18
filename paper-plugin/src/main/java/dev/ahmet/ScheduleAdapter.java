@@ -1,6 +1,8 @@
 package dev.ahmet;
 
 import net.citizensnpcs.api.npc.NPC;
+import net.citizensnpcs.api.ai.NavigatorParameters;
+import net.citizensnpcs.api.ai.PathfinderType;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -31,6 +33,7 @@ final class ScheduleAdapter {
     private final ScheduleState state = new ScheduleState();
     private final LongSupplier clock;
     private boolean bedRoute;
+    private boolean exactLegIssued;
     private String fallbackCause;
     private long bedRetryAt=-1;
     private final ScheduleRetryPolicy retries = new ScheduleRetryPolicy();
@@ -57,6 +60,7 @@ final class ScheduleAdapter {
 
     void suspend(NPC npc, String reason) {
         preempted=true;
+        exactLegIssued=false;
         cancelOwnedNavigation(npc);
         wakeOwned(npc);
         if(npc!=null&&npc.isSpawned()&&npc.getEntity() instanceof Villager villager&&villager.isSleeping())villager.wakeup();
@@ -81,6 +85,7 @@ final class ScheduleAdapter {
 
     void tick(NPC npc, Location home, Location bed, boolean enabled, boolean blocked, boolean returningHome,
               int maxDistance, Predicate<Location> safe, RoutePlanner planner, ChunkAccess access) {
+        routeChunkAccess=access;
         if (!enabled) { suspend(npc, "schedule disabled"); return; }
         if (blocked) { suspend(npc, "task/recovery preemption"); return; }
         if (returningHome) { suspend(npc, "manual return-home priority"); return; }
@@ -170,7 +175,12 @@ final class ScheduleAdapter {
     private boolean observeRoute(NPC npc, Location current, double tolerance, long now) {
         Location target=state.target();if(target==null)return false;
         boolean arrived=routeArrived(current,target,bedRoute,tolerance);
-        if(arrived){cancelOwnedNavigation(npc);state.arrived("waypoint reached");retries.succeeded();return false;}
+        if(arrived){cancelOwnedNavigation(npc);exactLegIssued=false;state.arrived("waypoint reached");retries.succeeded();return false;}
+        if(!exactLegIssued&&!npc.getNavigator().isNavigating()&&current.getWorld()==target.getWorld()&&current.distance(target)<=1.0
+                &&Math.abs(current.getY()-target.getY())<=.20&&safeExactSegment(current,target)){
+            issueExactLeg(npc,target);
+            return true;
+        }
         NavigationWatchdog.Outcome result=state.watchdog().observe(current.distanceSquared(target),now);
         if(result==NavigationWatchdog.Outcome.RETRY||result==NavigationWatchdog.Outcome.GIVE_UP){
             boolean failedBedRoute=bedRoute;
@@ -189,11 +199,59 @@ final class ScheduleAdapter {
     private void startRoute(NPC npc, Location target, Predicate<Location> safe,boolean forBed) {
         if (target==null||npc==null||!npc.isSpawned()||!safe.test(target)||target.getWorld()!=npc.getEntity().getWorld()) return;
         if (!retries.ready(clock.getAsLong())) return;
-        state.target(target.clone());bedRoute=forBed;state.watchdog().reset();
+        state.target(target.clone());bedRoute=forBed;exactLegIssued=false;state.watchdog().reset();
+        issueTarget(npc,target,false,forBed);
+    }
+
+    private boolean safeExactSegment(Location current,Location target){
+        double distance=current.distance(target);
+        if(distance>1.0||current.getWorld()!=target.getWorld())return false;
+        int intervals=Math.max(1,(int)Math.ceil(distance/.125));
+        if(intervals>9)return false;
+        for(int i=0;i<=intervals;i++){
+            double fraction=(double)i/intervals;
+            Location sample=new Location(current.getWorld(),current.getX()+(target.getX()-current.getX())*fraction,
+                    current.getY()+(target.getY()-current.getY())*fraction,
+                    current.getZ()+(target.getZ()-current.getZ())*fraction);
+            if(!withinHeight(current.getWorld(),sample.getBlockY())
+                    ||!accessLoaded(sample)||!accessSafe(sample))return false;
+        }
+        return true;
+    }
+
+    private boolean accessLoaded(Location location){
+        return routeChunkAccess!=null&&routeChunkAccess.loaded(location.getWorld(),location.getBlockX(),location.getBlockZ());
+    }
+    private boolean accessSafe(Location location){return routeChunkAccess!=null&&routeChunkAccess.safeStandingCell(location);}
+
+    private ScheduleAdapter.ChunkAccess routeChunkAccess;
+
+    private void issueExactLeg(NPC npc,Location target){
+        exactLegIssued=true;
+        issueTarget(npc,target,true,bedRoute);
+    }
+
+    private void issueTarget(NPC npc,Location target,boolean exact,boolean forBed){
         double margin=navigationMargin(forBed);
-        npc.getNavigator().getDefaultParameters().destinationTeleportMargin(-1).stationaryTicks(-1).distanceMargin(margin).pathDistanceMargin(margin);
-        npc.getNavigator().getLocalParameters().destinationTeleportMargin(-1).stationaryTicks(-1).distanceMargin(margin).pathDistanceMargin(margin);
-        npc.getNavigator().setTarget(target);state.navigationStarted();retries.started();
+        var navigator=npc.getNavigator();
+        NavigatorParameters defaults=navigator.getDefaultParameters();
+        if(npc.isFlyable()||defaults.locationStrategyFactory()!=null){
+            deferNoCandidate("schedule precision route requires the default ground pathfinder");
+            return;
+        }
+        PathfinderType pathfinderType=defaults.pathfinderType();
+        double distanceMargin=defaults.distanceMargin(),pathDistanceMargin=defaults.pathDistanceMargin();
+        double teleportMargin=defaults.destinationTeleportMargin();int stationaryTicks=defaults.stationaryTicks();
+        try {
+            defaults.pathfinderType(PathfinderType.CITIZENS).distanceMargin(margin).pathDistanceMargin(0)
+                    .destinationTeleportMargin(-1).stationaryTicks(-1);
+            if(exact)navigator.setTarget(java.util.List.of(target.toVector()));
+            else navigator.setTarget(target);
+            state.navigationStarted();retries.started();
+        } finally {
+            defaults.pathfinderType(pathfinderType).distanceMargin(distanceMargin).pathDistanceMargin(pathDistanceMargin)
+                    .destinationTeleportMargin(teleportMargin).stationaryTicks(stationaryTicks);
+        }
     }
 
     private void cancelOwnedNavigation(NPC npc) {

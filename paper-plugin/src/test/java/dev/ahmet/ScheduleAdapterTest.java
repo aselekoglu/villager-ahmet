@@ -8,7 +8,9 @@ import org.bukkit.block.data.type.Bed;
 import net.citizensnpcs.api.npc.NPC;
 import net.citizensnpcs.api.ai.Navigator;
 import net.citizensnpcs.api.ai.NavigatorParameters;
+import net.citizensnpcs.api.ai.PathfinderType;
 import org.bukkit.entity.Villager;
+import org.bukkit.util.Vector;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Proxy;
@@ -124,21 +126,22 @@ class ScheduleAdapterTest {
         AtomicInteger navigatorCancels=new AtomicInteger();
         AtomicReference<Location> navigatorTarget=new AtomicReference<>();
         AtomicReference<Boolean> navigating=new AtomicReference<>(false);
-        NavigatorParameters defaults=new NavigatorParameters(),locals=new NavigatorParameters();
+        NavigatorParameters defaults=taskDefaults(),locals=new NavigatorParameters();
         Navigator navigator=(Navigator)Proxy.newProxyInstance(Navigator.class.getClassLoader(),new Class<?>[]{Navigator.class},(p,m,a)->switch(m.getName()){
-            case "getDefaultParameters"->defaults;case "getLocalParameters"->locals;case "setTarget"->{navigatorTarget.set((Location)a[0]);navigating.set(true);yield null;}
+            case "getDefaultParameters"->defaults;case "getLocalParameters"->locals;case "setTarget"->{copyPrecision(locals,defaults);navigatorTarget.set((Location)a[0]);navigating.set(true);yield null;}
             case "isNavigating"->navigating.get();case "cancelNavigation"->{navigatorCancels.incrementAndGet();navigating.set(false);yield null;}default->null;});
         Villager villager=(Villager)Proxy.newProxyInstance(Villager.class.getClassLoader(),new Class<?>[]{Villager.class},(p,m,a)->switch(m.getName()){
             case "getLocation"->current.get();case "isSleeping"->false;case "getWorld"->world;case "sleep"->{sleepCalls.incrementAndGet();yield true;}case "toString"->"sleep seam villager";default->null;});
         NPC npc=(NPC)Proxy.newProxyInstance(NPC.class.getClassLoader(),new Class<?>[]{NPC.class},(p,m,a)->switch(m.getName()){
-            case "isSpawned"->true;case "getEntity"->villager;case "getNavigator"->navigator;default->null;});
+            case "isSpawned"->true;case "isFlyable"->false;case "getEntity"->villager;case "getNavigator"->navigator;default->null;});
         TestChunks chunks=new TestChunks();
         chunks.put(0,64,0,Bed.Part.FOOT,org.bukkit.block.BlockFace.NORTH,false);
         chunks.put(0,64,-1,Bed.Part.HEAD,org.bukkit.block.BlockFace.NORTH,false);
         Location foot=new Location(world,0,64,0),home=new Location(world,1.79,64,.5);
         ScheduleAdapter adapter=new ScheduleAdapter(()->1_000L);
         adapter.tick(npc,home,foot,true,false,false,32,loc->true,(from,to)->null,chunks);
-        assertEquals(.10,defaults.distanceMargin(),.0001);
+        assertTaskDefaults(defaults);
+        assertRouteParameters(locals,true);
         assertTrue(adapter.ownsNavigation());
         Location firstTarget=navigatorTarget.get();
         assertNotNull(firstTarget);
@@ -181,15 +184,15 @@ class ScheduleAdapterTest {
         Location home=new Location(world,1.79,64,.5);
         AtomicLong now=new AtomicLong(0);
         AtomicInteger targetCount=new AtomicInteger(),cancelCount=new AtomicInteger(),sleepCount=new AtomicInteger();
-        NavigatorParameters defaults=new NavigatorParameters(),locals=new NavigatorParameters();
+        NavigatorParameters defaults=taskDefaults(),locals=new NavigatorParameters();
         AtomicReference<Boolean> navigating=new AtomicReference<>(false);
         Navigator navigator=(Navigator)Proxy.newProxyInstance(Navigator.class.getClassLoader(),new Class<?>[]{Navigator.class},(p,m,a)->switch(m.getName()){
-            case "getDefaultParameters"->defaults;case "getLocalParameters"->locals;case "setTarget"->{targetCount.incrementAndGet();navigating.set(true);yield null;}
+            case "getDefaultParameters"->defaults;case "getLocalParameters"->locals;case "setTarget"->{copyPrecision(locals,defaults);targetCount.incrementAndGet();navigating.set(true);yield null;}
             case "isNavigating"->navigating.get();case "cancelNavigation"->{cancelCount.incrementAndGet();navigating.set(false);yield null;}default->null;});
         Villager villager=(Villager)Proxy.newProxyInstance(Villager.class.getClassLoader(),new Class<?>[]{Villager.class},(p,m,a)->switch(m.getName()){
             case "getLocation"->home;case "isSleeping"->false;case "getWorld"->world;case "sleep"->{sleepCount.incrementAndGet();yield true;}default->null;});
         NPC npc=(NPC)Proxy.newProxyInstance(NPC.class.getClassLoader(),new Class<?>[]{NPC.class},(p,m,a)->switch(m.getName()){
-            case "isSpawned"->true;case "getEntity"->villager;case "getNavigator"->navigator;default->null;});
+            case "isSpawned"->true;case "isFlyable"->false;case "getEntity"->villager;case "getNavigator"->navigator;default->null;});
         TestChunks chunks=new TestChunks();
         chunks.put(0,64,0,Bed.Part.FOOT,org.bukkit.block.BlockFace.NORTH,false);
         chunks.put(0,64,-1,Bed.Part.HEAD,org.bukkit.block.BlockFace.NORTH,false);
@@ -219,6 +222,86 @@ class ScheduleAdapterTest {
         assertEquals(0,sleepCount.get());
     }
 
+    @Test
+    void regularRouteClonesCitizensPrecisionAndRestoresTaskDefaults() {
+        World world=world("regular-precision",10_000L);Location home=new Location(world,.5,64,.5);
+        NavigatorParameters defaults=taskDefaults(),locals=new NavigatorParameters();AtomicReference<Boolean> navigating=new AtomicReference<>(false);
+        Navigator navigator=(Navigator)Proxy.newProxyInstance(Navigator.class.getClassLoader(),new Class<?>[]{Navigator.class},(p,m,a)->switch(m.getName()){
+            case "getDefaultParameters"->defaults;case "getLocalParameters"->locals;case "setTarget"->{copyPrecision(locals,defaults);navigating.set(true);yield null;}
+            case "isNavigating"->navigating.get();case "cancelNavigation"->{navigating.set(false);yield null;}default->null;});
+        Villager villager=(Villager)Proxy.newProxyInstance(Villager.class.getClassLoader(),new Class<?>[]{Villager.class},(p,m,a)->switch(m.getName()){
+            case "getLocation"->home;case "isSleeping"->false;case "getWorld"->world;default->null;});
+        NPC npc=(NPC)Proxy.newProxyInstance(NPC.class.getClassLoader(),new Class<?>[]{NPC.class},(p,m,a)->switch(m.getName()){
+            case "isSpawned"->true;case "isFlyable"->false;case "getEntity"->villager;case "getNavigator"->navigator;default->null;});
+        new ScheduleAdapter(()->1_000L).tick(npc,home,null,true,false,false,32,loc->true,(from,to)->null,new TestChunks());
+        assertRouteParameters(locals,false);assertTaskDefaults(defaults);
+    }
+
+    @Test
+    void taskDefaultsRestoreWhenSetTargetThrows() {
+        World world=world("precision-throws");Location home=new Location(world,1.79,64,.5),bed=new Location(world,0,64,0);
+        NavigatorParameters defaults=taskDefaults();Navigator navigator=(Navigator)Proxy.newProxyInstance(Navigator.class.getClassLoader(),new Class<?>[]{Navigator.class},(p,m,a)->switch(m.getName()){
+            case "getDefaultParameters"->defaults;case "setTarget"->{throw new IllegalStateException("simulated target failure");}default->null;});
+        Villager villager=(Villager)Proxy.newProxyInstance(Villager.class.getClassLoader(),new Class<?>[]{Villager.class},(p,m,a)->switch(m.getName()){
+            case "getLocation"->home;case "isSleeping"->false;case "getWorld"->world;default->null;});
+        NPC npc=(NPC)Proxy.newProxyInstance(NPC.class.getClassLoader(),new Class<?>[]{NPC.class},(p,m,a)->switch(m.getName()){
+            case "isSpawned"->true;case "isFlyable"->false;case "getEntity"->villager;case "getNavigator"->navigator;default->null;});
+        TestChunks chunks=new TestChunks();chunks.put(0,64,0,Bed.Part.FOOT,org.bukkit.block.BlockFace.NORTH,false);chunks.put(0,64,-1,Bed.Part.HEAD,org.bukkit.block.BlockFace.NORTH,false);
+        assertThrows(IllegalStateException.class,()->new ScheduleAdapter(()->1_000L).tick(npc,home,bed,true,false,false,32,loc->true,(from,to)->null,chunks));
+        assertTaskDefaults(defaults);
+    }
+
+    @Test
+    void completedPlannedRouteGetsOneExactIterableFinalLeg() {
+        RouteHarness h=new RouteHarness("exact-leg");
+        ScheduleAdapter adapter=new ScheduleAdapter(()->1_000L);
+        h.tick(adapter);
+        Location planned=h.locationTarget.get();assertNotNull(planned);
+        h.current.set(planned.clone().add(-.45,0,-.45));h.navigating.set(false);
+        h.tick(adapter);
+        assertNotNull(h.exactTarget.get());
+        Vector vector=h.exactTarget.get().iterator().next();
+        assertEquals(planned.toVector(),vector);
+        assertEquals(1,h.exactCalls.get());assertRouteParameters(h.locals,false);assertTaskDefaults(h.defaults);
+        h.tick(adapter);
+        assertEquals(1,h.exactCalls.get(),"an issued exact leg must not be reissued before arrival");
+    }
+
+    @Test
+    void exactFinalLegRejectsUnsafeSegmentAndFarOrDifferentHeightEndpoints() {
+        for(String mode:new String[]{"unsafe","far","height","world"}){
+            RouteHarness h=new RouteHarness("exact-"+mode);ScheduleAdapter adapter=new ScheduleAdapter(()->1_000L);h.tick(adapter);
+            Location planned=h.locationTarget.get();
+            h.current.set(switch(mode){case "far"->planned.clone().add(-1.1,0,0);case "height"->planned.clone().add(-.45,.3,-.45);case "world"->new Location(world("other-world"),planned.getX()-.45,planned.getY(),planned.getZ()-.45);default->planned.clone().add(-.45,0,-.45);});
+            if(mode.equals("unsafe"))h.chunks.unsafe.add((int)Math.floor(planned.getX())+","+(int)Math.floor(planned.getZ()));
+            h.navigating.set(false);h.tick(adapter);
+            assertEquals(0,h.exactCalls.get(),mode+" segment must not receive an exact leg");
+        }
+    }
+
+    private static final class RouteHarness {
+        final World world;final Location home,currentValue;final AtomicReference<Location> current=new AtomicReference<>(),locationTarget=new AtomicReference<>();
+        final AtomicReference<Iterable<Vector>> exactTarget=new AtomicReference<>();final AtomicReference<Boolean> navigating=new AtomicReference<>(false);
+        final AtomicInteger exactCalls=new AtomicInteger();final NavigatorParameters defaults=taskDefaults(),locals=new NavigatorParameters();final TestChunks chunks=new TestChunks();final NPC npc;
+        @SuppressWarnings("unchecked") RouteHarness(String name){
+            world=world(name,10_000L);home=new Location(world,.5,120,.5);currentValue=home;current.set(home);
+            Navigator navigator=(Navigator)Proxy.newProxyInstance(Navigator.class.getClassLoader(),new Class<?>[]{Navigator.class},(p,m,a)->switch(m.getName()){
+                case "getDefaultParameters"->defaults;case "getLocalParameters"->locals;
+                case "setTarget"->{copyPrecision(locals,defaults);if(a[0] instanceof Location loc)locationTarget.set(loc.clone());else {exactTarget.set((Iterable<Vector>)a[0]);exactCalls.incrementAndGet();}navigating.set(true);yield null;}
+                case "isNavigating"->navigating.get();case "cancelNavigation"->{navigating.set(false);yield null;}default->null;});
+            Villager villager=(Villager)Proxy.newProxyInstance(Villager.class.getClassLoader(),new Class<?>[]{Villager.class},(p,m,a)->switch(m.getName()){
+                case "getLocation"->current.get();case "isSleeping"->false;case "getWorld"->world;default->null;});
+            npc=(NPC)Proxy.newProxyInstance(NPC.class.getClassLoader(),new Class<?>[]{NPC.class},(p,m,a)->switch(m.getName()){
+                case "isSpawned"->true;case "isFlyable"->false;case "getEntity"->villager;case "getNavigator"->navigator;default->null;});
+        }
+        void tick(ScheduleAdapter adapter){adapter.tick(npc,home,null,true,false,false,32,loc->true,(from,to)->null,chunks);}
+    }
+
+    private static NavigatorParameters taskDefaults(){return new NavigatorParameters().pathfinderType(PathfinderType.MINECRAFT).distanceMargin(.75).pathDistanceMargin(.75).destinationTeleportMargin(4).stationaryTicks(40);}
+    private static void copyPrecision(NavigatorParameters target,NavigatorParameters source){target.pathfinderType(source.pathfinderType()).distanceMargin(source.distanceMargin()).pathDistanceMargin(source.pathDistanceMargin()).destinationTeleportMargin(source.destinationTeleportMargin()).stationaryTicks(source.stationaryTicks());}
+    private static void assertTaskDefaults(NavigatorParameters p){assertEquals(PathfinderType.MINECRAFT,p.pathfinderType());assertEquals(.75,p.distanceMargin(),.0001);assertEquals(.75,p.pathDistanceMargin(),.0001);assertEquals(4,p.destinationTeleportMargin(),.0001);assertEquals(40,p.stationaryTicks());}
+    private static void assertRouteParameters(NavigatorParameters p,boolean bed){double margin=bed?.10:.25;assertEquals(PathfinderType.CITIZENS,p.pathfinderType());assertEquals(margin,p.distanceMargin(),.0001);assertEquals(0,p.pathDistanceMargin(),.0001);assertEquals(-1,p.destinationTeleportMargin(),.0001);assertEquals(-1,p.stationaryTicks());}
+
     private static NPC fakeNpc(Location current){
         Villager villager=(Villager)Proxy.newProxyInstance(Villager.class.getClassLoader(),new Class<?>[]{Villager.class},(p,m,a)->switch(m.getName()){
             case "getLocation"->current;case "isSleeping"->false;case "getWorld"->current.getWorld();case "toString"->"test villager";default->null;});
@@ -228,14 +311,14 @@ class ScheduleAdapterTest {
 
     private static NPC movingNpc(Location current,AtomicInteger targetCount,AtomicReference<Location> target){
         AtomicReference<Boolean> navigating=new AtomicReference<>(false);
-        NavigatorParameters defaults=new NavigatorParameters(),locals=new NavigatorParameters();
+        NavigatorParameters defaults=taskDefaults(),locals=new NavigatorParameters();
         Navigator navigator=(Navigator)Proxy.newProxyInstance(Navigator.class.getClassLoader(),new Class<?>[]{Navigator.class},(p,m,a)->switch(m.getName()){
-            case "getDefaultParameters"->defaults;case "getLocalParameters"->locals;case "setTarget"->{targetCount.incrementAndGet();target.set((Location)a[0]);navigating.set(true);yield null;}
+            case "getDefaultParameters"->defaults;case "getLocalParameters"->locals;case "setTarget"->{copyPrecision(locals,defaults);targetCount.incrementAndGet();target.set((Location)a[0]);navigating.set(true);yield null;}
             case "isNavigating"->navigating.get();case "cancelNavigation"->{navigating.set(false);yield null;}default->null;});
         Villager villager=(Villager)Proxy.newProxyInstance(Villager.class.getClassLoader(),new Class<?>[]{Villager.class},(p,m,a)->switch(m.getName()){
             case "getLocation"->current;case "isSleeping"->false;case "getWorld"->current.getWorld();default->null;});
         return (NPC)Proxy.newProxyInstance(NPC.class.getClassLoader(),new Class<?>[]{NPC.class},(p,m,a)->switch(m.getName()){
-            case "isSpawned"->true;case "getEntity"->villager;case "getNavigator"->navigator;default->null;});
+            case "isSpawned"->true;case "isFlyable"->false;case "getEntity"->villager;case "getNavigator"->navigator;default->null;});
     }
 
     private static World world(String name){return world(name,13_000L);}
@@ -245,12 +328,13 @@ class ScheduleAdapterTest {
     private static final class TestChunks implements ScheduleAdapter.ChunkAccess {
         final Map<String,BlockData> beds=new HashMap<>();
         final java.util.Set<String> unloaded=new java.util.HashSet<>();
+        final java.util.Set<String> unsafe=new java.util.HashSet<>();
         final AtomicInteger dataReads=new AtomicInteger();
         void put(int x,int y,int z,Bed.Part part,org.bukkit.block.BlockFace face,boolean occupied){beds.put(key(x,y,z),bed(part,face,occupied));}
         public boolean loaded(World world,int x,int z){return !unloaded.contains((x>>4)+","+(z>>4));}
         public Material material(World world,int x,int y,int z){return Material.RED_BED;}
         public BlockData data(World world,int x,int y,int z){dataReads.incrementAndGet();return beds.get(key(x,y,z));}
-        public boolean safeStandingCell(Location location){return true;}
+        public boolean safeStandingCell(Location location){return !unsafe.contains(location.getBlockX()+","+location.getBlockZ());}
         private static String key(int x,int y,int z){return x+","+y+","+z;}
         private static BlockData bed(Bed.Part part,org.bukkit.block.BlockFace face,boolean occupied){
             return (BlockData)Proxy.newProxyInstance(Bed.class.getClassLoader(),new Class<?>[]{Bed.class},(p,m,a)->switch(m.getName()){
