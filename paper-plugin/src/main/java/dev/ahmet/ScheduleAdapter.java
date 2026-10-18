@@ -42,13 +42,14 @@ final class ScheduleAdapter {
     ScheduleAdapter(){this(System::currentTimeMillis);}
     ScheduleAdapter(LongSupplier clock){this.clock=clock;}
 
-    void bedRebound(){bedRetryAt=-1;retries.clear();}
+    void bedRebound(){bedRetryAt=-1;retries.clear();fallbackCause=null;}
 
     String status() {
         String phase = state.phase() == null ? "idle" : state.phase().name().toLowerCase(java.util.Locale.ROOT);
         String activity = state.ownsSleep() ? "sleeping" : state.ownsNavigation() ? "walking" : state.reason();
         String detail=activity;
         if(fallbackCause!=null&&!detail.contains(fallbackCause))detail+="; "+fallbackCause;
+        if(bedRetryAt>=0&&clock.getAsLong()<bedRetryAt&&!detail.contains("bed route retry cooldown"))detail+="; bed route retry cooldown";
         return phase + " (" + detail + ")";
     }
 
@@ -129,11 +130,12 @@ final class ScheduleAdapter {
             return;
         }
         long bedNow=clock.getAsLong();
-        if(bedRetryAt>=0&&bedNow<bedRetryAt){fallbackHome(npc,current,home,safe,planner,"bed route retry cooldown");return;}
+        if(bedRetryAt>=0&&bedNow<bedRetryAt){routeHome(npc,current,home,safe,planner);return;}
         if(bedRetryAt>=0){bedRetryAt=-1;retries.clear();}
         if (bed == null) { fallbackHome(npc,current,home,safe,planner,"no bed bound"); return; }
         String bedError = validateBoundBed(bed, current, home, maxDistance, access);
         if (bedError != null) { fallbackHome(npc,current,home,safe,planner,bedError); return; }
+        fallbackCause=null;
         Location standing = findBedApproach(bed, access);
         if (standing == null) { fallbackHome(npc,current,home,safe,planner,"bed has no loaded safe approach"); return; }
         standing = centered(standing);
@@ -158,7 +160,7 @@ final class ScheduleAdapter {
     }
 
     private void fallbackHome(NPC npc,Location current,Location home,Predicate<Location> safe,RoutePlanner planner,String cause){
-        if(fallbackCause==null)fallbackCause=cause;
+        fallbackCause=cause;
         if(bedRoute){cancelOwnedNavigation(npc);state.idle(cause);}
         routeHome(npc,current,home,safe,planner);
     }

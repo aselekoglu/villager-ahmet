@@ -179,6 +179,44 @@ class ScheduleAdapterTest {
     }
 
     @Test
+    void bedStatusTracksTheCurrentFailureAcrossRebindAndValidationChanges() {
+        World world=world("bed-status"),otherWorld=world("bed-status-other");
+        Location home=new Location(world,.5,64,.5),bed=new Location(world,0,64,0);
+        ScheduleAdapter adapter=new ScheduleAdapter(()->1_000L);
+        TestChunks chunks=new TestChunks();
+        NPC npc=fakeNpc(home);
+        java.util.function.Predicate<Location> safe=loc->true;
+        ScheduleAdapter.RoutePlanner noRoute=(from,to)->null;
+
+        adapter.tick(npc,home,bed,true,false,false,32,safe,noRoute,chunks);
+        assertTrue(adapter.status().contains("bed block is missing"),adapter.status());
+
+        chunks.put(0,64,0,Bed.Part.FOOT,org.bukkit.block.BlockFace.NORTH,true);
+        chunks.put(0,64,-1,Bed.Part.HEAD,org.bukkit.block.BlockFace.NORTH,true);
+        adapter.bedRebound();
+        adapter.tick(npc,home,bed,true,false,false,32,safe,noRoute,chunks);
+        assertTrue(adapter.status().contains("bed is occupied"),adapter.status());
+        assertFalse(adapter.status().contains("bed block is missing"),adapter.status());
+
+        chunks.put(0,64,0,Bed.Part.FOOT,org.bukkit.block.BlockFace.NORTH,false);
+        chunks.put(0,64,-1,Bed.Part.HEAD,org.bukkit.block.BlockFace.NORTH,false);
+        chunks.unsafe.add("1,0");chunks.unsafe.add("-1,0");chunks.unsafe.add("0,1");chunks.unsafe.add("0,-1");
+        adapter.tick(npc,home,bed,true,false,false,32,safe,noRoute,chunks);
+        assertTrue(adapter.status().contains("bed has no loaded safe approach"),adapter.status());
+        assertFalse(adapter.status().contains("bed is occupied"),adapter.status());
+
+        chunks.unsafe.clear();chunks.unloaded.add("0,0");
+        adapter.tick(npc,home,bed,true,false,false,32,safe,noRoute,chunks);
+        assertTrue(adapter.status().contains("bound bed chunk is unloaded"),adapter.status());
+        assertFalse(adapter.status().contains("bed has no loaded safe approach"),adapter.status());
+
+        chunks.unloaded.clear();
+        adapter.tick(npc,home,new Location(otherWorld,0,64,0),true,false,false,32,safe,noRoute,chunks);
+        assertTrue(adapter.status().contains("bound bed is in another world"),adapter.status());
+        assertFalse(adapter.status().contains("bound bed chunk is unloaded"),adapter.status());
+    }
+
+    @Test
     void bedRetryExhaustionKeepsCooldownEvenWhenFallbackHomeIsAlreadyReached() {
         World world=world("bed-cooldown");
         Location home=new Location(world,1.79,64,.5);
@@ -211,13 +249,20 @@ class ScheduleAdapterTest {
             }
         }
         assertEquals(3,targetCount.get());
+        assertTrue(adapter.status().contains("bed unreachable"),adapter.status());
         adapter.tick(npc,home,bed,true,false,false,32,loc->true,(from,to)->null,chunks);
+        assertTrue(adapter.status().contains("bed unreachable"),adapter.status());
+        assertTrue(adapter.status().contains("bed route retry cooldown"),adapter.status());
         assertEquals(3,targetCount.get(),"home arrival must not clear the bed retry cooldown");
         now.addAndGet(ScheduleRetryPolicy.COOLDOWN_MILLIS-1);
         adapter.tick(npc,home,bed,true,false,false,32,loc->true,(from,to)->null,chunks);
+        assertTrue(adapter.status().contains("bed unreachable"),adapter.status());
+        assertTrue(adapter.status().contains("bed route retry cooldown"),adapter.status());
         assertEquals(3,targetCount.get());
         now.incrementAndGet();
         adapter.tick(npc,home,bed,true,false,false,32,loc->true,(from,to)->null,chunks);
+        assertFalse(adapter.status().contains("bed unreachable"),adapter.status());
+        assertFalse(adapter.status().contains("bed route retry cooldown"),adapter.status());
         assertEquals(4,targetCount.get());
         assertEquals(0,sleepCount.get());
     }
