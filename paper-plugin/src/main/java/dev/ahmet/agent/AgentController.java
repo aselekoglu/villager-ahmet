@@ -18,6 +18,8 @@ public final class AgentController {
   private AgentState state = AgentState.IDLE;
   private AgentGoal currentGoal = AgentGoal.REST_IDLE;
   private long jobGeneration = 0;
+  private int productiveTransitionCount = 0;
+  private long lastAppliedServerStep = -1;
   private final Map<String, OfferedAction> currentOfferedActions = new LinkedHashMap<>();
   private long lastHelpRequestedMs = 0;
 
@@ -39,6 +41,8 @@ public final class AgentController {
 
   public long nextGeneration() {
     jobGeneration++;
+    productiveTransitionCount = 0;
+    currentGoal = AgentGoal.REST_IDLE;
     currentOfferedActions.clear();
     return jobGeneration;
   }
@@ -59,31 +63,41 @@ public final class AgentController {
     }
   }
 
-  /**
-   * Evaluates the appropriate goal for the agent based on current observation.
-   */
-  public AgentGoal evaluateGoal(AgentObservation obs) {
-    if (!obs.taskActive()) {
-      if (obs.cargo() > 0) {
-        currentGoal = AgentGoal.DELIVER_CARGO;
-      } else {
-        currentGoal = AgentGoal.REST_IDLE;
-      }
-      return currentGoal;
-    }
+  /** Selects a production goal only when all required server-authored safety facts are supplied. */
+  public ProductionGoalPolicy.Selection evaluateGoal(
+      AgentObservation observation, ProductionGoalPolicy.SafetyContext safetyContext) {
+    return ProductionGoalPolicy.select(observation, safetyContext, currentGoal, productiveTransitionCount, budget());
+  }
 
-    if (obs.cargo() >= obs.requested() || obs.collected() >= obs.requested()) {
-      currentGoal = AgentGoal.DELIVER_CARGO;
-      return currentGoal;
-    }
+  /** Applies a selection only to the exact current safety snapshot and at most once per server step. */
+  public boolean applyGoal(ProductionGoalPolicy.Selection selection,
+                           ProductionGoalPolicy.SafetyContext currentSafetyContext) {
+    if (selection == null || currentSafetyContext == null) return false;
+    if (selection.evaluatedContext() != currentSafetyContext
+        && !selection.evaluatedContext().equals(currentSafetyContext)) return false;
+    if (selection.jobGeneration() != jobGeneration || currentSafetyContext.jobGeneration() != jobGeneration) return false;
+    if (!Objects.equals(selection.taskId(), currentSafetyContext.taskId())
+        || !Objects.equals(selection.ownerId(), currentSafetyContext.ownerId())
+        || selection.serverStepId() != currentSafetyContext.serverStepId()) return false;
+    if (selection.serverStepId() <= lastAppliedServerStep) return false;
 
-    if (obs.routeClears() >= budget().maxRouteClears()) {
-      currentGoal = AgentGoal.REQUEST_PLAYER_HELP;
-      return currentGoal;
-    }
+    AgentGoal selectedGoal = selection.goal();
+    if (isProductiveGoal(selectedGoal) && selectedGoal != currentGoal
+        && productiveTransitionCount >= ProductionGoalPolicy.MAX_PRODUCTIVE_TRANSITIONS) return false;
 
-    currentGoal = AgentGoal.HARVEST_RESOURCE;
-    return currentGoal;
+    if (isProductiveGoal(selectedGoal) && selectedGoal != currentGoal) productiveTransitionCount++;
+    currentGoal = selectedGoal;
+    lastAppliedServerStep = selection.serverStepId();
+    return true;
+  }
+
+  public int productiveTransitionCount() {
+    return productiveTransitionCount;
+  }
+
+  private static boolean isProductiveGoal(AgentGoal goal) {
+    return goal == AgentGoal.HARVEST_RESOURCE || goal == AgentGoal.CLEAR_OBSTRUCTION
+        || goal == AgentGoal.EXPLORE_RESOURCES;
   }
 
   /**

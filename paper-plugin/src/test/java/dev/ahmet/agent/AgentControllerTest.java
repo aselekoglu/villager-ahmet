@@ -3,6 +3,7 @@ package dev.ahmet.agent;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -19,23 +20,35 @@ public class AgentControllerTest {
     controller.transitionTo(AgentState.PLANNING, "Scanning targets");
     assertEquals(AgentState.PLANNING, controller.state());
 
-    // Goal evaluation when inactive with cargo -> DELIVER_CARGO
     AgentObservation obsDeliver = new AgentObservation(
         null, true, null, null, null, null, false, "oak_log", 10, 5, 5, 0, 0, 0, 0, List.of(), 1000L
     );
-    assertEquals(AgentGoal.DELIVER_CARGO, controller.evaluateGoal(obsDeliver));
+    var inactiveCargo = ProductionGoalPolicy.SafetyContext.builder(0, null, null, 1)
+        .taskActive(false).cargo(5).build();
+    assertEquals(AgentGoal.REST_IDLE, evaluateAndApply(controller, obsDeliver, inactiveCargo));
 
     // Goal evaluation when active and cargo < requested -> HARVEST_RESOURCE
     AgentObservation obsHarvest = new AgentObservation(
         null, true, null, null, null, "task-1", true, "oak_log", 10, 2, 2, 0, 0, 0, 0, List.of(), 1000L
     );
-    assertEquals(AgentGoal.HARVEST_RESOURCE, controller.evaluateGoal(obsHarvest));
+    var activeTask = ProductionGoalPolicy.SafetyContext.builder(0, "task-1",
+        UUID.fromString("088b2d3a-a941-4a46-b670-5cbdb4ddfb69"), 2).taskActive(true).targetAvailable(true).build();
+    assertEquals(AgentGoal.HARVEST_RESOURCE, evaluateAndApply(controller, obsHarvest, activeTask));
 
-    // Goal evaluation when route clears exhausted -> REQUEST_PLAYER_HELP
+    // A blocked route with no allowed clear or retry requests help.
     AgentObservation obsHelp = new AgentObservation(
         null, true, null, null, null, "task-1", true, "oak_log", 10, 2, 2, 0, 0, 3, 0, List.of(), 1000L
     );
-    assertEquals(AgentGoal.REQUEST_PLAYER_HELP, controller.evaluateGoal(obsHelp));
+    var blocked = ProductionGoalPolicy.SafetyContext.builder(0, "task-1",
+        UUID.fromString("088b2d3a-a941-4a46-b670-5cbdb4ddfb69"), 3).taskActive(true).routeBlocked(true).build();
+    assertEquals(AgentGoal.REQUEST_PLAYER_HELP, evaluateAndApply(controller, obsHelp, blocked));
+  }
+
+  private static AgentGoal evaluateAndApply(AgentController controller, AgentObservation observation,
+                                             ProductionGoalPolicy.SafetyContext context) {
+    var selection = controller.evaluateGoal(observation, context);
+    assertTrue(controller.applyGoal(selection, context));
+    return selection.goal();
   }
 
   @Test
