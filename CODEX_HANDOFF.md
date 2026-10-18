@@ -68,7 +68,7 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 - A 30-minute idle gap starts a session; the current summary and up to five previous summaries of at most 1,000 characters each are retained. Summaries contain discussion snippets, typed task requests, and separately labeled verified events; they do not infer arbitrary personal facts and use no additional LLM call.
 - Schema v1 migrates to v2 while preserving conversation history and audit rows. Actor maps are prototype-safe; limits are 200 actors, 500 combined events/audit rows, 20 stored turns per actor, and six turns in model history.
 - Only `task_started`, `task_cancelled`, and `task_delivered` with a valid actor reach verified model context. Unknown events and old chat audit rows remain separate. Model context is untrusted data and does not alter task validators, task/cargo ownership, or chest gates.
-- Local Node suite is **28/28**. The feature is not in the Paper/Citizens ZIP; source publication and live brain deployment are pending. No live provider or human gameplay with the new memory was run.
+- Local Node suite is **28/28**. M1 source is published at `74f61d580e74d1c942b3f2badd7f498324212339`; the current Node process started and its health/configuration and idle status were read back. No live provider call, human gameplay with the new memory, or production-store migration inspection was performed.
 
 ---
 
@@ -80,7 +80,7 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
   - Covers Turkish chat parsing, return-home intent, JEV model contract, OpenAI GPT-6 Luna contract, memory store, decision fallbacks, bounded item IDs, action allowlists, and fallback leaf clearing protection.
 - **Distribution Packages**:
   - Historical private server package: commit `775ca1e`, SHA-256 `57172d57df10eb13821fd9a907025d8422c3b7bb3dd3a5ec90618c7223eca83a`; its 2026-10-12 startup does not verify the current schedule source. The exact current JAR was installed on 2026-10-18 and Paper startup plus `save-all` were verified; `/ahmet status` reported NPC id restored in Citizens but unspawned (`NPC: yok`). See the live deployment record in `docs/VALIDATION_RESULTS.md`.
-  - Rebuilt M1 package `dist/villager-ahmet-plugins-paper-1.21.6.zip` SHA-256: `cb339161ed171957ad7f208895adade6c193ae8a2ffb24aedc1856dea4ab55d8`; four entries and archive/embedded hashes verified. It contains the unchanged Paper JAR SHA-256 `4041f4bb70a67d0abc2ae2cd9db226da98916d758d5605f8c65863ef6aebbda1` and pinned Citizens JAR SHA-256 `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158`; the Node brain is not bundled. The JAR’s prior disposable acceptance evidence is unchanged. Source publication and live Node deployment remain pending.
+  - Rebuilt M1 package `dist/villager-ahmet-plugins-paper-1.21.6.zip` SHA-256: `cb339161ed171957ad7f208895adade6c193ae8a2ffb24aedc1856dea4ab55d8`; four entries and archive/embedded hashes verified. It contains the unchanged Paper JAR SHA-256 `4041f4bb70a67d0abc2ae2cd9db226da98916d758d5605f8c65863ef6aebbda1` and pinned Citizens JAR SHA-256 `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158`; the Node brain is not bundled. The JAR’s prior disposable acceptance evidence is unchanged. The separate Node brain is deployed from the published source.
   - Validated by `dist/SHA256SUMS.txt`. This archive contains the Paper plugin and Citizens dependency, not the Node brain; it does not include M1 memory code.
 
 ---

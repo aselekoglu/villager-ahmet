@@ -34,7 +34,7 @@ M1 can start immediately; M2 before M3 and M9; M3 before autonomous M5/M6/M7; M5
 
 - Use `tasks/todo.md` and this plan's SDD ledger as the recovery map. Do not redispatch completed tasks after quota/compaction; inspect git and ledger first.
 - Offline Java verification: `mvn -B -ntp -o -Dmaven.repo.local="<scratch Maven repository>" package` in `paper-plugin` with Java 21. Node: `node --test test/*.test.mjs`; mock smoke may require loopback permission.
-- An earlier local server read-back showed IDLE, zero cargo, bound chest, no bed, and an unspawned NPC; a walking status alone is not evidence of a spawned actor.
+- The current Node process was restarted from published source on 2026-10-18. Status read-back showed IDLE, zero cargo, bound chest, no bed, and an unspawned NPC; a walking status alone is not evidence of a spawned actor. The production memory file was not inspected.
 - Disposable runtime helpers and dated evidence logs are local scratch artifacts; verify they exist before reuse. Prior evidence is archived outside the repository.
 
 - Git HTTPS push previously failed; GitHub connector published identical tree hashes with expected-head non-force updates. API commits use author/committer offset -0400 and no terminal message newline; reconstruct and hash-check exact API commits locally before CAS ref sync. Current branch refs are clean/equal. Never invent a SHA or force-update a remote.

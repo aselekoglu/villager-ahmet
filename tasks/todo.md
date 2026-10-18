@@ -2,8 +2,8 @@
 
 - [x] M1 Player/session memory: implement, test, independent review, mock HTTP, document.
 - [x] M1 rebuild and verify Paper/Citizens package (ZIP SHA-256 `cb339161ed171957ad7f208895adade6c193ae8a2ffb24aedc1856dea4ab55d8`; Node brain remains separate).
-- [ ] Publish M1 source and record the published revision.
-- [ ] Deploy updated Node brain and verify the running source/read-back.
+- [x] Publish M1 source (`74f61d580e74d1c942b3f2badd7f498324212339`) and verify the public tree.
+- [x] Restart the Node brain from published source and verify startup, health/configuration, idle status, and world save read-back.
 - [ ] M2 Bounded grounded perception.
 - [ ] M3 Controlled production goal selection.
 - [ ] M4 Gestures, sound and nearby speech.
@@ -13,6 +13,7 @@
 - [ ] M8 Fine-grained claims, permissions, protection compatibility and bounded tickets.
 - [ ] M9 Private observability/admin dashboard and honest usage/cost audit.
 - [ ] M10 Disposable failure acceptance, isolated installation, final review/release/deploy.
+- [ ] M1 live provider and human memory acceptance; production-store migration remains uninspected.
 - [ ] Human player/two-client acceptance (requires actual user; never mark from proxy).
 
 
