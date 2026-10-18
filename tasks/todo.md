@@ -6,7 +6,7 @@
 - [x] Restart the Node brain from published source and verify startup, health/configuration, idle status, and world save read-back.
 - [x] M2 bounded grounded perception: Java adapter, Node sanitization/forwarding, independent source review, disposable Paper runtime, and actual request-body sanitizer compatibility.
 - [x] Rebuild and verify the four-entry M2 Paper/Citizens package (ZIP SHA-256 `67f6a1e2a0cc60f6a6bb23d99ec3bc5eabece9119a3e6ec46deb19214f256b64`; embedded core JAR SHA-256 `48669fd65dbdffb7be39d861906a61a30173aeab5f0b88ee85dff8c4f44f195b`; no config secrets or test ZIP).
-- [ ] Publish M2 source and deploy/read back the reviewed core JAR. No M2 live deployment is claimed.
+- [x] Publish M2 source (`ba29c68916562f922b3bae085c72b51f345030c0`, tree `30d87eaf4c82778cfac5d4b9b87112129b600b76`) and deploy/read back the reviewed core JAR from the verified four-entry package; Paper/Node restart, health, idle status, and saved dimensions were confirmed. No provider was invoked; human acceptance remains open.
 - [ ] M3 Controlled production goal selection.
 - [ ] M4 Gestures, sound and nearby speech.
 - [ ] M5 Allowlisted transactional crafting.
