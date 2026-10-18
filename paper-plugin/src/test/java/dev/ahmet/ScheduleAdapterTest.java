@@ -66,6 +66,28 @@ class ScheduleAdapterTest {
     }
 
     @Test
+    void wanderRadiusChecksCenteredDestinationAndKeepsValidHalfBlockHome() {
+        World world=world("wander-radius",10_000L);
+        AtomicInteger issued=new AtomicInteger();
+        AtomicReference<Location> issuedTarget=new AtomicReference<>();
+        Location integerHome=new Location(world,0,64,0);
+        ScheduleAdapter integerAdapter=new ScheduleAdapter(()->1_000L);
+        integerAdapter.tick(movingNpc(integerHome,issued,issuedTarget),integerHome,null,true,false,false,32,
+                loc->loc.getBlockX()==4&&loc.getBlockZ()==4,(from,to)->null,new TestChunks());
+        assertEquals(0,issued.get(),"centered target would exceed six blocks from integer home");
+        assertTrue(integerAdapter.target()==null);
+
+        issued.set(0);issuedTarget.set(null);
+        Location centeredHome=new Location(world,.5,64,.5);
+        ScheduleAdapter centeredAdapter=new ScheduleAdapter(()->1_000L);
+        centeredAdapter.tick(movingNpc(centeredHome,issued,issuedTarget),centeredHome,null,true,false,false,32,
+                loc->loc.getBlockX()==4&&loc.getBlockZ()==4,(from,to)->null,new TestChunks());
+        assertEquals(1,issued.get());
+        assertNotNull(issuedTarget.get());
+        assertTrue(issuedTarget.get().distance(centeredHome)<=6.0);
+    }
+
+    @Test
     void arrivalRequiresCenteredStandingCellRatherThanNearbySphere() {
         World world=world("arrival");
         Location target=new Location(world,4.5,64,4.5);
@@ -204,8 +226,21 @@ class ScheduleAdapterTest {
             case "isSpawned"->true;case "getEntity"->villager;case "toString"->"test NPC";default->null;});
     }
 
-    private static World world(String name){return (World)Proxy.newProxyInstance(World.class.getClassLoader(),new Class<?>[]{World.class},(p,m,a)->switch(m.getName()){
-        case "getName"->name;case "getMinHeight"->-64;case "getMaxHeight"->320;case "getTime"->13_000L;case "equals"->p==a[0];case "hashCode"->System.identityHashCode(p);case "toString"->name;default->null;});}
+    private static NPC movingNpc(Location current,AtomicInteger targetCount,AtomicReference<Location> target){
+        AtomicReference<Boolean> navigating=new AtomicReference<>(false);
+        NavigatorParameters defaults=new NavigatorParameters(),locals=new NavigatorParameters();
+        Navigator navigator=(Navigator)Proxy.newProxyInstance(Navigator.class.getClassLoader(),new Class<?>[]{Navigator.class},(p,m,a)->switch(m.getName()){
+            case "getDefaultParameters"->defaults;case "getLocalParameters"->locals;case "setTarget"->{targetCount.incrementAndGet();target.set((Location)a[0]);navigating.set(true);yield null;}
+            case "isNavigating"->navigating.get();case "cancelNavigation"->{navigating.set(false);yield null;}default->null;});
+        Villager villager=(Villager)Proxy.newProxyInstance(Villager.class.getClassLoader(),new Class<?>[]{Villager.class},(p,m,a)->switch(m.getName()){
+            case "getLocation"->current;case "isSleeping"->false;case "getWorld"->current.getWorld();default->null;});
+        return (NPC)Proxy.newProxyInstance(NPC.class.getClassLoader(),new Class<?>[]{NPC.class},(p,m,a)->switch(m.getName()){
+            case "isSpawned"->true;case "getEntity"->villager;case "getNavigator"->navigator;default->null;});
+    }
+
+    private static World world(String name){return world(name,13_000L);}
+    private static World world(String name,long time){return (World)Proxy.newProxyInstance(World.class.getClassLoader(),new Class<?>[]{World.class},(p,m,a)->switch(m.getName()){
+        case "getName"->name;case "getMinHeight"->-64;case "getMaxHeight"->320;case "getTime"->time;case "equals"->p==a[0];case "hashCode"->System.identityHashCode(p);case "toString"->name;default->null;});}
 
     private static final class TestChunks implements ScheduleAdapter.ChunkAccess {
         final Map<String,BlockData> beds=new HashMap<>();

@@ -113,9 +113,14 @@ final class ScheduleAdapter {
             if (observeRoute(npc, current, 0.30, clock.getAsLong())) return;
             if (!retries.ready(clock.getAsLong())) return;
             Location waypoint = VillagerSchedule.findWanderWaypoint(current, home, state.waypointAttempt(),
-                    candidate -> safe.test(candidate) && candidate.distanceSquared(home) <= 36.0);
+                    candidate -> {
+                        Location standing=centered(candidate);
+                        return safe.test(standing)&&standing.distanceSquared(home)<=36.0;
+                    });
             if (waypoint == null) { deferNoCandidate("no loaded safe wander waypoint"); return; }
-            startRoute(npc, centered(waypoint), safe, false);
+            Location standing=centered(waypoint);
+            if(!safe.test(standing)||standing.distanceSquared(home)>36.0){deferNoCandidate("no centered safe wander waypoint within home radius");return;}
+            startRoute(npc, standing, safe, false);
             return;
         }
         long bedNow=clock.getAsLong();
