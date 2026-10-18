@@ -72,6 +72,14 @@ If three separate resource routes fail or two consecutive scans find no remainin
 
 Wood provenance is conservative and local to this plugin. Main-thread `BlockPlaceEvent` handlers persist coordinates for player-placed logs/stems; eligible wood at those coordinates is never offered to JEV. A configurable spherical home exclusion protects pre-existing structures because vanilla world data has no historical placer metadata. The radius defaults to 10 blocks and operators can set its center/radius with `/ahmet protecthome <0-32>`. The existing leaf/fungus heuristic remains an additional natural-tree signal. Prior edits elsewhere, command edits, and edits made by other plugins cannot be identified retroactively and need an explicit protected area.
 
+## Deterministic Citizens schedule
+
+`ScheduleAdapter` owns routine navigation and bed sleep for the real Citizens `VILLAGER`; Paper remains authoritative and all Citizens/Bukkit calls stay on the server main thread. The schedule uses world time modulo 24,000 ticks: WAKE `[0,1000)`, WORK `[1000,9000)`, WANDER `[9000,12000)`, and SLEEP `[12000,24000)`. WORK means that Ahmet is idle and available at home; it does not launch autonomous harvesting. Scheduling is enabled by default with `options.schedule-enabled: true`.
+
+At WANDER, the planner tries a bounded set of safe, loaded locations no farther than six blocks from the saved home, without changing blocks or loading chunks. During WAKE and WORK, and at night, Ahmet returns toward home. An operator can bind an existing bed by looking at it within six blocks and running `/ahmet bed`; the plugin persists only its location. It does not create or replace beds. For sleep, Ahmet first walks to a safe standing location adjacent to the validated bed and only then invokes the native villager sleep behavior. Missing, occupied, stale, wrong-world, or unreachable beds fail closed and leave Ahmet resting at home with the current reason exposed by `/ahmet status`.
+
+An active job, cargo, recovery block, or outstanding journal work preempts schedule movement and sleep immediately. Schedule navigation uses Citizens pathfinding with bounded precision for routine waypoints; it does not teleport or alter task-navigation defaults. Only an explicit operator `/ahmet summon` while idle may reposition Ahmet. Schedule retries are bounded and cooled down rather than retried each tick. Runtime probe observations and manual gameplay gaps are recorded in `docs/VALIDATION_RESULTS.md` and `docs/ACCEPTANCE.md`.
+
 ## Gameplay assumptions
 
 - Version pin: Minecraft Java 1.21.6 / Paper 1.21.6 / Java 21 / Citizens 2.0.41 build 4138 (1.21_R5 adapter).

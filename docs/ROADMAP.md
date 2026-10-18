@@ -26,7 +26,7 @@ The 1.21.6 vanilla item catalog and common-resource code path are implemented; v
 - [x] Obstruction clearance & canopy navigation recovery: safe walkable approach, qualified leaf removal, safe descent simulation, and zero-cargo clear journal operation.
 - [x] External protection SPI (`ProtectionHook`, `CompositeProtectionHook`) with fail-closed safety.
 - [x] Structured player help requests (`BLOCKED_AWAITING_HELP`) when route retries or descent simulations fail.
-- [ ] Citizen NPC schedule: wake, wander, work, sleep at bed and village home.
+- [x] Deterministic Citizens NPC schedule: WAKE/WORK at home, bounded WANDER, and bed-directed SLEEP with safe adjacency, fail-closed fallback, retries, status reasons, persistence, and task/cargo/recovery preemption. WORK means idle availability, not auto-harvest. See [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`ACCEPTANCE.md`](ACCEPTANCE.md); final-binary disposable runtime and player acceptance are tracked separately.
 - [ ] Context-aware conversational memory; player relationships and session-scoped summaries.
 - [ ] Avatar gestures: look at players, arm swing while chopping, working sounds, speech proximity.
 - [ ] Perception: inventories/blocks in loaded chunks, player positions with privacy bounds.

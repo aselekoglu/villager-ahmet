@@ -8,6 +8,11 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 - **Node Brain Daemon (`brain/`)**: Language understanding, structured task extraction, conversational memory, and decision candidate selection. Strictly distinguishes **TypeSafe JEV** (`POST https://api.typesafe.ai/v1/systemone` using model `jev-latest`) for bounded decision selection from **OpenAI GPT-6 Luna** (`POST https://api.openai.com/v1/chat/completions`) for conversational chat.
 - **Private LAN Network Policy**: Operating on private LAN (`10.0.0.140:25565`) with `online-mode=false` (to accommodate operator's offline TLauncher client profile) and whitelist enabled. Strictly private; never port-forwarded or exposed publicly.
 
+### Deterministic Citizens schedule
+- `ScheduleAdapter` runs the real Citizens villager through WAKE `[0,1000)`, WORK `[1000,9000)`, WANDER `[9000,12000)`, and SLEEP `[12000,24000)` using world time modulo 24,000 ticks. WORK is idle availability at home, not automatic harvesting.
+- Operators bind an existing nearby bed with `/ahmet bed`; only its location is persisted. Ahmet walks to a safe adjacent standing cell before native sleep. Invalid, occupied, stale, wrong-world, or unreachable beds fail closed to home and expose the current reason in `/ahmet status`.
+- Jobs, cargo, recovery blocks, and outstanding journal work immediately preempt schedule movement/sleep. Routine schedule movement is bounded Citizens pathfinding with no teleport; task navigation defaults are preserved. Schedule enablement defaults to `true` (`options.schedule-enabled`).
+
 ---
 
 ## 2. Implemented Capabilities & Verified Features
@@ -54,16 +59,20 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 - `ProtectionHook` SPI and `CompositeProtectionHook` providing fail-closed protection checks in production and harness paths.
 - Structured player help requests (`BLOCKED_AWAITING_HELP`) when route retries or safe clearance are exhausted.
 
+### J. Deterministic Citizens Schedule
+- Schedule policy and adapter are integrated with the production task loop and expose phase/activity/reason in `/ahmet status`; `/ahmet bed` binds an existing bed.
+- Unit coverage includes time boundaries, eligibility, safe bounded wander, task/cargo/recovery/journal preemption, bed state transitions, current failure reporting, and retry cooldowns. Runtime-probe results and the live-play acceptance boundary are recorded in the docs.
+
 ---
 
 ## 3. Test Suites & Verification Evidence
 
-- **Java Maven Unit Tests**: **125 tests, 0 failures** (`mvn test` in `paper-plugin/`).
+- **Java Maven Unit Tests**: latest source **153 tests, 0 failures** (`mvn package` in `paper-plugin/`). Earlier dated counts below remain historical snapshots.
   - Covers `AgentEvaluationHarnessTest` (7), `AgentControllerTest` (3), `AgentModelsTest` (4), `ActionPreconditionsTest` (5), `ProtectionHookTest` (5), `ObstructionPolicyTest` (9), `DescentSimulatorTest` (7), `HarvestApproachPlannerTest` (3), `OperationJournalTest` (8), `OperationRecoveryTest` (6), `WoodTaskTest` (12), `ExplorationPlannerTest` (9), `CargoDepositPlannerTest` (6), `ClearTransactionTest` (2), `TaskAdmissionTest` (2), `ResourceCatalogTest` (3), and all existing unit suites.
 - **Node Brain Unit Tests**: **16 tests, 0 failures** (`npm test` in `brain/`).
   - Covers Turkish chat parsing, return-home intent, JEV model contract, OpenAI GPT-6 Luna contract, memory store, decision fallbacks, bounded item IDs, action allowlists, and fallback leaf clearing protection.
 - **Distribution Packages**:
-  - `server-live/plugins/VillagerAhmet.jar` (commit `775ca1e`, pushed to `origin/main`; SHA-256: `57172d57df10eb13821fd9a907025d8422c3b7bb3dd3a5ec90618c7223eca83a`). Paper 1.21.6 build 48 + Citizens 2.0.41 build 4138 + Java 21 started with `Done (10.035s)`; brain is listening at `127.0.0.1:3197`. `/ahmet status`: IDLE, cargo 0, chest bound, recovery unblocked; NPC id 1 restored but unspawned (`NPC: yok`). Old startup/shutdown retired the pre-existing clear journal before this startup, so replay of those records was not exercised here. (Note: the 2026-10-16 source fixes in the working tree/next commit have not yet been deployed to `server-live`.)
+  - Historical `server-live` package: commit `775ca1e`, SHA-256 `57172d57df10eb13821fd9a907025d8422c3b7bb3dd3a5ec90618c7223eca83a`; its 2026-10-12 successful startup does not verify the current schedule source. A later user play session makes its old unspawned-NPC status stale. The live server was confirmed stopped at the 2026-10-18 resumption; final package deployment and startup evidence are pending controller read-back.
   - `dist/villager-ahmet-plugins-paper-1.21.6.zip` (SHA-256: `a4743a1d5dbe053f17385ab7a512013b65b1555e05b02e2d088b99566252970d`)
   - Validated by `dist/SHA256SUMS.txt`.
 
@@ -95,8 +104,7 @@ Historical review prompt for **sol 6.1** (the claims and deployment hashes above
 3. **Exploration & Navigation Robustness**: Review `ExplorationPlanner.java` algorithms (`findExplorationWaypoint` and `findStepTowardsHome`) for pathfinding efficiency, boundary limits, and obstacle avoidance.
 4. **Security & Input Validation**: Ensure bounded typed actions and strict validation of player chat and task inputs without any command injection or arbitrary coordinate passthrough.
 5. **Next Roadmap Objectives**:
-   - First open P1 item: Citizen NPC schedule (wake, wander, work, sleep at bed and village home).
-   - Live gameplay validation of wandering exploration and multi-step home return with online player.
+   - Live gameplay validation of schedule, wandering exploration and multi-step home return with an online player.
    - Enhanced visual feedback / particle effects or arm swinging during harvesting.
    - Clean up duplicate Citizens NPC template records if any exist in the saved world registry.
 
@@ -107,3 +115,8 @@ Historical review prompt for **sol 6.1** (the claims and deployment hashes above
 - Verification on 2026-10-16: Java 21 Maven package passed with **125/125** tests, Node tests passed **16/16**, and the disposable Paper 1.21.6 runtime probe (`scripts/fixtures/RuntimeCommonResourceProbe.java`) verified `/ahmet items` console queries, all 11 source block drops (+ `COARSE_DIRT` negative control), scan behavior and invocation timing (the earlier probe used a synchronous loop, the corrected independent rerun subsequently verified 74 separate scheduler ticks plus next-tick invalidation; see VALIDATION_RESULTS.md), and end-to-end bounded collection + Citizens villager walking (`teleportDetected=false`) + virtual cargo + chest delivery across all 7 common-resource groups (`dirt`, `sand`, `red_sand`, `cobblestone`, `coal`, `raw_iron`, `raw_gold`, depositing 11/11 items into the bound chest) against the mock brain.
 - Animation/particles and duplicate Citizens registry-record cleanup remain follow-ups. No saved registry files were edited.
 - The manual acceptance matrix remains authoritative; do not mark any newly affected live-world or forced-crash scenario complete without observing it.
+
+## Schedule release status (2026-10-18)
+
+- Current local HEAD at documentation start: `dacb432` plus an uncommitted schedule status/cooldown correction; final artifact SHA-256 `d91ee295b59a46353e69154ac6a3969bc710f5b01adacea0f37d0c22ed0cd95e` (153 Java tests). This checksum identifies the pre-release local JAR, not a deployed package.
+- Prior 153-test runtime probe verified changing bed-status reasons and a two-DIRT delivery; the cooldown-only follow-up is covered by unit tests and included in the final JAR. Exact-JAR common-resource, fresh schedule, and same-world restart disposable probes now pass. The verified transfer ZIP and embedded JAR checksums are recorded in `dist/SHA256SUMS.txt`. Final push, live deployment, and post-startup status remain pending controller evidence; no live player schedule acceptance is claimed here.
