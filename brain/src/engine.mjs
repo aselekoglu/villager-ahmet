@@ -1,5 +1,6 @@
 import {parseTask,isCancel,isReturnHome,validateTask} from './intent.mjs';
 import {chooseAction,conversationalReply,interpretTurn} from './models.mjs';
+import {sanitizePerception} from './perception.mjs';
 function busyReply(req) {
   const cargo=Number(req.context?.cargo??0);
   if(!req.context?.taskActive&&Number.isInteger(cargo)&&cargo>0)
@@ -17,7 +18,9 @@ export async function chat(req,{store,models={chooseAction,conversationalReply,i
   else if(isCancel(message))reply='Tamam, duruyorum. Görevi iptal ettim.';
   else {
     const memory=store.context(actor);
-    const modelOptions={key,mode:chatMode,memory,events:memory.verifiedEvents};
+    const generation=req.context?.generation;
+    const perception=sanitizePerception(req.context?.perception,{expectedGeneration:generation});
+    const modelOptions={key,mode:chatMode,memory,events:memory.verifiedEvents,perception,generation:perception.generation};
     let turn=null,modelFailed=false;
     try {turn=await models.interpretTurn(message,name,store.history(actor),modelOptions);}
     catch {modelFailed=true;}
@@ -50,7 +53,9 @@ export async function decide(req,{models={chooseAction},key,decisionMode}={}) {
   if(!req||!Array.isArray(req.actions)||req.actions.length===0||req.actions.length>16)throw new Error('Invalid actions');
   const actions=req.actions.map(a=>({id:String(a.id).slice(0,40),description:String(a.description??a.id).slice(0,180)}));
   if(actions.some(a=>!/^[a-z_]+$/.test(a.id)))throw new Error('Invalid action id');
-  try{return await models.chooseAction(req.observation??{},actions,{key,mode:decisionMode});}
+  const observation=req.observation??{};
+  const perception=sanitizePerception(observation.perception,{expectedGeneration:observation.generation});
+  try{return await models.chooseAction({...observation,perception},actions,{key,mode:decisionMode});}
   catch(e){
     const safeFallback=actions.find(a=>!a.id.startsWith('clear_')&&a.id!=='wait')?.id
       ??actions.find(a=>!a.id.startsWith('clear_'))?.id

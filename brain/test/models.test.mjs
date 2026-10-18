@@ -36,3 +36,21 @@ test('GPT-6 Luna returns a JSON task intent separately from JEV',async()=>{
   assert.equal(seen.body.model,'gpt-6-luna');assert.deepEqual(seen.body.response_format,{type:'json_object'});
  }finally{globalThis.fetch=previous;}
 });
+
+test('provider serialization re-sanitizes perception and keeps it advisory',async()=>{
+ const previous=globalThis.fetch;let seen=[];
+ try {
+  globalThis.fetch=async(url,init)=>{seen.push({url,body:JSON.parse(init.body)});return url.includes('typesafe')
+    ?{ok:true,json:async()=>({model:'jev-latest',answers:{action:{choice:'a0'}}})}
+    :{ok:true,json:async()=>({choices:[{message:{content:'Tamam.'}}]})};};
+  const snapshot={version:1,available:true,capturedAt:Date.now(),generation:2,phase:'WORK',blocks:{sampledCells:1,types:[{material:'STONE',count:1,secret:'drop'}],secret:'drop'},inventory:{enabled:false,available:false,items:[]},players:{enabled:false,available:false,bands:[]},secret:'drop'};
+  await chooseAction({generation:2,perception:snapshot,secret:'other'},[{id:'wait',description:'Wait'}],{key:'test-only',mode:'jev'});
+  await conversationalReply('Hi','Ata',[],{key:'test-only',mode:'llm',generation:2,perception:snapshot});
+  assert.equal(seen.length,2);assert.equal(seen[0].body.state.secret,'other');
+  assert.equal(seen[0].body.state.perception.secret,undefined);
+  assert.equal(seen[0].body.state.perception.blocks.secret,undefined);
+  assert.equal(seen[0].body.state.perception.blocks.types[0].secret,undefined);
+  const prompt=seen[1].body.messages.map(m=>m.content??'').join('\n');
+  assert.match(prompt,/bounded, partial, read-only observation/);assert.doesNotMatch(prompt,/"secret"/);
+ }finally{globalThis.fetch=previous;}
+});

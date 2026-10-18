@@ -371,8 +371,14 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     if(npc==null || !npc.isSpawned()){player.sendMessage("§cÖnce /ahmet spawn ile Ahmet'i oluştur.");return;}
     if(!player.getWorld().equals(npc.getEntity().getWorld()) || player.getLocation().distanceSquared(npc.getEntity().getLocation())>18*18){player.sendMessage("§cAhmet'le konuşmak için ona yaklaş.");return;}
     JsonObject req=new JsonObject();req.addProperty("actorUuid",player.getUniqueId().toString());req.addProperty("actorName",player.getName());req.addProperty("text",message);
-    JsonObject context=new JsonObject();context.addProperty("busy",task.active || task.cargo>0);context.addProperty("taskActive",task.active);context.addProperty("cargo",task.cargo);context.addProperty("chestBound",chestLocation!=null);req.add("context",context);
+    final long interactionGeneration=controller.jobGeneration();
+    GroundedPerception.Snapshot perception=BukkitPerception.capture(npc,player,chestLocation,
+        getConfig().getBoolean("perception.enabled",true),
+        getConfig().getBoolean("perception.include-bound-chest",false),
+        getConfig().getBoolean("perception.include-players",false),interactionGeneration);
+    JsonObject context=new JsonObject();context.addProperty("generation",interactionGeneration);context.add("perception",com.google.gson.JsonParser.parseString(perception.toJson()));context.addProperty("busy",task.active || task.cargo>0);context.addProperty("taskActive",task.active);context.addProperty("cargo",task.cargo);context.addProperty("chestBound",chestLocation!=null);req.add("context",context);
     brain.post("/api/chat",req).whenComplete((reply,error)->Bukkit.getScheduler().runTask(this,()->{
+      if(controller.jobGeneration()!=interactionGeneration)return;
       if(error!=null){player.sendMessage("§cAhmet'in beyni şu an yanıt vermiyor: "+error.getMessage());return;}
       if(!player.isOnline())return;
       String answer=reply.has("reply")?reply.get("reply").getAsString():"Hmm?";
@@ -610,9 +616,14 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     observation.addProperty("task",woodTask?"collect_wood":"collect_item");observation.addProperty("materialPreference",task.materialPreference);observation.addProperty("requested",task.requested);observation.addProperty("collected",task.collected);
     observation.addProperty("cargo",task.cargo);observation.addProperty("deposited",task.deposited);observation.addProperty("requiredAction",woodTask?"select_tree":"select_resource");
     observation.addProperty("chestBound",chestLocation!=null);observation.addProperty("position",coords(current));
+    final long generation=controller.jobGeneration();
+    GroundedPerception.Snapshot perception=BukkitPerception.capture(npc,taskViewer(),chestLocation,
+        getConfig().getBoolean("perception.enabled",true),
+        getConfig().getBoolean("perception.include-bound-chest",false),
+        getConfig().getBoolean("perception.include-players",false),generation);
+    observation.addProperty("generation",generation);observation.add("perception",com.google.gson.JsonParser.parseString(perception.toJson()));
     req.add("observation",observation);req.add("actions",options);
     deciding=true;
-    final long generation=controller.jobGeneration();
     brain.post("/api/decide",req).whenComplete((response,error)->Bukkit.getScheduler().runTask(this,()->{
       deciding=false;if(!task.active || npc==null || !npc.isSpawned() || controller.jobGeneration()!=generation)return;
       // JEV may select only an offered target ID. Java retains each real block location.
@@ -650,6 +661,12 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
 
   private void clearScheduleNavigation(String reason){scheduleAdapter.suspend(npc,reason);}
+
+  private Player taskViewer(){
+    if(task.owner==null)return null;
+    try{return Bukkit.getPlayer(java.util.UUID.fromString(task.owner));}
+    catch(IllegalArgumentException ignored){return null;}
+  }
 
   private ScheduleAdapter.ChunkAccess scheduleChunkAccess(){
     return new ScheduleAdapter.ChunkAccess(){
@@ -710,10 +727,15 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     observation.addProperty("chestBound",chestLocation!=null);
     observation.addProperty("position",coords(current));
     observation.addProperty("routeClears",routeClears);
+    final long generation=controller.jobGeneration();
+    GroundedPerception.Snapshot perception=BukkitPerception.capture(npc,taskViewer(),chestLocation,
+        getConfig().getBoolean("perception.enabled",true),
+        getConfig().getBoolean("perception.include-bound-chest",false),
+        getConfig().getBoolean("perception.include-players",false),generation);
+    observation.addProperty("generation",generation);observation.add("perception",com.google.gson.JsonParser.parseString(perception.toJson()));
     req.add("observation",observation);req.add("actions",options);
 
     deciding=true;
-    final long generation=controller.jobGeneration();
     brain.post("/api/decide",req).whenComplete((response,error)->Bukkit.getScheduler().runTask(this,()->{
       deciding=false;
       if(!task.active||npc==null||!npc.isSpawned()||controller.jobGeneration()!=generation)return;

@@ -10,14 +10,14 @@
 
 ## Local REST protocol
 
-All POSTs include `Authorization: Bearer <BRIDGE_TOKEN>` and JSON. Brain binds to `127.0.0.1:3197` by default. Every request is bounded. The Java plugin is client, Node brain is server.
+All POSTs include `Authorization: Bearer <BRIDGE_TOKEN>` and JSON. Brain binds to `localhost:3197` by default. Every request is bounded. The Java plugin is client, Node brain is server.
 
 ### `POST /api/chat`
 
 Request:
 
 ```json
-{"actorUuid":"<Minecraft UUID>","actorName":"primary test player","text":"Ahmet, 20 meşe odunu topla","context":{"busy":false,"chestBound":true}}
+{"actorUuid":"<player UUID>","actorName":"<player display name>","text":"Ahmet, 20 meşe odunu topla","context":{"generation":7,"busy":false,"chestBound":true,"perception":{"version":1,"available":false,"capturedAt":0,"generation":7,"phase":"UNKNOWN","blocks":{"sampledCells":0,"types":[]},"inventory":{"enabled":false,"available":false,"items":[]},"players":{"enabled":false,"available":false,"bands":[]}}}}
 ```
 
 Response (the LLM may set a wood species or request a common resource item):
@@ -33,13 +33,13 @@ Wood requests use the existing `collect_wood` intent; common resources use `coll
 Request:
 
 ```json
-{"observation":{"task":"collect_wood","materialPreference":"any","requested":20,"collected":3,"cargo":3,"deposited":0,"requiredAction":"select_tree","chestBound":true,"position":"<local position>"},"actions":[{"id":"target_a","description":"Walk to nearby BIRCH_LOG block, distance 5 blocks"},{"id":"target_b","description":"Walk to nearby OAK_LOG block, distance 8 blocks"},{"id":"wait","description":"Wait briefly"}]}
+{"observation":{"generation":8,"task":"collect_wood","materialPreference":"any","requested":20,"collected":3,"cargo":3,"deposited":0,"requiredAction":"select_tree","chestBound":true,"position":"<server-local position>","perception":{"version":1,"available":false,"capturedAt":0,"generation":8,"phase":"UNKNOWN","blocks":{"sampledCells":0,"types":[]},"inventory":{"enabled":false,"available":false,"items":[]},"players":{"enabled":false,"available":false,"bands":[]}}},"actions":[{"id":"target_a","description":"Walk to nearby BIRCH_LOG block, distance 5 blocks"},{"id":"target_b","description":"Walk to nearby OAK_LOG block, distance 8 blocks"},{"id":"wait","description":"Wait briefly"}]}
 ```
 
 Response:
 
 ```json
-{"id":"walk_tree","source":"jev","model":"jev-latest","confidence":0.92}
+{"id":"target_a","source":"jev","model":"jev-latest","confidence":0.92}
 ```
 
 `source` can also be `heuristic`, `forced`, `fallback`. Server can only execute actions actually offered for the current task generation. Responses from cancelled/replaced jobs are discarded.
@@ -51,6 +51,18 @@ Response:
 ```
 
 Acknowledge `{ "ok": true }`. Allowed types: `task_started`, `task_cancelled`, `task_delivered`. These events feed bounded conversation memory. Server can lose an event when the brain is offline; core task execution remains authoritative in Paper YAML.
+
+## Bounded grounded perception (M2)
+
+The plugin attaches a generation-stamped v1 snapshot to `/api/chat` context and `/api/decide` observations. It is read-only, partial, advisory data. It cannot create goals, authorize actions, supply coordinates, or change existing task/cargo/recovery priority. Perception makes no additional model calls; the existing offered-action validation and Java authority remain decisive.
+
+- `perception.enabled` defaults to `true` for block sampling. Paper checks the main thread before reading NPC/world state, samples only already-loaded cells within four blocks along four cardinal rays, stops at opaque or unloaded cells, and reads at most 64 cells. It emits at most eight aggregate material counts. A bounded ray or unloaded edge is not full-world coverage.
+- `perception.include-bound-chest` and `perception.include-players` default to `false`. Inventory data is available only after explicit opt-in and an online same-world viewer passes `ahmet.admin`; it covers only the already-bound nearby chest, reads the full double-chest view up to 54 slots, and emits at most eight material totals (maximum aggregate 3,456). It reads no player inventory, container names, item metadata, or NBT.
+- Player data is available only after opt-in and a valid online same-world viewer context. The adapter considers at most 32 online candidates, excludes the viewer and filters foreign-world, invisible, or hidden players before position reads. It emits at most eight anonymous `near` (within four blocks) or `nearby` (within eight blocks) bands; no name, UUID, world name, or coordinates are included.
+- Snapshot JSON contains only `version`, `available`, `capturedAt`, `generation`, `phase`, and the `blocks`, `inventory`, and `players` sections. Node accepts only the v1 field/type allowlist, enforces a 20-second maximum age and one-second future skew, and requires the caller's current generation. Missing, stale, malformed, unsafe-integer, or mismatched input becomes minimal unavailable data; unknown fields are stripped before every provider serialization. Old plugin requests without perception remain usable.
+- All Bukkit, Citizens, world, block, player, and inventory access remains on the Paper main thread. HTTP work is asynchronous and bounded. Chat callbacks compare the generation captured before the request with the current job generation before applying any reply, task, cancel, or home effect.
+
+The model may use the sanitized observations as context, but unavailable or partial sections mean “unknown,” not “empty world/chest.” A visible-player band is not an identity and does not grant permission. Runtime evidence and the human/provider boundary are recorded in `docs/VALIDATION_RESULTS.md` and `docs/ACCEPTANCE.md`.
 
 ## Bounded conversational memory
 

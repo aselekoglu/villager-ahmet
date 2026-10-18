@@ -1,12 +1,12 @@
 # Codex Handoff — Villager Ahmet
 
 ## 1. Project Overview & Architecture
-Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition running on **Paper 1.21.6 (build 48)** with **Citizens 2.0.41 (build 4138)** and **Java 21**, coordinated by a local **Node.js (v22)** brain daemon (`127.0.0.1:3197`).
+Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition running on **Paper 1.21.6 (build 48)** with **Citizens 2.0.41 (build 4138)** and **Java 21**, coordinated by a local **Node.js (v22)** brain daemon (`localhost:3197`).
 
 ### Architectural Division of Responsibility
 - **Java Paper Plugin (`paper-plugin/`)**: Authoritative owner of world mutations, entity pathfinding, item transactions, task state, write-ahead journaling, and safe boundaries. All Bukkit/Citizens calls stay on the server main thread.
 - **Node Brain Daemon (`brain/`)**: Language understanding, structured task extraction, conversational memory, and decision candidate selection. Strictly distinguishes **TypeSafe JEV** (`POST https://api.typesafe.ai/v1/systemone` using model `jev-latest`) for bounded decision selection from **OpenAI GPT-6 Luna** (`POST https://api.openai.com/v1/chat/completions`) for conversational chat.
-- **Private LAN Network Policy**: Operating on a private LAN with `online-mode=false` (to accommodate operator's offline TLauncher client profile) and whitelist enabled. Strictly private; never port-forwarded or exposed publicly.
+- **Private LAN Network Policy**: A private LAN that accepts offline clients may use `online-mode=false` with whitelist enabled. Offline mode allows username spoofing; use only on a trusted LAN, never port-forward, and restore online authentication before any public exposure.
 
 ### Deterministic Citizens schedule
 - `ScheduleAdapter` runs the real Citizens villager through WAKE `[0,1000)`, WORK `[1000,9000)`, WANDER `[9000,12000)`, and SLEEP `[12000,24000)` using world time modulo 24,000 ticks. WORK is idle availability at home, not automatic harvesting.
@@ -68,20 +68,26 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 - A 30-minute idle gap starts a session; the current summary and up to five previous summaries of at most 1,000 characters each are retained. Summaries contain discussion snippets, typed task requests, and separately labeled verified events; they do not infer arbitrary personal facts and use no additional LLM call.
 - Schema v1 migrates to v2 while preserving conversation history and audit rows. Actor maps are prototype-safe; limits are 200 actors, 500 combined events/audit rows, 20 stored turns per actor, and six turns in model history.
 - Only `task_started`, `task_cancelled`, and `task_delivered` with a valid actor reach verified model context. Unknown events and old chat audit rows remain separate. Model context is untrusted data and does not alter task validators, task/cargo ownership, or chest gates.
-- Local Node suite is **28/28**. M1 source is published at `74f61d580e74d1c942b3f2badd7f498324212339`; the current Node process started and its health/configuration and idle status were read back. No live provider call, human gameplay with the new memory, or production-store migration inspection was performed.
+- At the M1 checkpoint, the local Node suite was **28/28**. M1 source is published at `74f61d580e74d1c942b3f2badd7f498324212339`; the current Node process started and its health/configuration and idle status were read back. The latest combined source suite is **38/38**. No live provider call, human gameplay with the new memory, or production-store migration inspection was performed.
+
+### L. Grounded read-only perception (M2)
+- Paper captures a partial v1 snapshot on the main thread: four-block cardinal surface rays, at most 64 cells and eight material types, with no chunk loading. Chat and JEV observations carry the current job generation; obsolete chat callbacks are rejected before task, cancel, or home effects.
+- Bound-chest inventory and player observations are disabled by default. Inventory requires explicit opt-in, an online same-world viewer with `ahmet.admin`, and the already-bound loaded chest within eight blocks; a double chest is read as up to 54 slots. Player observations require opt-in and emit only `near`/`nearby` bands for visible, non-invisible, same-world players. Snapshots contain no names, UUIDs, coordinates, item metadata, or NBT and have no action authority.
+- The Node brain sanitizes perception at both the engine and provider boundaries; missing, stale, future-dated, malformed, or mismatched-generation input becomes unavailable. Perception adds no model calls or action types.
+- Current reviewed core JAR SHA-256: `48669fd65dbdffb7be39d861906a61a30173aeab5f0b88ee85dff8c4f44f195b`; offline Java package: **175/175**, Node suite: **38/38**. Disposable Paper 1.21.6/Citizens 2.0.41 runtime acceptance and captured synthetic chat/JEV request compatibility passed. The four-entry Paper/Citizens package is rebuilt and verified: ZIP SHA-256 `67f6a1e2a0cc60f6a6bb23d99ec3bc5eabece9119a3e6ec46deb19214f256b64`; it contains no config secrets or test ZIP. M2 source publication and live deployment remain pending. Human/player visibility acceptance and live providers were not tested.
 
 ---
 
 ## 3. Test Suites & Verification Evidence
 
-- **Java Maven Unit Tests**: latest source **155 tests, 0 failures** (`mvn package` in `paper-plugin/`; controller log `local scratch evidence`). Earlier dated counts below remain historical snapshots.
+- **Java Maven Unit Tests**: latest reviewed source **175 tests, 0 failures** (`mvn package` in `paper-plugin/`). Earlier dated counts below remain historical snapshots.
   - Covers `AgentEvaluationHarnessTest` (7), `AgentControllerTest` (3), `AgentModelsTest` (4), `ActionPreconditionsTest` (5), `ProtectionHookTest` (5), `ObstructionPolicyTest` (9), `DescentSimulatorTest` (7), `HarvestApproachPlannerTest` (3), `OperationJournalTest` (8), `OperationRecoveryTest` (6), `WoodTaskTest` (12), `ExplorationPlannerTest` (9), `CargoDepositPlannerTest` (6), `ClearTransactionTest` (2), `TaskAdmissionTest` (2), `ResourceCatalogTest` (3), and all existing unit suites.
-- **Node Brain Unit Tests**: current source **28 tests, 0 failures** (`node --test test/*.test.mjs` in `brain/`). Earlier dated counts below remain historical snapshots.
+- **Node Brain Unit Tests**: latest reviewed source **38 tests, 0 failures** (`node --test test/*.test.mjs` in `brain/`). Earlier dated counts below remain historical snapshots.
   - Covers Turkish chat parsing, return-home intent, JEV model contract, OpenAI GPT-6 Luna contract, memory store, decision fallbacks, bounded item IDs, action allowlists, and fallback leaf clearing protection.
 - **Distribution Packages**:
   - Historical private server package: commit `775ca1e`, SHA-256 `57172d57df10eb13821fd9a907025d8422c3b7bb3dd3a5ec90618c7223eca83a`; its 2026-10-12 startup does not verify the current schedule source. The exact current JAR was installed on 2026-10-18 and Paper startup plus `save-all` were verified; `/ahmet status` reported NPC id restored in Citizens but unspawned (`NPC: yok`). See the live deployment record in `docs/VALIDATION_RESULTS.md`.
-  - Rebuilt M1 package `dist/villager-ahmet-plugins-paper-1.21.6.zip` SHA-256: `cb339161ed171957ad7f208895adade6c193ae8a2ffb24aedc1856dea4ab55d8`; four entries and archive/embedded hashes verified. It contains the unchanged Paper JAR SHA-256 `4041f4bb70a67d0abc2ae2cd9db226da98916d758d5605f8c65863ef6aebbda1` and pinned Citizens JAR SHA-256 `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158`; the Node brain is not bundled. The JAR’s prior disposable acceptance evidence is unchanged. The separate Node brain is deployed from the published source.
-  - Validated by `dist/SHA256SUMS.txt`. This archive contains the Paper plugin and Citizens dependency, not the Node brain; it does not include M1 memory code.
+  - Historical M1 package `dist/villager-ahmet-plugins-paper-1.21.6.zip` SHA-256: `cb339161ed171957ad7f208895adade6c193ae8a2ffb24aedc1856dea4ab55d8`; it predates M2 and is not the M2 release artifact. It contains the Paper plugin and pinned Citizens dependency, not the Node brain.
+  - Final M2 package `dist/villager-ahmet-plugins-paper-1.21.6.zip` has four verified entries and SHA-256 `67f6a1e2a0cc60f6a6bb23d99ec3bc5eabece9119a3e6ec46deb19214f256b64`; the embedded core JAR matches `48669fd65dbdffb7be39d861906a61a30173aeab5f0b88ee85dff8c4f44f195b`. No config secrets or test ZIP are included. M2 source publication and live deployment remain pending.
 
 ---
 

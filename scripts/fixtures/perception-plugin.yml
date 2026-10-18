@@ -1,0 +1,6 @@
+name: RuntimePerceptionProbe
+version: 1.0
+main: dev.ahmetprobe.RuntimePerceptionProbe
+api-version: '1.21'
+load: POSTWORLD
+depend: [Citizens, VillagerAhmet]

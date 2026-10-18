@@ -95,6 +95,32 @@ test('decision timeout is labelled and falls back to an offered action',async()=
  }finally{globalThis.fetch=previous;}
 });
 
+test('chat forwards only sanitized same-generation perception and keeps existing task gates',async()=>{
+ const d=await mkdtemp(join(tmpdir(),'ahmet-'));
+ try {const store=new MemoryStore(join(d,'memory.json'));await store.load();let seen;
+  const result=await chat({actorUuid:'perception-player',actorName:'Ata',text:'Selam',context:{generation:7,chestBound:false,busy:false,perception:{version:1,available:true,capturedAt:Date.now(),generation:7,phase:'WORK',blocks:{sampledCells:1,types:[{material:'STONE',count:1}],private:'drop'},inventory:{enabled:false,available:false,items:[]},players:{enabled:false,available:false,bands:[]},world:'secret'}}},{store,
+   models:{interpretTurn:async(_t,_n,_h,o)=>{seen=o;return {reply:'Selam!',task:null}},conversationalReply:async()=>{throw Error('no extra call')}}});
+  assert.equal(result.task,null);assert.equal(seen.perception.world,undefined);assert.equal(seen.perception.blocks.private,undefined);
+  assert.equal(seen.perception.generation,7);assert.equal(seen.perception.blocks.types[0].material,'STONE');
+ }finally{await rm(d,{recursive:true,force:true});}
+});
+
+test('chat treats missing and stale perception as unavailable without changing task admission',async()=>{
+ const d=await mkdtemp(join(tmpdir(),'ahmet-'));
+ try {const store=new MemoryStore(join(d,'memory.json'));await store.load();let snapshots=[];
+  for(const context of [{generation:4,chestBound:true,busy:false},{generation:4,chestBound:true,busy:false,perception:{version:1,available:true,capturedAt:Date.now(),generation:3,phase:'WORK',blocks:{sampledCells:1,types:[]},inventory:{enabled:false,available:false,items:[]},players:{enabled:false,available:false,bands:[]}}},{generation:4,chestBound:true,busy:false,perception:{version:1}}]) {
+   await chat({actorUuid:'same-player',actorName:'Ata',text:'Selam',context},{store,models:{interpretTurn:async(_t,_n,_h,o)=>{snapshots.push(o.perception);return {reply:'Merhaba',task:null}}}});
+  }
+  assert.equal(snapshots[0].available,false);assert.equal(snapshots[1].available,false);assert.equal(snapshots[2].available,false);
+ }finally{await rm(d,{recursive:true,force:true});}
+});
+
+test('decision sanitizes perception against its generation and makes one model choice',async()=>{
+ let calls=0,seen;
+ const result=await decide({observation:{generation:9,perception:{version:1,available:true,capturedAt:Date.now(),generation:8,phase:'WORK',blocks:{sampledCells:1,types:[]},inventory:{enabled:false,available:false,items:[]},players:{enabled:false,available:false,bands:[]}}},actions:[{id:'wait'}]}, {models:{chooseAction:async(state,actions)=>{calls++;seen=state;return {id:actions[0].id,source:'heuristic'}}}});
+ assert.equal(result.id,'wait');assert.equal(calls,1);assert.equal(seen.perception.available,false);
+});
+
 test('decision fallback and mock modes never select a clear mutation action',async()=>{
  const previous=globalThis.fetch;
  try {

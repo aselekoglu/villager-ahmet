@@ -14,6 +14,10 @@ options:
   protect-home-radius: 10
   # Only harvest unmarked log/stem blocks with nearby tree leaves or Nether-fungus indicators.
   only-natural-wood: true
+perception:
+  enabled: true
+  include-bound-chest: false
+  include-players: false
 protection:
   # Operators can relocate this center with /ahmet protecthome <radius>.
   home: {}

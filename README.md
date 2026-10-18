@@ -2,7 +2,7 @@
 
 An AI-assisted **real villager NPC** for a private Minecraft Java Edition multiplayer world. Not a player bot wearing a villager skin.
 
-**Status:** common-resource gathering, the Paper 1.21.6 item catalog, cargo/recovery journaling, double-chest delivery, protected-home filtering, bounded Citizens navigation, deterministic Citizens scheduling, and bounded player/session memory are implemented in source. Latest Node source suite: **28 tests passed**; the latest Java source verification remains **155 tests passed** (Java was unchanged for M1). Mock HTTP validation passes. The Paper/Citizens release package is rebuilt and verified. M1 source is published at `74f61d580e74d1c942b3f2badd7f498324212339`, and the updated Node brain has been restarted with a verified status read-back. Current schedule JAR `4041f4bb…` passed fresh and same-world restart probes, plus all seven common-resource groups in a disposable Paper server. The same JAR is installed on the private server; Paper startup and `save-all` completed, though `/ahmet status` reported the saved NPC as unspawned (`NPC: yok`). Live player schedule behavior remains unverified; no live provider call or human gameplay validated M1 memory; the production memory migration was not inspected. See [`docs/VALIDATION_RESULTS.md`](docs/VALIDATION_RESULTS.md) and [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md). Ahmet is a real Citizens villager.
+**Status:** bounded common-resource gathering, cargo/recovery journaling, double-chest delivery, protected-home filtering, Citizens navigation and schedule, player/session memory, and privacy-bounded grounded perception are implemented and verified in source. Current suites pass **175 Java** and **38 Node** tests; the mock HTTP smoke test passes. M2’s disposable Paper 1.21.6 runtime probe passed for read-only perception, request forwarding, and stale-generation rejection. The four-entry Paper/Citizens package is rebuilt and verified (ZIP SHA-256 `67f6a1e2a0cc60f6a6bb23d99ec3bc5eabece9119a3e6ec46deb19214f256b64`); its embedded core JAR SHA-256 is `48669fd65dbdffb7be39d861906a61a30173aeab5f0b88ee85dff8c4f44f195b`. M2 source publication and live deployment remain pending. Human gameplay, live provider calls, and inspection of the existing production memory store remain unverified. See [`docs/VALIDATION_RESULTS.md`](docs/VALIDATION_RESULTS.md) and [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md). Ahmet is a real Citizens villager.
 
 ## Architecture
 
@@ -17,16 +17,19 @@ Minecraft Java clients (same game version, unmodified)
         ├── in-world NPC navigation
         ├── bounded common-resource block removal with exact drop checks
         ├── per-material virtual cargo, persisted in plugin YAML
-        └── actual chest insertion
+        ├── actual chest insertion
+        └── bounded read-only perception of nearby blocks, opted-in chest, and anonymous visible-player bands
                      │ local authenticated HTTP
-      Node.js brain (127.0.0.1:3197)
+      Node.js brain (localhost:3197)
         ├── chat/task intent (OpenAI chat/completions, GPT-6 Luna JSON)
         ├── JEV (TypeSafe System One, account alias `jev-latest`)
         ├── bounded player/session memory persisted to disk
         └── deterministic mock/fallback mode
 ```
 
-Memory is a bounded deterministic summary of each named player’s recent discussion and typed requests. It rolls sessions after 30 minutes idle, keeps the current and up to five prior summaries (each at most 1,000 characters), and uses interaction-count familiarity labels only; it does not infer personal facts or grant permissions. V1 history and audit rows migrate to v2. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for limits and isolation. This Node source feature is not included in the Paper/Citizens ZIP and has not yet been deployed to the live brain.
+Memory is a bounded deterministic summary of each named player’s recent discussion and typed requests. It rolls sessions after 30 minutes idle, keeps the current and up to five prior summaries (each at most 1,000 characters), and uses interaction-count familiarity labels only; it does not infer personal facts or grant permissions. V1 history and audit rows migrate to v2. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for limits and isolation. The Node brain is separate from the Paper/Citizens ZIP.
+
+Grounded perception is advisory and partial. Paper samples loaded blocks on its main thread within a four-block radius, bounded to 64 cells and eight material types. Bound-chest inventory and nearby-player observations are disabled by default; inventory requires an online same-world viewer with `ahmet.admin`, and player output contains only anonymous distance bands. The Node brain strips unknown fields and rejects missing, stale, future-dated, or generation-mismatched snapshots before model serialization. Perception grants no action or permission authority and causes no additional model calls.
 
 The code is original and does not incorporate files from `rmalde/minecraft-agent`; that repo does not currently show a license. The system borrows the **concept** of high-level planning + JEV typed action selection. Minecraft entity control is implemented with Citizens rather than Mineflayer. Resource discovery advances incrementally on the Paper main thread, with a bounded coordinate budget per tick; a scan is not treated as empty until its cursor completes.
 
@@ -55,7 +58,7 @@ whitelist add YourUsername
 op YourUsername
 ```
 
-Join Minecraft Java **1.21.6** with multiplayer server `localhost:25565` on the server computer, or use the server host address from another computer on the same trusted LAN. Per the user's request, this private LAN server uses `online-mode=false` and keeps the whitelist enabled so the offline TLauncher profile can join. Offline mode lets clients on that LAN claim usernames and changes UUID-based player identity; use only on the trusted LAN, do not configure port forwarding, and restore `online-mode=true` before any public/WAN exposure. Do not put the local brain API or Paper admin interfaces on the Internet.
+Join Minecraft Java **1.21.6** with multiplayer server `localhost:25565` on the server computer, or use the server host address from another computer on the same trusted LAN. A private LAN setup that accepts offline clients may use `online-mode=false` with the whitelist enabled. Offline mode permits username spoofing and changes UUID-based player identity; use it only on a trusted LAN, do not configure port forwarding, and restore `online-mode=true` before any public/WAN exposure. Do not expose the local brain API or Paper admin interfaces publicly.
 
 ## In-game walkthrough
 
