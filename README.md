@@ -2,7 +2,7 @@
 
 An AI-assisted **real villager NPC** for a private Minecraft Java Edition multiplayer world. Not a player bot wearing a villager skin.
 
-**Status:** common-resource gathering, the Paper 1.21.6 item catalog, cargo/recovery journaling, double-chest delivery, protected-home filtering, bounded Citizens navigation, and a deterministic Citizens day schedule are implemented. Latest source verification: **153 Java tests, 16 Node tests, and mock HTTP smoke pass**. The exact current schedule JAR passed fresh and same-world restart probes in a disposable Paper server; live player schedule behavior and final live deployment remain unverified. See [`docs/VALIDATION_RESULTS.md`](docs/VALIDATION_RESULTS.md) and [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md). Ahmet is a real Citizens villager.
+**Status:** common-resource gathering, the Paper 1.21.6 item catalog, cargo/recovery journaling, double-chest delivery, protected-home filtering, bounded Citizens navigation, and a deterministic Citizens day schedule are implemented. Latest Java source verification: **155 tests passed**; the existing Node suite has **16 passing tests**, and mock HTTP smoke passes. Current schedule JAR `4041f4bb…` passed fresh and same-world restart probes; the same JAR passed all seven common-resource groups in a disposable Paper server. Live player schedule behavior and final live deployment remain unverified. See [`docs/VALIDATION_RESULTS.md`](docs/VALIDATION_RESULTS.md) and [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md). Ahmet is a real Citizens villager.
 
 ## Architecture
 

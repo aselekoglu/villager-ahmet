@@ -67,13 +67,13 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 
 ## 3. Test Suites & Verification Evidence
 
-- **Java Maven Unit Tests**: latest source **153 tests, 0 failures** (`mvn package` in `paper-plugin/`). Earlier dated counts below remain historical snapshots.
+- **Java Maven Unit Tests**: latest source **155 tests, 0 failures** (`mvn package` in `paper-plugin/`; controller log `/private/tmp/ahmet-release-java-20261018.log`). Earlier dated counts below remain historical snapshots.
   - Covers `AgentEvaluationHarnessTest` (7), `AgentControllerTest` (3), `AgentModelsTest` (4), `ActionPreconditionsTest` (5), `ProtectionHookTest` (5), `ObstructionPolicyTest` (9), `DescentSimulatorTest` (7), `HarvestApproachPlannerTest` (3), `OperationJournalTest` (8), `OperationRecoveryTest` (6), `WoodTaskTest` (12), `ExplorationPlannerTest` (9), `CargoDepositPlannerTest` (6), `ClearTransactionTest` (2), `TaskAdmissionTest` (2), `ResourceCatalogTest` (3), and all existing unit suites.
 - **Node Brain Unit Tests**: **16 tests, 0 failures** (`npm test` in `brain/`).
   - Covers Turkish chat parsing, return-home intent, JEV model contract, OpenAI GPT-6 Luna contract, memory store, decision fallbacks, bounded item IDs, action allowlists, and fallback leaf clearing protection.
 - **Distribution Packages**:
   - Historical `server-live` package: commit `775ca1e`, SHA-256 `57172d57df10eb13821fd9a907025d8422c3b7bb3dd3a5ec90618c7223eca83a`; its 2026-10-12 successful startup does not verify the current schedule source. A later user play session makes its old unspawned-NPC status stale. The live server was confirmed stopped at the 2026-10-18 resumption; final package deployment and startup evidence are pending controller read-back.
-  - `dist/villager-ahmet-plugins-paper-1.21.6.zip` (SHA-256: `a4743a1d5dbe053f17385ab7a512013b65b1555e05b02e2d088b99566252970d`)
+  - Current `dist/villager-ahmet-plugins-paper-1.21.6.zip` (SHA-256: `19066e4765a7f72cf91c6f50460afe9e38870c6e4911487a6e267c7797546493`), containing the tested plugin JAR SHA-256 `4041f4bb70a67d0abc2ae2cd9db226da98916d758d5605f8c65863ef6aebbda1` and pinned Citizens JAR. Package integrity and embedded checksums were verified; current JAR fresh, same-world restart, and common-resource disposable acceptance all pass.
   - Validated by `dist/SHA256SUMS.txt`.
 
 ---
@@ -118,5 +118,5 @@ Historical review prompt for **sol 6.1** (the claims and deployment hashes above
 
 ## Schedule release status (2026-10-18)
 
-- Current local HEAD at documentation start: `dacb432` plus an uncommitted schedule status/cooldown correction; final artifact SHA-256 `d91ee295b59a46353e69154ac6a3969bc710f5b01adacea0f37d0c22ed0cd95e` (153 Java tests). This checksum identifies the pre-release local JAR, not a deployed package.
-- Prior 153-test runtime probe verified changing bed-status reasons and a two-DIRT delivery; the cooldown-only follow-up is covered by unit tests and included in the final JAR. Exact-JAR common-resource, fresh schedule, and same-world restart disposable probes now pass. The verified transfer ZIP and embedded JAR checksums are recorded in `dist/SHA256SUMS.txt`. Final push, live deployment, and post-startup status remain pending controller evidence; no live player schedule acceptance is claimed here.
+- Previous schedule checkpoint (superseded artifact): local JAR SHA-256 `d91ee295b59a46353e69154ac6a3969bc710f5b01adacea0f37d0c22ed0cd95e` with 153 Java tests. Its disposable common-resource, fresh schedule, and same-world restart results are historical evidence for that JAR only.
+- Current schedule fix: 155 Java tests pass. The new JAR `4041f4bb70a67d0abc2ae2cd9db226da98916d758d5605f8c65863ef6aebbda1` passed complete fresh and same-world restart schedule probes plus common-resource runtime acceptance. The outside-radius WANDER return took 48 ticks (8.855 blocks walked to within 2.5 blocks of home); movement probes recorded zero production teleports. Live deployment and live player schedule acceptance remain pending controller read-back.
