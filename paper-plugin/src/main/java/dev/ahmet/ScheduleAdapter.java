@@ -38,6 +38,7 @@ final class ScheduleAdapter {
     private long bedRetryAt=-1;
     private final ScheduleRetryPolicy retries = new ScheduleRetryPolicy();
     private boolean preempted;
+    private boolean wanderRecovery;
 
     ScheduleAdapter(){this(System::currentTimeMillis);}
     ScheduleAdapter(LongSupplier clock){this.clock=clock;}
@@ -62,6 +63,7 @@ final class ScheduleAdapter {
     void suspend(NPC npc, String reason) {
         preempted=true;
         exactLegIssued=false;
+        wanderRecovery=false;
         cancelOwnedNavigation(npc);
         wakeOwned(npc);
         if(npc!=null&&npc.isSpawned()&&npc.getEntity() instanceof Villager villager&&villager.isSleeping())villager.wakeup();
@@ -101,6 +103,7 @@ final class ScheduleAdapter {
             state.changePhase(phase);
             retries.clear();
             fallbackCause = null;
+            wanderRecovery = false;
         }
         if (villager.isSleeping()&&!state.ownsSleep()) villager.wakeup();
         if (state.ownsSleep() && villager.isSleeping()) return;
@@ -112,9 +115,21 @@ final class ScheduleAdapter {
         if (phase == VillagerSchedule.Phase.WANDER) {
             if (current.distanceSquared(home) > 36.0) {
                 fallbackCause = "wander radius exceeded";
+                if (!wanderRecovery) {
+                    cancelOwnedNavigation(npc);
+                    wanderRecovery = true;
+                }
+            }
+            if (wanderRecovery) {
+                fallbackCause = "wander radius exceeded";
+                if (current.distanceSquared(home) > 6.25) {
+                    routeHome(npc, current, home, safe, planner);
+                    return;
+                }
                 cancelOwnedNavigation(npc);
-                routeHome(npc, current, home, safe, planner);
-                return;
+                wanderRecovery = false;
+                retries.succeeded();
+                if ("wander radius exceeded".equals(fallbackCause)) fallbackCause = null;
             }
             if (observeRoute(npc, current, 0.30, clock.getAsLong())) return;
             if (!retries.ready(clock.getAsLong())) return;
@@ -127,6 +142,7 @@ final class ScheduleAdapter {
             Location standing=centered(waypoint);
             if(!safe.test(standing)||standing.distanceSquared(home)>36.0){deferNoCandidate("no centered safe wander waypoint within home radius");return;}
             startRoute(npc, standing, safe, false);
+            if (state.ownsNavigation()) fallbackCause = null;
             return;
         }
         long bedNow=clock.getAsLong();

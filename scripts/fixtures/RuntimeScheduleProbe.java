@@ -159,8 +159,21 @@ public final class RuntimeScheduleProbe extends JavaPlugin implements Listener {
           require(maxRouteStep<=1.5,"wander normal-route tick step exceeded 1.5 blocks");
           assertNoStageTeleport("wander");
           logSample("wander");
-          returnHomePhase();
+          wanderRecoveryPhase();
         });
+  }
+
+  private void wanderRecoveryPhase() {
+    fixtureTeleport(new Location(world, 8.5, 120, 8.5), "wander-recovery", 10_000L, () ->
+        await("WANDER recovers home from outside its radius by walking", NAV_TIMEOUT_TICKS,
+            () -> phase().equals("WANDER") && horizontalDistance(npc.getEntity().getLocation(), home) <= 2.5,
+            () -> {
+              require(routeDistance > 2.0, "WANDER outside-radius recovery did not produce measured walking");
+              require(maxRouteStep <= 1.5, "WANDER recovery normal-route tick step exceeded 1.5 blocks");
+              assertNoStageTeleport("WANDER outside-radius recovery");
+              logSample("wander-recovery");
+              returnHomePhase();
+            }));
   }
 
   private void returnHomePhase() {

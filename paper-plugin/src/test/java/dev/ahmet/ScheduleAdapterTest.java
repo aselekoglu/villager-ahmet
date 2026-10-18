@@ -179,6 +179,80 @@ class ScheduleAdapterTest {
     }
 
     @Test
+    void outsideWanderRecoveryKeepsOneRouteAndUsesWatchdogRetriesAndCooldown() {
+        World world=world("wander-recovery",10_000L);
+        Location home=new Location(world,.5,64,.5);
+        AtomicReference<Location> current=new AtomicReference<>(new Location(world,8.5,64,.5));
+        AtomicReference<Location> target=new AtomicReference<>();
+        AtomicInteger targetCount=new AtomicInteger(),cancelCount=new AtomicInteger(),plannerCalls=new AtomicInteger();
+        AtomicReference<Boolean> navigating=new AtomicReference<>(false);
+        NavigatorParameters defaults=taskDefaults(),locals=new NavigatorParameters();
+        Navigator navigator=(Navigator)Proxy.newProxyInstance(Navigator.class.getClassLoader(),new Class<?>[]{Navigator.class},(p,m,a)->switch(m.getName()){
+            case "getDefaultParameters"->defaults;case "getLocalParameters"->locals;
+            case "setTarget"->{copyPrecision(locals,defaults);target.set(((Location)a[0]).clone());targetCount.incrementAndGet();navigating.set(true);yield null;}
+            case "isNavigating"->navigating.get();case "cancelNavigation"->{cancelCount.incrementAndGet();navigating.set(false);yield null;}default->null;});
+        Villager villager=(Villager)Proxy.newProxyInstance(Villager.class.getClassLoader(),new Class<?>[]{Villager.class},(p,m,a)->switch(m.getName()){
+            case "getLocation"->current.get();case "isSleeping"->false;case "getWorld"->world;default->null;});
+        NPC npc=(NPC)Proxy.newProxyInstance(NPC.class.getClassLoader(),new Class<?>[]{NPC.class},(p,m,a)->switch(m.getName()){
+            case "isSpawned"->true;case "isFlyable"->false;case "getEntity"->villager;case "getNavigator"->navigator;default->null;});
+        AtomicLong now=new AtomicLong(0);
+        ScheduleAdapter adapter=new ScheduleAdapter(now::get);
+        ScheduleAdapter.RoutePlanner homeRoute=(from,to)->{plannerCalls.incrementAndGet();return new Location(world,4.5,64,.5);};
+        for(int i=0;i<20;i++)adapter.tick(npc,home,null,true,false,false,32,loc->true,homeRoute,new TestChunks());
+        assertEquals(1,targetCount.get(),"the active inward route must survive repeated WANDER ticks");
+        assertEquals(1,plannerCalls.get());
+        assertTrue(adapter.status().contains("wander radius exceeded"),adapter.status());
+
+        now.set(15_000);adapter.tick(npc,home,null,true,false,false,32,loc->true,homeRoute,new TestChunks());
+        assertEquals(1,targetCount.get(),"first stalled route observation schedules a retry delay");
+        now.set(16_999);adapter.tick(npc,home,null,true,false,false,32,loc->true,homeRoute,new TestChunks());
+        assertEquals(1,targetCount.get());
+        now.set(17_000);adapter.tick(npc,home,null,true,false,false,32,loc->true,homeRoute,new TestChunks());
+        assertEquals(2,targetCount.get());
+        now.set(17_001);adapter.tick(npc,home,null,true,false,false,32,loc->true,homeRoute,new TestChunks());
+        now.set(32_001);adapter.tick(npc,home,null,true,false,false,32,loc->true,homeRoute,new TestChunks());
+        now.set(34_001);adapter.tick(npc,home,null,true,false,false,32,loc->true,homeRoute,new TestChunks());
+        assertEquals(3,targetCount.get());
+        now.set(34_002);adapter.tick(npc,home,null,true,false,false,32,loc->true,homeRoute,new TestChunks());
+        now.set(49_002);adapter.tick(npc,home,null,true,false,false,32,loc->true,homeRoute,new TestChunks());
+        assertEquals(3,targetCount.get());
+        assertTrue(adapter.status().contains("route retry budget exhausted"),adapter.status());
+        now.set(64_001);adapter.tick(npc,home,null,true,false,false,32,loc->true,homeRoute,new TestChunks());
+        assertEquals(3,targetCount.get());
+        now.set(64_002);adapter.tick(npc,home,null,true,false,false,32,loc->true,homeRoute,new TestChunks());
+        assertEquals(4,targetCount.get());
+        assertEquals(4,plannerCalls.get());
+
+        Location recoveryTarget=adapter.target();
+        current.set(new Location(world,5.9,64,.5));
+        adapter.tick(npc,home,null,true,false,false,32,loc->true,homeRoute,new TestChunks());
+        assertEquals(4,targetCount.get(),"re-entering the six-block radius must retain the active home route");
+        assertTrue(adapter.ownsNavigation());
+        assertEquals(recoveryTarget,adapter.target());
+        assertTrue(adapter.status().contains("wander radius exceeded"),adapter.status());
+
+        current.set(home.clone());
+        adapter.tick(npc,home,null,true,false,false,32,loc->true,homeRoute,new TestChunks());
+        assertFalse(adapter.status().contains("wander radius exceeded"),adapter.status());
+        assertEquals(5,targetCount.get(),"home arrival must resume ordinary wandering");
+        assertTrue(cancelCount.get()>=4,"recovery route should be cancelled on exit and when replaced");
+    }
+
+    @Test
+    void recoveredSafeWanderWaypointClearsItsResolvedStatusReason() {
+        World world=world("wander-cause",10_000L);Location home=new Location(world,.5,64,.5);
+        AtomicLong now=new AtomicLong(0);AtomicInteger targets=new AtomicInteger();AtomicReference<Location> target=new AtomicReference<>();
+        ScheduleAdapter adapter=new ScheduleAdapter(now::get);AtomicReference<Boolean> safe=new AtomicReference<>(false);
+        NPC npc=movingNpc(home,targets,target);
+        for(int i=0;i<20;i++)adapter.tick(npc,home,null,true,false,false,32,loc->safe.get(),(from,to)->null,new TestChunks());
+        assertTrue(adapter.status().contains("no loaded safe wander waypoint"),adapter.status());
+        safe.set(true);now.set(ScheduleRetryPolicy.COOLDOWN_MILLIS);
+        adapter.tick(npc,home,null,true,false,false,32,loc->true,(from,to)->null,new TestChunks());
+        assertEquals(1,targets.get());
+        assertFalse(adapter.status().contains("no loaded safe wander waypoint"),adapter.status());
+    }
+
+    @Test
     void bedStatusTracksTheCurrentFailureAcrossRebindAndValidationChanges() {
         World world=world("bed-status"),otherWorld=world("bed-status-other");
         Location home=new Location(world,.5,64,.5),bed=new Location(world,0,64,0);
