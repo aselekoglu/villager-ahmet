@@ -42,18 +42,19 @@ public final class ProductionGoalPolicy {
 
     if (context.taskId() == null || context.ownerId() == null) return AgentGoal.REQUEST_PLAYER_HELP;
     if (context.readyToDeliver()) return AgentGoal.DELIVER_CARGO;
+    if (context.requiredSafeReturn()) return AgentGoal.RETURN_HOME;
 
     if (context.routeBlocked()) {
       if (context.clearOfferedByLiveJev()
           && budget.canClearObstruction(context.routeClears(), context.jobClears())) {
         return productive(AgentGoal.CLEAR_OBSTRUCTION, currentGoal, productiveTransitions);
       }
-      if (context.routeRetryAvailable()) return productive(AgentGoal.HARVEST_RESOURCE, currentGoal, productiveTransitions);
+      if (context.routeRetryAvailable()) return productive(retryGoal(context), currentGoal, productiveTransitions);
       return AgentGoal.REQUEST_PLAYER_HELP;
     }
 
     if (context.navigationInProgress()) {
-      return productive(AgentGoal.HARVEST_RESOURCE, currentGoal, productiveTransitions);
+      return productive(retryGoal(context), currentGoal, productiveTransitions);
     }
     if (context.targetAvailable() || context.scanPending()) {
       return productive(AgentGoal.HARVEST_RESOURCE, currentGoal, productiveTransitions);
@@ -64,6 +65,12 @@ public final class ProductionGoalPolicy {
     }
     if (!context.scanExhausted()) return AgentGoal.REST_IDLE;
     return AgentGoal.REQUEST_PLAYER_HELP;
+  }
+
+  private static AgentGoal retryGoal(SafetyContext context) {
+    if (context.navigationPurpose() == AgentGoal.EXPLORE_RESOURCES) return AgentGoal.EXPLORE_RESOURCES;
+    if (context.navigationPurpose() == AgentGoal.RETURN_HOME) return AgentGoal.RETURN_HOME;
+    return AgentGoal.HARVEST_RESOURCE;
   }
 
   private static AgentGoal productive(AgentGoal candidate, AgentGoal currentGoal, int transitions) {
@@ -117,6 +124,7 @@ public final class ProductionGoalPolicy {
       boolean scanPending,
       boolean scanExhausted,
       boolean explorationAllowed,
+      AgentGoal navigationPurpose,
       boolean returningHome,
       boolean requiredSafeReturn,
       int routeClears,
@@ -130,6 +138,7 @@ public final class ProductionGoalPolicy {
       if (routeClears < 0 || jobClears < 0 || explorationAttempts < 0) {
         throw new IllegalArgumentException("action counters must be non-negative");
       }
+      Objects.requireNonNull(navigationPurpose, "navigation purpose must not be null");
     }
 
     public static Builder builder(long jobGeneration, String taskId, UUID ownerId, long serverStepId) {
@@ -146,6 +155,7 @@ public final class ProductionGoalPolicy {
     public SafetyContext withCargo(int value) { return copy().cargo(value).build(); }
     public SafetyContext withReadyToDeliver(boolean value) { return copy().readyToDeliver(value).build(); }
     public SafetyContext withScanPending(boolean value) { return copy().scanPending(value).build(); }
+    public SafetyContext withNavigationPurpose(AgentGoal value) { return copy().navigationPurpose(value).build(); }
 
     private Builder copy() {
       return new Builder(jobGeneration, taskId, ownerId, serverStepId)
@@ -155,7 +165,7 @@ public final class ProductionGoalPolicy {
           .routeBlocked(routeBlocked).routeRetryAvailable(routeRetryAvailable)
           .clearOfferedByLiveJev(clearOfferedByLiveJev).targetAvailable(targetAvailable)
           .scanPending(scanPending).scanExhausted(scanExhausted).explorationAllowed(explorationAllowed)
-          .returningHome(returningHome).requiredSafeReturn(requiredSafeReturn)
+          .navigationPurpose(navigationPurpose).returningHome(returningHome).requiredSafeReturn(requiredSafeReturn)
           .routeClears(routeClears).jobClears(jobClears).explorationAttempts(explorationAttempts);
     }
 
@@ -178,6 +188,7 @@ public final class ProductionGoalPolicy {
       private boolean scanPending;
       private boolean scanExhausted;
       private boolean explorationAllowed;
+      private AgentGoal navigationPurpose = AgentGoal.REST_IDLE;
       private boolean returningHome;
       private boolean requiredSafeReturn;
       private int routeClears;
@@ -209,6 +220,7 @@ public final class ProductionGoalPolicy {
       public Builder scanPending(boolean value) { scanPending = value; return this; }
       public Builder scanExhausted(boolean value) { scanExhausted = value; return this; }
       public Builder explorationAllowed(boolean value) { explorationAllowed = value; return this; }
+      public Builder navigationPurpose(AgentGoal value) { navigationPurpose = value; return this; }
       public Builder returningHome(boolean value) { returningHome = value; return this; }
       public Builder requiredSafeReturn(boolean value) { requiredSafeReturn = value; return this; }
       public Builder routeClears(int value) { routeClears = value; return this; }
@@ -218,7 +230,7 @@ public final class ProductionGoalPolicy {
         return new SafetyContext(jobGeneration, taskId, ownerId, serverStepId, taskActive, cargo,
             readyToDeliver, recoveryBlocked, transactionPending, committedJournalHistory,
             navigationInProgress, routeBlocked, routeRetryAvailable, clearOfferedByLiveJev,
-            targetAvailable, scanPending, scanExhausted, explorationAllowed, returningHome, requiredSafeReturn,
+            targetAvailable, scanPending, scanExhausted, explorationAllowed, navigationPurpose, returningHome, requiredSafeReturn,
             routeClears, jobClears, explorationAttempts);
       }
     }

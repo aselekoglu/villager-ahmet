@@ -64,6 +64,64 @@ class ProductionGoalPolicyTest {
   }
 
   @Test
+  void fourthExplorationKeepsItsPurposeWhileMovingAndOnArrival() {
+    AgentController controller = controller();
+    var start = context(0, "task-1", OWNER, 1).scanExhausted(true).explorationAllowed(true)
+        .explorationAttempts(3).build();
+    assertEquals(AgentGoal.EXPLORE_RESOURCES, selectAndApply(controller, observation(start), start));
+    assertEquals(1, controller.productiveTransitionCount());
+
+    var moving = context(0, "task-1", OWNER, 2).navigationInProgress(true)
+        .navigationPurpose(AgentGoal.EXPLORE_RESOURCES).explorationAllowed(false).explorationAttempts(4).build();
+    assertEquals(AgentGoal.EXPLORE_RESOURCES, selectAndApply(controller, observation(moving), moving));
+    assertEquals(1, controller.productiveTransitionCount());
+
+    var retry = context(0, "task-1", OWNER, 3).navigationInProgress(true).routeBlocked(true)
+        .routeRetryAvailable(true).navigationPurpose(AgentGoal.EXPLORE_RESOURCES)
+        .explorationAllowed(false).explorationAttempts(4).build();
+    assertEquals(AgentGoal.EXPLORE_RESOURCES, selectAndApply(controller, observation(retry), retry));
+    assertEquals(1, controller.productiveTransitionCount());
+
+    var arrival = context(0, "task-1", OWNER, 4).navigationInProgress(true)
+        .navigationPurpose(AgentGoal.EXPLORE_RESOURCES).explorationAllowed(false).explorationAttempts(4).build();
+    assertEquals(AgentGoal.EXPLORE_RESOURCES, selectAndApply(controller, observation(arrival), arrival));
+    assertEquals(1, controller.productiveTransitionCount());
+  }
+
+  @Test
+  void activeHomeBoundaryReturnPrecedesHarvestButReadyDeliveryStillWins() {
+    AgentController controller = controller();
+    var outside = context(0, "task-1", OWNER, 1).requiredSafeReturn(true).targetAvailable(true).build();
+    assertEquals(AgentGoal.RETURN_HOME, selectAndApply(controller, observation(outside), outside));
+
+    controller.nextGeneration();
+    var readyOutside = context(1, "task-2", OWNER, 2).requiredSafeReturn(true).readyToDeliver(true)
+        .cargo(1).build();
+    assertEquals(AgentGoal.DELIVER_CARGO, selectAndApply(controller, observation(readyOutside), readyOutside));
+  }
+
+  @Test
+  void activeReturnHomePurposePersistsAfterCrossingBackInsideTheBoundary() {
+    AgentController controller = controller();
+    var returning = context(0, "task-1", OWNER, 1).navigationInProgress(true)
+        .navigationPurpose(AgentGoal.RETURN_HOME).requiredSafeReturn(false).targetAvailable(true).build();
+    assertEquals(AgentGoal.RETURN_HOME, selectAndApply(controller, observation(returning), returning));
+
+    controller.nextGeneration();
+    var ready = context(1, "task-2", OWNER, 2).navigationInProgress(true)
+        .navigationPurpose(AgentGoal.RETURN_HOME).readyToDeliver(true).cargo(1).build();
+    assertEquals(AgentGoal.DELIVER_CARGO, selectAndApply(controller, observation(ready), ready));
+  }
+
+  @Test
+  void staleIdleReturnIntentDoesNotOverrideANewActiveTask() {
+    AgentController controller = controller();
+    var activeTask = context(0, "task-1", OWNER, 1).returningHome(true).targetAvailable(true)
+        .requiredSafeReturn(false).build();
+    assertEquals(AgentGoal.HARVEST_RESOURCE, selectAndApply(controller, observation(activeTask), activeTask));
+  }
+
+  @Test
   void authoritativeSafetyRestSupersedesAStaleObservation() {
     AgentController controller = controller();
     var working = context(0, "task-1", OWNER, 1).targetAvailable(true).build();
