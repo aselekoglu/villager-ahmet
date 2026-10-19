@@ -10,7 +10,10 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 
 ### JEV preview provider acceptance — 2026-10-19
 - One synthetic TypeSafe choice call using alias `jev-preview` returned `source=jev`, resolved model `jev-1.14.0`, and the offered `wait` action. The observed call took **558 ms**; this single sample is not a latency benchmark.
-- This proves the provider alias/resolution/choice path only. It does not prove copied-source launch precedence, Paper/runtime integration, publication/deployment, Minecraft behavior, human acceptance, OpenAI behavior, or production-memory-store migration. Those checks remain open.
+- The copied `scripts/run.sh` launcher was checked without an explicit process-level model override: a synthetic dotenv value of `jev-latest` produced health configuration `jev-preview` with mock chat and decision modes. This proves copied-source launcher precedence, not a provider call.
+- In the fresh isolated release worktree, Node passed **43/43** tests and `scripts/smoke.sh` passed in mock mode. These checks do not substitute for the single live provider call above.
+- This release changes only Node JEV selection/configuration/error handling and its launcher default. The installed M2 core JAR and four-entry distribution are unchanged (SHA-256 `48669fd65dbdffb7be39d861906a61a30173aeab5f0b88ee85dff8c4f44f195b` and `67f6a1e2a0cc60f6a6bb23d99ec3bc5eabece9119a3e6ec46deb19214f256b64`, respectively). Publication and live activation remain pending.
+- This evidence does not prove Paper/runtime integration, Minecraft behavior, human acceptance, OpenAI behavior, or production-memory-store migration. Those checks remain open.
 
 ### Deterministic Citizens schedule
 - `ScheduleAdapter` runs the real Citizens villager through WAKE `[0,1000)`, WORK `[1000,9000)`, WANDER `[9000,12000)`, and SLEEP `[12000,24000)` using world time modulo 24,000 ticks. WORK is idle availability at home, not automatic harvesting.
