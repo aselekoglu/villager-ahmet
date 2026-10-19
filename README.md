@@ -1,95 +1,152 @@
 # Villager Ahmet
 
-An AI-assisted **real villager NPC** for a private Minecraft Java Edition multiplayer world. Not a player bot wearing a villager skin.
+**A villager with a little more on his mind.**
 
-**Status:** bounded common-resource gathering, cargo/recovery journaling, double-chest delivery, protected-home filtering, Citizens navigation and schedule, player/session memory, and privacy-bounded grounded perception are implemented and verified in source. Current suites pass **175 Java** and **38 Node** tests; the mock HTTP smoke test passes. M2’s disposable Paper 1.21.6 runtime probe passed for read-only perception, request forwarding, and stale-generation rejection. The four-entry Paper/Citizens package is rebuilt and verified (ZIP SHA-256 `67f6a1e2a0cc60f6a6bb23d99ec3bc5eabece9119a3e6ec46deb19214f256b64`); its embedded core JAR SHA-256 is `48669fd65dbdffb7be39d861906a61a30173aeab5f0b88ee85dff8c4f44f195b`. M2 source is published as `ba29c68916562f922b3bae085c72b51f345030c0`, and live deployment/read-back completed with this package. The reviewed source tree is `30d87eaf4c82778cfac5d4b9b87112129b600b76`. Human gameplay and inspection of the existing production memory store remain unverified; no live provider was invoked for this M2 release verification. See [`docs/VALIDATION_RESULTS.md`](docs/VALIDATION_RESULTS.md) and [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md). Ahmet is a real Citizens villager.
+Villager Ahmet is an experimental AI-assisted companion for a private **Minecraft Java Edition** world. He looks and moves like an actual villager, remembers a little about the people he meets, responds to requests, and can help gather everyday resources.
 
-## Architecture
+Ask Ahmet for wood in chat, and he can search for a safe nearby tree, walk to it, harvest supported blocks, and bring the resulting items back to a chest. Underneath that simple interaction is a deliberately constrained AI agent: models help interpret requests and choose actions, while the Minecraft server remains responsible for what is actually allowed to happen.
+
+> **The important distinction:** Ahmet is a real **Citizens-managed villager NPC**, not a player bot in a villager skin—and not a vanilla villager whose built-in AI has magically been replaced.
+
+## Meet Ahmet
+
+Imagine sharing a little Minecraft village with a helpful neighbor:
+
+1. You say, **“Ahmet, 20 tane odun topla”** (“Ahmet, collect 20 wood”).
+2. Ahmet interprets the request and looks for eligible, nearby resources.
+3. He walks to a server-approved target and gathers what he can.
+4. He returns to the chest you assigned and deposits the actual items.
+5. If he gets stuck, runs out of eligible resources, or cannot deliver, he reports a partial result rather than pretending he succeeded.
+
+You can also interact through commands, so the basic resource-gathering loop works without a live language-model API.
+
+## What works today
+
+| Capability | What it means in-game |
+| --- | --- |
+| **Real villager presence** | A Citizens NPC with in-world navigation, a configurable home, a bed, and a small daily routine. |
+| **Natural-language requests** | Chat can turn bounded requests into supported gathering tasks. |
+| **Resource gathering** | Logs/stems, natural bamboo, dirt, sand, stone, coal, iron, and gold are supported through specific validated block/drop mappings. |
+| **Chest delivery** | Gathered outputs are credited to persistent cargo, then inserted into a real assigned chest (including double chests). |
+| **Basic memory** | Ahmet keeps limited, player-isolated summaries of recent interactions and sessions. |
+| **Grounded awareness** | A bounded snapshot of nearby loaded blocks can inform the agent; additional inventory and anonymous player-distance observations are opt-in and restricted. |
+| **Protective boundaries** | Home protection, player-placement tracking, action validation, task ownership, and recovery bookkeeping reduce accidental damage. |
+| **Offline-friendly development** | Deterministic mock/fallback modes let you explore and test the system without model credentials. |
+
+**This is a working prototype, not a fully autonomous villager.** The collection loop is implemented with server-side block removal and virtual cargo accounting—not the vanilla mining animation, physical tool use, or item pickup. Ahmet's daily routine is scripted; he does not independently decide to start mining or crafting. Some manual multiplayer, persistence, and live-provider acceptance checks remain open.
+
+See [validation results](docs/VALIDATION_RESULTS.md) for what has actually been tested and [the roadmap](docs/ROADMAP.md) for what is still planned.
+
+## How it works
 
 ```text
-Minecraft Java clients (same game version, unmodified)
-                     │
-      Private Paper 1.21.6 server (Java 21)
-                     │
-       Citizens villager NPC "Ahmet"
-                     │
-        VillagerAhmet Paper plugin
-        ├── in-world NPC navigation
-        ├── bounded common-resource block removal with exact drop checks
-        ├── per-material virtual cargo, persisted in plugin YAML
-        ├── actual chest insertion
-        └── bounded read-only perception of nearby blocks, opted-in chest, and anonymous visible-player bands
-                     │ local authenticated HTTP
-      Node.js brain (localhost:3197)
-        ├── chat/task intent (OpenAI chat/completions, GPT-6 Luna JSON)
-        ├── JEV (TypeSafe System One, account alias `jev-latest`)
-        ├── bounded player/session memory persisted to disk
-        └── deterministic mock/fallback mode
+Minecraft Java players (no client mods)
+                 |
+      Paper 1.21.6 server
+                 |
+      Citizens villager: Ahmet
+                 |
+      VillagerAhmet Java plugin
+      - NPC movement and tasks
+      - safe target discovery
+      - block/drop validation
+      - cargo and chest transactions
+      - bounded world observations
+                 |
+      authenticated local HTTP bridge
+                 |
+          Node.js brain
+      - request interpretation (OpenAI)
+      - offered-action selection (TypeSafe JEV)
+      - player/session context
+      - deterministic fallback
 ```
 
-Memory is a bounded deterministic summary of each named player’s recent discussion and typed requests. It rolls sessions after 30 minutes idle, keeps the current and up to five prior summaries (each at most 1,000 characters), and uses interaction-count familiarity labels only; it does not infer personal facts or grant permissions. V1 history and audit rows migrate to v2. See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for limits and isolation. The Node brain is separate from the Paper/Citizens ZIP.
+**The model suggests; the server decides.** The Paper plugin discovers candidate blocks, checks preconditions and drop types, controls navigation, and applies world/inventory changes on the server thread. The Node brain handles conversation and decisions but cannot invent coordinates, execute arbitrary commands, or grant itself new permissions. JEV selects from actions the server has already offered.
 
-Grounded perception is advisory and partial. Paper samples loaded blocks on its main thread within a four-block radius, bounded to 64 cells and eight material types. Bound-chest inventory and nearby-player observations are disabled by default; inventory requires an online same-world viewer with `ahmet.admin`, and player output contains only anonymous distance bands. The Node brain strips unknown fields and rejects missing, stale, future-dated, or generation-mismatched snapshots before model serialization. Perception grants no action or permission authority and causes no additional model calls.
+The chat and action-selection models are separate integrations; neither is required for deterministic local tests. See [architecture and trust boundaries](docs/ARCHITECTURE.md).
 
-The code is original and does not incorporate files from `rmalde/minecraft-agent`; that repo does not currently show a license. The system borrows the **concept** of high-level planning + JEV typed action selection. Minecraft entity control is implemented with Citizens rather than Mineflayer. Resource discovery advances incrementally on the Paper main thread, with a bounded coordinate budget per tick; a scan is not treated as empty until its cursor completes.
+## Quick start
 
-## Setup (macOS or Linux)
+This project targets **macOS or Linux** and a **private, trusted world**. Start with a disposable world—not your only copy of a treasured save.
 
-Prerequisites: Minecraft Java Edition 1.21.6 accounts/clients; **Java 21**, **Node.js 20+**, **Python 3**, **Maven 3.9+**, a few GB of RAM, outbound Internet for downloading Paper/Citizens/build dependencies and model calls. Test with a *new* private world, not an irreplaceable save. Both clients connect to the Paper server; they don't need client mods. Live JEV and chat use separate credentials: `TYPESAFE_API_KEY` for TypeSafe and `OPENAI_API_KEY` for OpenAI GPT-6 Luna. Missing keys produce clearly labelled heuristic/mock behavior.
+**You'll need:** Minecraft Java Edition **1.21.6**, **Java 21**, **Node.js 20+**, **Python 3**, **Maven 3.9+**, and Internet access for downloading server dependencies. Minecraft clients do not require mods.
 
 ```bash
-export JAVA_HOME="<Java 21 runtime>"
-export PATH="$JAVA_HOME/bin:<Maven runtime>/bin:$PATH"
+git clone https://github.com/aselekoglu/villager-ahmet.git
+cd villager-ahmet
+
+# Make sure Java 21 and Maven are on your PATH.
 ./scripts/doctor.sh
 ./scripts/setup.sh
-# Set TYPESAFE_API_KEY and OPENAI_API_KEY in the ignored brain/.env for live calls.
-# If you have read and agree to the EULA:
+
+# Run only after reviewing and accepting the Minecraft EULA.
 ACCEPT_MINECRAFT_EULA=true ./scripts/run.sh
 ```
 
-This intentionally does **not** auto-consent to Mojang's EULA. The setup script downloads a checksummed stable Paper 1.21.6 build from the official PaperMC API and pinned Citizens 2.0.41 build 4138, creates a random local bridge token and compiles the plugin against the matching Citizens API. You can also download those exact official JARs yourself into `server/` and `server/plugins/` if the download endpoints fail.
+Setup downloads the pinned Paper/Citizens dependencies, compiles the plugin, and configures a random local bridge token. EULA acceptance is intentionally **not automatic**.
 
-To preserve the default test server while hosting a copied world separately, set `AHMET_SERVER_DIR="<private server directory>"` for both setup and run. Relative paths are resolved under the project root; the source world should be copied into that directory's `world/` only after the server has been set up and stopped.
+For optional live AI behavior, configure your own credentials in the Git-ignored `brain/.env`:
 
-From the Minecraft server console, add every real Java username and make yourself operator:
+```dotenv
+TYPESAFE_API_KEY=your_typesafe_key
+OPENAI_API_KEY=your_openai_key
+```
+
+Use `TYPESAFE_API_KEY` for the JEV decision integration and `OPENAI_API_KEY` for chat. Without keys, the relevant paths use explicitly labelled mock/heuristic behavior rather than claiming live model responses.
+
+Join the Paper server from Minecraft Java 1.21.6 using `localhost:25565` on the host or its private LAN address from another machine. From the server console, whitelist the participating Java accounts and grant your own account operator privileges:
 
 ```text
 whitelist add YourUsername
 op YourUsername
 ```
 
-Join Minecraft Java **1.21.6** with multiplayer server `localhost:25565` on the server computer, or use the server host address from another computer on the same trusted LAN. A private LAN setup that accepts offline clients may use `online-mode=false` with the whitelist enabled. Offline mode permits username spoofing and changes UUID-based player identity; use it only on a trusted LAN, do not configure port forwarding, and restore `online-mode=true` before any public/WAN exposure. Do not expose the local brain API or Paper admin interfaces publicly.
+**Network caution:** Keep the whitelist enabled and the server private. If you choose `online-mode=false` for trusted LAN clients, usernames can be spoofed; never expose that setup to the Internet. Do not publicly expose the Node brain or its admin bridge.
 
-## In-game walkthrough
+For a separate server directory or imported world, use the `AHMET_SERVER_DIR` workflow described in [the setup notes](docs/ARCHITECTURE.md), and back up worlds before changing server versions.
 
-1. In the server as operator, stand where Ahmet should live, enter `/ahmet spawn`. If Ahmet already exists and is idle, `/ahmet summon` moves him to a safe nearby block.
-2. Set the schedule bed by looking at an existing bed from within six blocks and entering `/ahmet bed`. This stores only the bed location; it does not create or replace a bed. Put a chest beside your house, look directly at it from within six blocks, enter `/ahmet chest`.
-3. Ensure safe targets are within 24 blocks of Ahmet in already loaded chunks (configurable): natural tree logs/stems and bamboo, dirt/grass blocks, sand/red sand, stone (cobblestone output), coal ore, iron ore, or gold ore. Planks and crafted bamboo blocks are not searched. Ore harvesting checks Paper's block drops with the minimum pickaxe tier; fortune/silk-touch variants and variable-output drops are excluded.
-4. Stand within 18 blocks of Ahmet and type `Ahmet, 20 tane odun topla`, `12 toprak topla`, `8 kum getir`, `10 taş topla`, `4 kömür topla`, `5 ham demir getir` or `3 ham altın getir`.
-5. Watch Ahmet walk toward a server-discovered candidate, remove one supported block at a time, and then walk to deposit the exact matching output items into the configured real chest. Verify with `/ahmet status` and chest inventory.
+## Your first task
 
-Commands: `/ahmet help` lists commands; `/ahmet status` shows task/NPC state and schedule phase/activity/reason; `/ahmet bed` binds an existing nearby bed for the schedule; `/ahmet cargo` shows exact carried item types and counts; `/ahmet items <ara>` searches the full catalog and reports gatherability; `/ahmet ask <mesaj>` sends a direct chat request. `/ahmet collect <item|odun> <1-64>` starts a bounded collection job directly, without chat-model parsing, while still using the same Paper validation and JEV target selection (examples: `/ahmet collect odun 8`, `/ahmet collect raw_iron 5`, `/ahmet collect birch_log 4`). `/ahmet cancel` is limited to the task owner or operator; `/ahmet deliver` sends leftover cargo to the bound chest. Only operators can spawn/summon Ahmet, bind the bed, or bind the chest. Summoning is disabled during an active task or journal recovery.
+Once connected as an operator:
 
-If a task is cancelled after Ahmet has collected items, run `/ahmet deliver` to clear the carried cargo into the bound chest before starting another task.
+1. Stand where Ahmet should live and run `/ahmet spawn`.
+2. Look at an existing bed within six blocks and run `/ahmet bed` to associate it with his routine.
+3. Look at a chest within six blocks and run `/ahmet chest` to set the delivery destination.
+4. Make sure supported natural resources are nearby, in loaded chunks.
+5. Stand within chat range (18 blocks by default) and try **“Ahmet, 20 tane odun topla”**.
 
-If Ahmet cannot reach three different resource targets, or two consecutive scans find no remaining nearby target, he automatically stops that request and tries to deliver the cargo already collected. The reply identifies it as a partial result and includes the collected/requested amount. A blocked or full delivery chest still requires the path to be cleared or space to be made; cargo remains saved in that case.
+Or skip language-model interpretation entirely:
 
-Wood protection distinguishes new player edits from natural targets by recording player-placed log/stem blocks and skipping them permanently. Minecraft does not retain placement history for blocks that existed before this plugin, so an existing build needs a protected area: stand at its center and run `/ahmet protecthome 10` (choose a radius from 0–32; `0` disables the area). Ahmet also requires natural leaves/fungus markers for untracked wood. The tracked placement registry and protected-home center survive restart. Commands or other plugins that change blocks do not fire normal player-place events; protect those areas manually.
+```text
+/ahmet collect odun 8
+/ahmet collect raw_iron 5
+/ahmet status
+/ahmet cargo
+```
 
-The plugin also exports Paper 1.21.6's complete obtainable vanilla item-material catalog to `plugins/VillagerAhmet/item-catalog-1.21.6.json`. In game, `/ahmet items <ad>` searches that catalog. Catalog presence means Ahmet can identify and validate the vanilla item ID; it does **not** mean every item has a gather action. The executable collection registry currently supports logs/stems and natural bamboo, dirt, sand/red sand, stone-to-cobblestone, coal ore, iron ore and gold ore; unsupported items are listed as not yet gatherable.
+Useful controls include `/ahmet help`, `/ahmet ask <message>`, `/ahmet items <search>`, `/ahmet cancel`, `/ahmet deliver`, `/ahmet summon`, and `/ahmet protecthome 10`.
 
-**MVP realism caveat:** Harvesting is performed by the *Paper server plugin* removing an eligible physical block and crediting the exact checked output to virtual cargo; it is **not** native villager mining or item pickup. Ahmet visibly walks, changes the real world, and deposits real items. Tool durability is not consumed, and the plugin's natural-tree marker is a heuristic. The deterministic schedule is a scripted routine: WAKE and WORK stay at home, WANDER walks within six blocks of home, and SLEEP routes to the operator-bound bed; WORK does not start harvesting. Tasks, carried cargo, or recovery work preempt schedule movement and sleep. Schedule runtime evidence, including failed probe iterations and any remaining manual acceptance, is recorded in the validation documents. Animation, actual carried-item render, and protected-region hooks remain follow-ups; saved registry files were not edited.
+Ahmet can identify more Minecraft items than he can collect. The full searchable vanilla item catalog is **not** a promise that every item is gatherable. Jobs are deliberately bounded to at most **64 output items**, and only supported source/output mappings can be executed.
 
-## Model modes
+### Protect your builds
 
-- `AHMET_DECISION_MODE=jev` + valid `TYPESAFE_API_KEY`: use `POST https://api.typesafe.ai/v1/systemone` with the account-listed `JEV_MODEL` (currently `jev-latest`). The JEV response is only a choice among *server-offered legal actions*; it never receives authority to run commands.
-- `AHMET_CHAT_MODE=llm` + valid `OPENAI_API_KEY`: use `POST https://api.openai.com/v1/chat/completions` with `CHAT_MODEL` (defaults to `gpt-6-luna`).
-- No API key / `mock` modes: deterministic proof-of-concept. **Do not claim a JEV live integration test was performed in mock mode.**
-- If an API decision fails, the brain returns a labelled fallback so existing tasks can continue. Do not silently pass off fallback as JEV.
+Before asking Ahmet to gather wood near a house, use `/ahmet protecthome 10` from its center (adjust the radius as needed). The plugin tracks logs placed by players after it starts recording placements, but it cannot reconstruct the history of existing builds. Tree detection is still heuristic, so protected zones and a test world matter.
 
-Store each provider key in `brain/.env` (ignored by Git), never in the plugin, logs or messages. The plugin talks to the locally bound brain with a separate, randomly generated `BRIDGE_TOKEN`. Neither Paper nor the clients need either model key.
+If delivery fails because the chest is full or inaccessible, Ahmet retains cargo for later recovery rather than silently discarding it.
 
-## Tests
+## AI, memory, and privacy
+
+Ahmet is designed to have **limited context, not unlimited access**.
+
+- Player history is scoped to each player's identity, uses short deterministic session summaries, and is capped in size and retention. It does not infer private personal facts or confer authority.
+- Perception covers a small, loaded area and is read-only. Chest details are disabled by default and require an eligible operator; observed nearby players are represented as anonymous distance bands.
+- Snapshots are sanitized and age-checked before model calls. An outdated AI response must not overwrite a newer task.
+- API keys stay in `brain/.env`, not in the Minecraft plugin or repository. The server-to-brain bridge uses its own local authentication token.
+
+Models and server-side safety checks are complementary, **not** interchangeable. This code is intended for private experimentation, not deployment on an untrusted public server.
+
+## Testing and project status
 
 ```bash
 cd brain && npm test
@@ -97,20 +154,28 @@ cd .. && ./scripts/smoke.sh
 cd paper-plugin && mvn -B -ntp package
 ```
 
-Then perform the **manual multiplayer acceptance scenario** in `docs/ACCEPTANCE.md`. The repository CI workflow runs the Node suite, mock HTTP smoke test, Maven package build, and Java tests. A hosted GitHub Actions result still requires this workspace to be connected to a GitHub repository.
+The repository's recorded M2 verification passed **38 Node tests**, **175 Java tests**, the mock HTTP smoke test, and a disposable Paper/Citizens runtime perception probe. It also records a successful deployment/startup read-back. These results **do not** establish complete real-player gameplay, production-world crash durability, or successful live model calls.
 
-## Boundaries and operational safety
+Review the [acceptance checklist](docs/ACCEPTANCE.md) and [detailed validation evidence](docs/VALIDATION_RESULTS.md) before relying on Ahmet in an important world.
 
-- Private/trusted worlds only. A simple oak-leaves adjacency heuristic prevents some structure damage but cannot guarantee that every oak log belongs to a tree; don't deploy on a public/protected world without permission checks and stricter tree detection.
-- The NPC is a *Citizens-managed villager* (not a vanilla villager with naturally modified brain). Commands, movement and inventory changes are server controlled.
-- At most 64 output items per job. GPT-6 Luna may classify a bounded wood preference or canonical item ID; Paper accepts only the explicit common-resource registry. JEV may choose only among loaded, nearby, Java-validated candidate blocks. JEV runs at target selection, while Paper deterministically handles navigation and item transactions. Neither model can supply coordinates, teleport, create inventory, run commands, cheat, or place blocks. Only an explicit operator `/ahmet summon` can reposition the NPC, and never during task navigation.
-- Server plugin exclusively authorizes block deletion and chest deposit, on the Paper main thread. Async model calls never touch Bukkit world state.
-- Task state persists through a same-directory temporary YAML file and replacement; failures propagate to the transaction and prevent journal completion. `plugins/VillagerAhmet/operations.json` uses journal format v3 for harvest and chest-slot changes; legacy v1 oak harvests remain readable, while older entries without recovery fields fail closed for manual inspection. Deposit recovery checks the recorded inventory shape and requires every changed slot to match the recorded after-state before reconciling task counters. Unit tests do not establish power-loss durability or world-level crash safety; a forced-crash Paper-world test remains required. Conflicting world/chest state pauses recovery for manual inspection.
-- Keep Paper and Citizens versions pinned and tested together; never automatically update Minecraft on a running persistent world.
+## What's next?
 
-## Main design documents
+The longer-term goal is a villager who feels like part of the world—not merely a chatbot attached to a Minecraft entity. Planned work includes more convincing gestures and sounds, richer autonomous routines, crafting and farming, and eventually cooperation between multiple villagers. These are **future directions**, not current capabilities.
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — trust boundaries and protocol
-- [`docs/ACCEPTANCE.md`](docs/ACCEPTANCE.md) — actual success/failure criteria
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — post-MVP growth
-- [`CODEX_HANDOFF.md`](CODEX_HANDOFF.md) — one-shot Codex implementation/verification instructions
+Follow progress in the [roadmap](docs/ROADMAP.md).
+
+## Project documentation
+
+- [Architecture](docs/ARCHITECTURE.md) — components, protocol, trust boundaries, and persistence
+- [Acceptance checklist](docs/ACCEPTANCE.md) — gameplay and failure scenarios to verify
+- [Validation results](docs/VALIDATION_RESULTS.md) — tested builds, evidence, and remaining gaps
+- [Roadmap](docs/ROADMAP.md) — implemented milestones and upcoming ideas
+- [Codex handoff](CODEX_HANDOFF.md) — development and verification context
+
+## Inspiration and attribution
+
+Villager Ahmet was inspired by the idea of combining AI planning with a persistent Minecraft-world agent, including the high-level approach explored by [rmalde/minecraft-agent](https://github.com/rmalde/minecraft-agent). This repository uses its **own implementation**, built around Paper, Citizens, and a separate Node brain; it does not copy that project's source files.
+
+---
+
+*Ahmet is still learning how to be a good neighbor. Please test him somewhere he can't accidentally remodel your house.*
