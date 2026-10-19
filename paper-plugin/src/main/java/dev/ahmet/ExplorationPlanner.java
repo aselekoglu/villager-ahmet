@@ -28,22 +28,6 @@ final class ExplorationPlanner {
         double targetX = current.getX() + (distance * Math.cos(angle));
         double targetZ = current.getZ() + (distance * Math.sin(angle));
 
-        // Must remain within maxDistanceFromHome from effective home
-        if (effectiveHome != null && Objects.equals(effectiveHome.getWorld(), world)) {
-          double distFromHomeSq = Math.pow(targetX - effectiveHome.getX(), 2) + Math.pow(targetZ - effectiveHome.getZ(), 2);
-          if (distFromHomeSq > Math.pow(maxDistanceFromHome, 2)) {
-            continue;
-          }
-        }
-
-        // Must remain outside the protected home structure
-        if (protectedHome != null && protectHomeRadius > 0 && Objects.equals(protectedHome.getWorld(), world)) {
-          double distFromProtectedSq = Math.pow(targetX - protectedHome.getX(), 2) + Math.pow(targetZ - protectedHome.getZ(), 2);
-          if (distFromProtectedSq < Math.pow(protectHomeRadius + 2, 2)) {
-            continue;
-          }
-        }
-
         int blockX = (int) Math.floor(targetX);
         int blockZ = (int) Math.floor(targetZ);
         int currentY = current.getBlockY();
@@ -51,6 +35,21 @@ final class ExplorationPlanner {
         for (int dy : new int[]{ 0, 1, -1, 2, -2, 3, -3, 4, -4 }) {
           int y = currentY + dy;
           Location candidate = new Location(world, blockX + 0.5, y, blockZ + 0.5);
+          // Check the actual block-center waypoint, including its selected height, against the home boundary.
+          if (effectiveHome != null && Objects.equals(effectiveHome.getWorld(), world)) {
+            double dx = candidate.getX() - effectiveHome.getX();
+            double dyFromHome = candidate.getY() - effectiveHome.getY();
+            double dz = candidate.getZ() - effectiveHome.getZ();
+            if (dx * dx + dyFromHome * dyFromHome + dz * dz > Math.pow(maxDistanceFromHome, 2)) continue;
+          }
+
+          // Apply the same protected-home margin to the snapped candidate, not its unsnapped ray.
+          if (protectedHome != null && protectHomeRadius > 0 && Objects.equals(protectedHome.getWorld(), world)) {
+            double dx = candidate.getX() - protectedHome.getX();
+            double dz = candidate.getZ() - protectedHome.getZ();
+            if (dx * dx + dz * dz < Math.pow(protectHomeRadius + 2, 2)) continue;
+          }
+
           if (isSafe.test(candidate)) {
             return candidate;
           }

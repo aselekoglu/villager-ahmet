@@ -8,6 +8,46 @@ import static org.junit.jupiter.api.Assertions.*;
 class ExplorationPlannerTest {
 
   @Test
+  void explorationWaypointBlockCenterRemainsInsideHomeRadius() {
+    Location home = new Location(null, 0.0, 120.0, 0.0);
+    Location current = new Location(null, 0.0, 120.0, 0.0);
+
+    Location waypoint = ExplorationPlanner.findExplorationWaypoint(
+        current, home, null, 0, 10, 1, loc -> true);
+
+    assertNotNull(waypoint);
+    double dx = waypoint.getX() - home.getX();
+    double dy = waypoint.getY() - home.getY();
+    double dz = waypoint.getZ() - home.getZ();
+    assertTrue(dx * dx + dy * dy + dz * dz <= 100.0,
+        "The admitted block-center waypoint must remain within maxDistanceFromHome");
+  }
+
+  @Test
+  void elevatedExplorationWaypointIncludesHeightInHomeRadius() {
+    Location home = new Location(null, -1.0, 120.0, -0.09);
+    Location current = new Location(null, 0.0, 121.0, 0.0);
+
+    Location waypoint = ExplorationPlanner.findExplorationWaypoint(
+        current, home, null, 0, 10, 1,
+        loc -> loc.getBlockY() == 121 && loc.getX() == -7.5 && loc.getZ() == 7.5);
+
+    assertNull(waypoint, "A waypoint above the horizontal boundary must not exceed the 3D home radius");
+  }
+
+  @Test
+  void snappedExplorationWaypointStaysOutsideProtectedHomeMargin() {
+    Location protectedHome = new Location(null, 0.5, 120.0, 0.5);
+    Location current = new Location(null, 0.5, 120.0, 0.5);
+
+    Location waypoint = ExplorationPlanner.findExplorationWaypoint(
+        current, protectedHome, protectedHome, 8, 32, 1,
+        loc -> loc.getX() == 7.5 && loc.getZ() == 7.5);
+
+    assertNull(waypoint, "A safe snapped candidate inside protected radius plus two blocks must be skipped");
+  }
+
+  @Test
   void explorationWaypointStaysWithinMaxDistanceAndOutsideProtectedHome() {
     Location home = new Location(null, 0.0, 70.0, 0.0);
     Location protectedHome = new Location(null, 0.0, 70.0, 0.0);
