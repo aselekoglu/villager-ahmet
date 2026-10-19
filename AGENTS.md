@@ -7,7 +7,7 @@ Read `README.md`, `CODEX_HANDOFF.md`, `docs/ARCHITECTURE.md`, and `docs/ACCEPTAN
 - Do not lift code from `rmalde/minecraft-agent`: no license identified. Architectural inspiration only.
 - Never edit or delete user worlds. Use a fresh testing `server/` and preserve backups.
 - User must personally accept Minecraft EULA and supply model credentials. Do not invent API keys or model test evidence. For this user's explicitly requested private LAN, `online-mode=false` is intentional so the offline TLauncher profile can join; keep the whitelist enabled and never expose/port-forward this server outside the trusted LAN.
-- JEV uses TypeSafe `POST https://api.typesafe.ai/v1/systemone` with `TYPESAFE_API_KEY`; use an account-listed model such as `jev-latest`. Conversation uses OpenAI `POST https://api.openai.com/v1/chat/completions` separately with `OPENAI_API_KEY` and model `gpt-6-luna`. Always distinguish mock, fallback and live.
+- JEV uses TypeSafe `POST https://api.typesafe.ai/v1/systemone` with `TYPESAFE_API_KEY`; select `jev-preview` by default and validate the provider's resolved version metadata. Conversation uses OpenAI `POST https://api.openai.com/v1/chat/completions` separately with `OPENAI_API_KEY` and model `gpt-6-luna`. Always distinguish mock, fallback and live.
 - Only an explicit operator `/ahmet summon` can reposition Ahmet to a safe nearby location, and only while idle; Citizens pathfinding must never teleport during normal task movement.
 - Enforce bounded typed actions; no server command passthrough from LLM/JEV.
 - All Bukkit/Citizens entity, world and inventory access on server main thread. HTTP requests asynchronous and time bounded.

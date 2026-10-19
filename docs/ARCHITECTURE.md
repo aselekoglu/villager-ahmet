@@ -39,8 +39,12 @@ Request:
 Response:
 
 ```json
-{"id":"target_a","source":"jev","model":"jev-latest","confidence":0.92}
+{"id":"target_a","source":"jev","model":"jev-1.14.0","confidence":0.92}
 ```
+
+The normal `scripts/run.sh` launch selects the TypeSafe alias `jev-preview`. A deliberately supplied process-level `JEV_MODEL` may select `jev-preview`, `jev-latest`, or a versioned `jev-X.Y.Z` model ID of at most 64 characters. The process value takes precedence over `brain/.env`, so an older dotenv setting cannot silently undo the preview launch default. `GET /health` may report the validated configured alias; that is configuration metadata, not evidence of a provider call or resolved version. A JEV choice is accepted only when the response includes a plausible versioned `model` ID of at most 64 characters and a choice among the offered candidates. Missing or invalid metadata falls back safely.
+
+Provider failures are reduced to a provider name and bounded category, with a validated numeric HTTP status where available, before they reach fallback results. Raw provider response bodies, headers, credentials and private request state are not included in errors or decision logs. OpenAI chat keeps its separate GPT-6 Luna endpoint/model and success path.
 
 `source` can also be `heuristic`, `forced`, `fallback`. Server can only execute actions actually offered for the current task generation. Responses from cancelled/replaced jobs are discarded.
 

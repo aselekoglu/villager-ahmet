@@ -15,6 +15,7 @@ if [[ ! -f "$SERVER/eula.txt" ]] || ! grep -q '^eula=true$' "$SERVER/eula.txt"; 
   echo 'eula=true' > "$SERVER/eula.txt"
 fi
 cd "$ROOT/brain"
+export JEV_MODEL="${JEV_MODEL:-jev-preview}"
 node src/server.mjs & BRAIN_PID=$!
 trap 'kill "$BRAIN_PID" 2>/dev/null || true' EXIT INT TERM
 cd "$SERVER"
