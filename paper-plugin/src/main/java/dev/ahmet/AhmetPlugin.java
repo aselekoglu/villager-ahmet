@@ -70,6 +70,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private int routeClears=0;
   private final NavigationWatchdog navigationWatchdog=new NavigationWatchdog();
   private final NavigationRetry navigationRetry=new NavigationRetry();
+  private final OwnedNavigationRoute taskNavigationRoute=new OwnedNavigationRoute();
   private final FailedTargets failedTargets=new FailedTargets();
   private Location home;
   private Location protectedHome;
@@ -97,7 +98,9 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private int homeStepAttempt=0;
   private boolean returningHome=false;
   private Location scheduleBed;
-  private final ScheduleAdapter scheduleAdapter=new ScheduleAdapter();
+  private final ActivationRangeGuard activationRangeGuard=new ActivationRangeGuard();
+  private final ScheduleAdapter scheduleAdapter=new ScheduleAdapter(System::currentTimeMillis,
+      this::beginOwnedNavigation,this::endOwnedNavigation);
 
   @Override public void onEnable() {
     saveDefaultConfig();brain=new BrainClient(this);
@@ -130,7 +133,10 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     if(savedNpcReference.pending())Bukkit.getScheduler().runTaskLater(this,this::restoreSavedNpc,1L);
     getLogger().info("Villager Ahmet ready. Run /ahmet spawn as an operator to summon Ahmet.");
   }
-  @Override public void onDisable(){scheduleAdapter.suspend(npc,"shutdown");persist();flushJournalOnShutdown();}
+  @Override public void onDisable(){
+    try{scheduleAdapter.suspend(npc,"shutdown");persist();flushJournalOnShutdown();}
+    finally{activationRangeGuard.clear();}
+  }
   private void persist(){
     Integer liveNpcId=npc==null?null:npc.getId();
     getConfig().set("npc-id",savedNpcReference==null?(liveNpcId==null?-1:liveNpcId):savedNpcReference.idForPersistence(liveNpcId));
@@ -149,7 +155,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       }
       try { java.nio.file.Files.move(temporary,configFile,java.nio.file.StandardCopyOption.ATOMIC_MOVE,java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
       catch(java.nio.file.AtomicMoveNotSupportedException unsupported) { java.nio.file.Files.move(temporary,configFile,java.nio.file.StandardCopyOption.REPLACE_EXISTING); }
-    } catch(java.io.IOException e) { throw TaskStateSaveFailure.failClosed(e,()->recoveryBlocked=true); }
+    } catch(java.io.IOException e) { throw TaskStateSaveFailure.failClosed(e,this::lockRecovery); }
   }
   private void restoreSavedNpc(){
     if(savedNpcReference==null||!savedNpcReference.pending())return;
@@ -261,7 +267,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       if(npc==null){npc=CitizensAPI.getNPCRegistry().createNPC(EntityType.VILLAGER,"Ahmet");savedNpcReference.created(npc.getId());}
       scheduleAdapter.suspend(npc,"operator summon");
       if(npc.isSpawned()){
-        npc.getNavigator().cancelNavigation();
+        clearNavigation();
         npc.teleport(destination,PlayerTeleportEvent.TeleportCause.PLUGIN);
       }else if(!npc.spawn(destination)){
         player.sendMessage("§cAhmet güvenli noktada oluşturulamadı.");return true;
@@ -505,6 +511,11 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
 
   private void step(){
     if(!Bukkit.isPrimaryThread())return;
+    taskNavigationRoute.runStep(npc,this::stepOwnedNavigation,this::reconcileActivationRange,
+        ()->scheduleAdapter.suspend(npc,"step failure"),activationRangeGuard::clear);
+  }
+
+  private void stepOwnedNavigation(){
     advanceSchedule();
     if(scheduleAdapter.ownsTurn())return;
     if(recoveryBlocked || journal.pendingHarvest().isPresent() || journal.pendingDeposit().isPresent()
@@ -561,7 +572,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         boolean explorationRouteReached=explorationTarget!=null;
         if(explorationRouteReached&&getConfig().getBoolean("options.production-goals-enabled",false)
             &&!authorizeProductionGoal(AgentGoal.EXPLORE_RESOURCES,current,now,false,false))return;
-        if((reachedHarvest||reachedChest)&&npc.getNavigator().isNavigating())npc.getNavigator().cancelNavigation();
+        if(reachedHarvest||reachedChest)taskNavigationRoute.cancelIfOwned(npc);
+        else taskNavigationRoute.clear();
         navigationWatchdog.reset();
         navigationGoal=null;
         navigationPurpose=AgentGoal.REST_IDLE;
@@ -571,7 +583,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         if(homeStepTarget!=null){homeStepTarget=null;homeStepAttempt=0;}
         if(explorationRouteReached&&getConfig().getBoolean("options.production-goals-enabled",false))return;
       }else if(outcome==NavigationWatchdog.Outcome.RETRY){
-        if(npc.getNavigator().isNavigating())npc.getNavigator().cancelNavigation();
+        taskNavigationRoute.cancelIfOwned(npc);
         boolean waitingForHelp=getConfig().getBoolean("options.production-goals-enabled",false)
             &&controller.state()==AgentState.BLOCKED_AWAITING_HELP;
         if(task.active && !task.readyToDeliver() && (!productionGoalsEnabled
@@ -589,7 +601,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         }
         navigationRetry.schedule(now);return;
       }else if(outcome==NavigationWatchdog.Outcome.GIVE_UP){
-        if(npc.getNavigator().isNavigating())npc.getNavigator().cancelNavigation();
+        taskNavigationRoute.cancelIfOwned(npc);
         getLogger().warning("Navigation route gave up; npc="+coords(current)+", destination="+coords(navigationGoal)+", cargo="+task.cargo+", collected="+task.collected+"/"+task.requested);
         navigationGoal=null;navigationWatchdog.reset();
         routeClears=0;
@@ -669,7 +681,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       List<Block> spotted=findTargets(current,task.materialPreference);
       if(spotted==null)return;
       if(!spotted.isEmpty()){
-        if(npc.getNavigator().isNavigating())npc.getNavigator().cancelNavigation();
+        taskNavigationRoute.cancelIfOwned(npc);
         navigationGoal=null;navigationPurpose=AgentGoal.REST_IDLE;navigationWatchdog.reset();
         explorationTarget=null;explorationAttempts=0;invalidateTargetScan();
       }
@@ -785,7 +797,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         getConfig().getBoolean("perception.include-players",false),generation);
     observation.addProperty("generation",generation);observation.add("perception",com.google.gson.JsonParser.parseString(perception.toJson()));
     req.add("observation",observation);req.add("actions",options);
-    deciding=true;
+    deciding=true;endOwnedNavigation();
     brain.post("/api/decide",req).whenComplete((response,error)->Bukkit.getScheduler().runTask(this,()->{
       deciding=false;if(!task.active || npc==null || !npc.isSpawned() || controller.jobGeneration()!=generation)return;
       // JEV may select only an offered target ID. Java retains each real block location.
@@ -897,7 +909,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     observation.addProperty("generation",generation);observation.add("perception",com.google.gson.JsonParser.parseString(perception.toJson()));
     req.add("observation",observation);req.add("actions",options);
 
-    deciding=true;
+    deciding=true;endOwnedNavigation();
     brain.post("/api/decide",req).whenComplete((response,error)->Bukkit.getScheduler().runTask(this,()->{
       deciding=false;
       if(!Bukkit.isPrimaryThread())return;
@@ -1200,8 +1212,13 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
 
   private void blockRecovery(String message,Exception cause){
-    recoveryBlocked=true;
+    lockRecovery();
     getLogger().severe(message+(cause==null?"":": "+cause.getMessage()));
+  }
+  private void lockRecovery(){
+    if(!Bukkit.isPrimaryThread())throw new IllegalStateException("Recovery must be locked on the server main thread");
+    recoveryBlocked=true;
+    taskNavigationRoute.stopAndRelease(npc,activationRangeGuard::clear);
   }
   private Location getEffectiveHome(){
     return protectedHome!=null?protectedHome:home;
@@ -1248,15 +1265,54 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
   private void issueNavigationTarget(Location target){
     if(npc==null||!npc.isSpawned()||target==null)return;
-    npc.getNavigator().getDefaultParameters().destinationTeleportMargin(-1).stationaryTicks(-1).distanceMargin(0.75).pathDistanceMargin(0.75);
-    npc.getNavigator().setTarget(target);
-    // Citizens documents these per-target parameters; -1 disables destination and stuck teleports.
-    npc.getNavigator().getLocalParameters().destinationTeleportMargin(-1).stationaryTicks(-1).distanceMargin(0.75).pathDistanceMargin(0.75);
+    var navigator=npc.getNavigator();
+    taskNavigationRoute.issue(npc,this::beginOwnedNavigation,()->{
+      navigator.getDefaultParameters().destinationTeleportMargin(-1).stationaryTicks(-1).distanceMargin(0.75).pathDistanceMargin(0.75);
+      navigator.setTarget(target);
+    },()->{
+      // Citizens documents these per-target parameters; -1 disables destination and stuck teleports.
+      navigator.getLocalParameters().destinationTeleportMargin(-1).stationaryTicks(-1).distanceMargin(0.75).pathDistanceMargin(0.75);
+    },this::endOwnedNavigation);
   }
   private void clearNavigation(){
-    if(npc!=null&&npc.isSpawned())npc.getNavigator().cancelNavigation();
-    navigationGoal=null;navigationPurpose=AgentGoal.REST_IDLE;navigationWatchdog.reset();navigationRetry.clear();routeClears=0;
-    explorationTarget=null;homeStepTarget=null;
+    try{taskNavigationRoute.cancelIfOwned(npc);}
+    finally{
+      endOwnedNavigation();
+      navigationGoal=null;navigationPurpose=AgentGoal.REST_IDLE;navigationWatchdog.reset();navigationRetry.clear();routeClears=0;
+      explorationTarget=null;homeStepTarget=null;
+    }
+  }
+
+  private void beginOwnedNavigation(){
+    if(!Bukkit.isPrimaryThread()||npc==null)return;
+    activationRangeGuard.reconcile(activationMetadata(npc),true);
+  }
+
+  private void endOwnedNavigation(){
+    if(!Bukkit.isPrimaryThread())return;
+    activationRangeGuard.reconcile(activationMetadata(npc),false);
+  }
+
+  private void reconcileActivationRange(){
+    if(!Bukkit.isPrimaryThread())return;
+    boolean scheduleRoute=scheduleAdapter.ownsRoute(npc);
+    boolean pendingOperation=journal==null||journal.pendingHarvest().isPresent()
+        ||journal.pendingDeposit().isPresent()||journal.pendingClear().isPresent();
+    boolean taskRoute=ActivationRangeGuard.taskRouteEligible(taskNavigationRoute.matches(npc),recoveryBlocked,
+        pendingOperation,deciding,navigationGoal!=null,navigationRetry.pending());
+    activationRangeGuard.reconcile(activationMetadata(npc),scheduleRoute||taskRoute);
+  }
+
+  private ActivationRangeGuard.MetadataAccess activationMetadata(NPC target){
+    if(target==null)return null;
+    return new ActivationRangeGuard.MetadataAccess(){
+      @Override public Object identity(){return target;}
+      @Override public boolean spawned(){return target.isSpawned();}
+      @Override public boolean hasActivationRange(){return target.data().has(NPC.Metadata.ACTIVATION_RANGE);}
+      @Override public Integer activationRange(){return target.data().get(NPC.Metadata.ACTIVATION_RANGE);}
+      @Override public void setTransientActivationRange(int value){target.data().set(NPC.Metadata.ACTIVATION_RANGE,value);}
+      @Override public void removeActivationRange(){target.data().remove(NPC.Metadata.ACTIVATION_RANGE);}
+    };
   }
 
   private static boolean sameBlock(Location first,Location second){

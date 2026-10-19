@@ -31,7 +31,10 @@ final class ScheduleAdapter {
     }
 
     private final ScheduleState state = new ScheduleState();
+    private final OwnedNavigationRoute ownedRoute = new OwnedNavigationRoute();
     private final LongSupplier clock;
+    private final Runnable routeStarting;
+    private final Runnable routeStopped;
     private boolean bedRoute;
     private boolean exactLegIssued;
     private String fallbackCause;
@@ -40,8 +43,11 @@ final class ScheduleAdapter {
     private boolean preempted;
     private boolean wanderRecovery;
 
-    ScheduleAdapter(){this(System::currentTimeMillis);}
-    ScheduleAdapter(LongSupplier clock){this.clock=clock;}
+    ScheduleAdapter(){this(System::currentTimeMillis,()->{},()->{});}
+    ScheduleAdapter(LongSupplier clock){this(clock,()->{},()->{});}
+    ScheduleAdapter(LongSupplier clock,Runnable routeStarting,Runnable routeStopped){
+        this.clock=clock;this.routeStarting=routeStarting;this.routeStopped=routeStopped;
+    }
 
     void bedRebound(){bedRetryAt=-1;retries.clear();fallbackCause=null;}
 
@@ -56,6 +62,7 @@ final class ScheduleAdapter {
 
     VillagerSchedule.Phase phase() { return state.phase(); }
     boolean ownsNavigation() { return state.ownsNavigation(); }
+    boolean ownsRoute(NPC npc) { return state.ownsNavigation() && ownedRoute.matches(npc); }
     boolean ownsSleep() { return state.ownsSleep(); }
     boolean ownsTurn() { return !preempted && state.phase()!=null; }
     Location target() { return state.target(); }
@@ -261,21 +268,31 @@ final class ScheduleAdapter {
         double distanceMargin=defaults.distanceMargin(),pathDistanceMargin=defaults.pathDistanceMargin();
         double teleportMargin=defaults.destinationTeleportMargin();int stationaryTicks=defaults.stationaryTicks();
         try {
-            defaults.pathfinderType(PathfinderType.CITIZENS).distanceMargin(margin).pathDistanceMargin(0)
-                    .destinationTeleportMargin(-1).stationaryTicks(-1);
-            if(exact)navigator.setTarget(java.util.List.of(target.toVector()));
-            else navigator.setTarget(target);
-            state.navigationStarted();retries.started();
-        } finally {
-            defaults.pathfinderType(pathfinderType).distanceMargin(distanceMargin).pathDistanceMargin(pathDistanceMargin)
-                    .destinationTeleportMargin(teleportMargin).stationaryTicks(stationaryTicks);
+            try {
+                defaults.pathfinderType(PathfinderType.CITIZENS).distanceMargin(margin).pathDistanceMargin(0)
+                        .destinationTeleportMargin(-1).stationaryTicks(-1);
+                ownedRoute.issue(npc,routeStarting,()->{
+                    if(exact)navigator.setTarget(java.util.List.of(target.toVector()));
+                    else navigator.setTarget(target);
+                },()->{state.navigationStarted();retries.started();},routeStopped);
+            } finally {
+                defaults.pathfinderType(pathfinderType).distanceMargin(distanceMargin).pathDistanceMargin(pathDistanceMargin)
+                        .destinationTeleportMargin(teleportMargin).stationaryTicks(stationaryTicks);
+            }
+        } catch(RuntimeException|Error failure) {
+            if(ownedRoute.tracksRoute()){ownedRoute.clear();routeStopped.run();}
+            throw failure;
         }
     }
 
     private void cancelOwnedNavigation(NPC npc) {
         boolean owned=state.ownsNavigation();
-        state.navigationStopped(()->{if(npc!=null&&npc.isSpawned()&&npc.getNavigator().isNavigating())npc.getNavigator().cancelNavigation();});
-        if(owned)bedRoute=false;
+        try {
+            state.navigationStopped(()->ownedRoute.cancelIfOwned(npc));
+        } finally {
+            if(owned){bedRoute=false;ownedRoute.clear();routeStopped.run();}
+            else ownedRoute.clear();
+        }
     }
     private void wakeOwned(NPC npc) {
         state.wakeOwned(()->{if(npc!=null&&npc.isSpawned()&&npc.getEntity() instanceof Villager villager&&villager.isSleeping())villager.wakeup();});
