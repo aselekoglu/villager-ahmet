@@ -1,5 +1,13 @@
 # Validation results — 2026-10-12
 
+## JEV preview source and provider acceptance — 2026-10-19
+
+- Node defaults to the TypeSafe `jev-preview` alias at launch; an explicitly supplied valid process-level `JEV_MODEL` override remains supported and takes precedence over dotenv defaults. Health may expose only the validated configured alias (version IDs are capped at 64 characters). A real choice requires a plausible bounded versioned response `model` plus a currently offered action.
+- Provider HTTP, network and timeout errors expose a bounded category and validated numeric HTTP status where available. Synthetic tests confirm fake credentials and private input fragments do not enter provider errors or decision fallback reasons. OpenAI GPT-6 Luna's endpoint, configured model and successful response paths remain covered by the Node suite.
+- `brain` Node suite passed **43/43**. This includes mock TypeSafe metadata/choice tests, configuration precedence using a synthetic temporary dotenv file, and provider-error redaction. A separate private guard test passed without adding any dependency on ignored helper files to the public suite. `bash -n scripts/run.sh` and `git diff --check` passed.
+- Source/helper review passed. One explicit synthetic TypeSafe choice call through `jev-preview` returned `source=jev`, resolved model `jev-1.14.0`, and selected the offered `wait` action. Exactly one provider request was made; observed elapsed time was **558 ms**. This is one call's timing, not a benchmark. Sanitized evidence is stored privately.
+- The provider proof covers JEV selection only. It did not access or mutate a Minecraft world, invoke OpenAI, or involve a human player. Copied-source `scripts/run.sh` precedence against a synthetic old dotenv value, Paper/runtime checks, publication/deployment, M3 Minecraft acceptance, human acceptance, OpenAI proof, and production-memory-store inspection remain pending.
+
 ## M2 published source and live deployment read-back — 2026-10-18
 
 - Published source commit: `ba29c68916562f922b3bae085c72b51f345030c0`; reviewed tree: `30d87eaf4c82778cfac5d4b9b87112129b600b76`. Deployed the reviewed core JAR (SHA-256 `48669fd65dbdffb7be39d861906a61a30173aeab5f0b88ee85dff8c4f44f195b`) from the verified four-entry package (ZIP SHA-256 `67f6a1e2a0cc60f6a6bb23d99ec3bc5eabece9119a3e6ec46deb19214f256b64`).

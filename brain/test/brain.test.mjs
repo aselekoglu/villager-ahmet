@@ -95,6 +95,16 @@ test('decision timeout is labelled and falls back to an offered action',async()=
  }finally{globalThis.fetch=previous;}
 });
 
+test('decision fallback exposes only a bounded error category',async()=>{
+ const previous=globalThis.fetch;
+ try {
+  globalThis.fetch=async()=>({ok:false,status:401,json:async()=>({error:{message:'sk-fake-secret private-world-fragment'}})});
+  const result=await decide({observation:{private:'private-world-fragment'},actions:[{id:'harvest',description:'Harvest'}]},{key:'sk-fake-secret',decisionMode:'jev'});
+  assert.deepEqual(result,{id:'harvest',source:'fallback',reason:'http_4xx',httpStatus:401});
+  assert.doesNotMatch(JSON.stringify(result),/sk-fake-secret|private-world-fragment/);
+ } finally {globalThis.fetch=previous;}
+});
+
 test('chat forwards only sanitized same-generation perception and keeps existing task gates',async()=>{
  const d=await mkdtemp(join(tmpdir(),'ahmet-'));
  try {const store=new MemoryStore(join(d,'memory.json'));await store.load();let seen;

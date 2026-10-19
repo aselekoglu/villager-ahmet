@@ -1,5 +1,5 @@
 import {parseTask,isCancel,isReturnHome,validateTask} from './intent.mjs';
-import {chooseAction,conversationalReply,interpretTurn} from './models.mjs';
+import {chooseAction,conversationalReply,interpretTurn,ModelError} from './models.mjs';
 import {sanitizePerception} from './perception.mjs';
 function busyReply(req) {
   const cargo=Number(req.context?.cargo??0);
@@ -60,7 +60,7 @@ export async function decide(req,{models={chooseAction},key,decisionMode}={}) {
     const safeFallback=actions.find(a=>!a.id.startsWith('clear_')&&a.id!=='wait')?.id
       ??actions.find(a=>!a.id.startsWith('clear_'))?.id
       ??actions[0].id;
-    return {id:safeFallback,source:'fallback',reason:String(e.message).slice(0,140)};
+    return {id:safeFallback,source:'fallback',reason:e instanceof ModelError?e.category:'decision_failed',...(e instanceof ModelError&&Number.isInteger(e.httpStatus)?{httpStatus:e.httpStatus}:{})};
   }
 }
 

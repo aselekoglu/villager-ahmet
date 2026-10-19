@@ -5,8 +5,12 @@ Villager Ahmet is an autonomous, AI-driven assistant in Minecraft Java Edition r
 
 ### Architectural Division of Responsibility
 - **Java Paper Plugin (`paper-plugin/`)**: Authoritative owner of world mutations, entity pathfinding, item transactions, task state, write-ahead journaling, and safe boundaries. All Bukkit/Citizens calls stay on the server main thread.
-- **Node Brain Daemon (`brain/`)**: Language understanding, structured task extraction, conversational memory, and decision candidate selection. Strictly distinguishes **TypeSafe JEV** (`POST https://api.typesafe.ai/v1/systemone` using model `jev-latest`) for bounded decision selection from **OpenAI GPT-6 Luna** (`POST https://api.openai.com/v1/chat/completions`) for conversational chat.
+- **Node Brain Daemon (`brain/`)**: Language understanding, structured task extraction, conversational memory, and decision candidate selection. Strictly distinguishes **TypeSafe JEV** (`POST https://api.typesafe.ai/v1/systemone`, default model alias `jev-preview`, with the resolved version read from response metadata) for bounded decision selection from **OpenAI GPT-6 Luna** (`POST https://api.openai.com/v1/chat/completions`) for conversational chat.
 - **Private LAN Network Policy**: A private LAN that accepts offline clients may use `online-mode=false` with whitelist enabled. Offline mode allows username spoofing; use only on a trusted LAN, never port-forward, and restore online authentication before any public exposure.
+
+### JEV preview provider acceptance — 2026-10-19
+- One synthetic TypeSafe choice call using alias `jev-preview` returned `source=jev`, resolved model `jev-1.14.0`, and the offered `wait` action. The observed call took **558 ms**; this single sample is not a latency benchmark.
+- This proves the provider alias/resolution/choice path only. It does not prove copied-source launch precedence, Paper/runtime integration, publication/deployment, Minecraft behavior, human acceptance, OpenAI behavior, or production-memory-store migration. Those checks remain open.
 
 ### Deterministic Citizens schedule
 - `ScheduleAdapter` runs the real Citizens villager through WAKE `[0,1000)`, WORK `[1000,9000)`, WANDER `[9000,12000)`, and SLEEP `[12000,24000)` using world time modulo 24,000 ticks. WORK is idle availability at home, not automatic harvesting.

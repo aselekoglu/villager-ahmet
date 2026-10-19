@@ -15,7 +15,9 @@
 - [ ] M8 Fine-grained claims, permissions, protection compatibility and bounded tickets.
 - [ ] M9 Private observability/admin dashboard and honest usage/cost audit.
 - [ ] M10 Disposable failure acceptance, isolated installation, final review/release/deploy.
-- [ ] M1 live provider and human memory acceptance; production-store migration remains uninspected.
+- [ ] M1 human memory acceptance, OpenAI live proof, and production-memory-store migration inspection remain open; JEV live provider proof is recorded below.
+- [x] JEV preview provider acceptance: source/helper review passed; one synthetic TypeSafe call returned alias `jev-preview`, resolved model `jev-1.14.0`, source `jev`, and offered action `wait` (558 ms observed; not a benchmark).
+- [ ] JEV preview launch/release acceptance: copied-source launcher precedence with synthetic old dotenv, Paper/runtime integration, publication/deployment and Minecraft acceptance remain pending.
 - [ ] Human/player acceptance for M2 visible-player behavior (runtime used a no-human server and permission proxies only).
 - [ ] Human player/two-client acceptance (requires actual user; never mark from proxy).
 
