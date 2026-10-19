@@ -17,7 +17,10 @@
 - [ ] M10 Disposable failure acceptance, isolated installation, final review/release/deploy.
 - [ ] M1 human memory acceptance, OpenAI live proof, and production-memory-store migration inspection remain open; JEV live provider proof is recorded below.
 - [x] JEV preview provider acceptance: source/helper review passed; one synthetic TypeSafe call returned alias `jev-preview`, resolved model `jev-1.14.0`, source `jev`, and offered action `wait` (558 ms observed; not a benchmark).
-- [ ] JEV preview launch/release acceptance: copied-source launcher precedence with synthetic old dotenv, Paper/runtime integration, publication/deployment and Minecraft acceptance remain pending.
+- [x] JEV preview launcher precedence: copied `scripts/run.sh` without a process-level override used a synthetic dotenv value `jev-latest`; health showed `jev-preview`, mock chat and mock decision.
+- [x] Fresh isolated release checks: Node **43/43** and `scripts/smoke.sh` passed in mock mode.
+- [x] JEV preview source published and live startup verified: published source commit `c8f2777a934cd2355844a0685aacadb1fa715f85`; deployed Node source/launcher matched it byte for byte; Paper startup, configured preview health, idle status, and all-dimension save read-back passed. Installed M2 JAR and distribution were unchanged. No provider call or human interaction occurred during deployment; NPC remained unspawned.
+- [ ] Minecraft task/movement acceptance, human acceptance, OpenAI proof, and production-memory-store inspection remain open. The single provider proof is JEV-only; M3–M10 remain open.
 - [ ] Human/player acceptance for M2 visible-player behavior (runtime used a no-human server and permission proxies only).
 - [ ] Human player/two-client acceptance (requires actual user; never mark from proxy).
 
