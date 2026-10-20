@@ -22,7 +22,7 @@ The 1.21.6 vanilla item catalog and common-resource code path are implemented; v
 
 ## P1 — Real villager immersion & autonomy
 
-- [x] AgentController / precondition harness: typed offered actions, deterministic server preconditions (`ActionPreconditions`), and replayable evaluation tests (`AgentEvaluationHarnessTest`). `AgentObservation` and `evaluateGoal` remain harness-only; the production task loop remains in `AhmetPlugin`.
+- [x] AgentController / production goal policy: typed offered actions, deterministic server preconditions (`ActionPreconditions`), and server-fact-based goal selection for explicit authorized jobs. The operator opt-in defaults off; foreign route wait/help, actual retry exhaustion, terminal route cleanup, safe delivery, and unloaded-bed fallback are bounded. The final source/runtime and locally verified package are recorded in [`VALIDATION_RESULTS.md`](VALIDATION_RESULTS.md). M3 remains open pending source publication and deployment read-back.
 - [x] Obstruction clearance & canopy navigation recovery: safe walkable approach, qualified leaf removal, safe descent simulation, and zero-cargo clear journal operation.
 - [x] External protection SPI (`ProtectionHook`, `CompositeProtectionHook`) with fail-closed safety.
 - [x] Structured player help requests (`BLOCKED_AWAITING_HELP`) when route retries or descent simulations fail.
