@@ -102,4 +102,19 @@ public class AgentControllerTest {
     controller.clearHelp();
     assertEquals(AgentState.IDLE, controller.state());
   }
+
+  @Test
+  void sequenceAwareHelpClearCannotEraseAReplacementRequest() {
+    AgentController controller = new AgentController(
+        new ActionPreconditions((b, l) -> false, ActionBudget.DEFAULT));
+    assertTrue(controller.recordHelpRequest(10_000));
+    long firstRequest = controller.helpRequestSequence();
+    assertTrue(controller.recordHelpRequest(41_000));
+    long replacementRequest = controller.helpRequestSequence();
+
+    assertFalse(controller.clearHelp(firstRequest));
+    assertEquals(AgentState.BLOCKED_AWAITING_HELP, controller.state());
+    assertTrue(controller.clearHelp(replacementRequest));
+    assertEquals(AgentState.IDLE, controller.state());
+  }
 }

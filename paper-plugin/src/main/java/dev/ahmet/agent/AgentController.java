@@ -20,6 +20,7 @@ public final class AgentController {
   private long jobGeneration = 0;
   private int productiveTransitionCount = 0;
   private long lastAppliedServerStep = -1;
+  private long helpRequestSequence = 0;
   private final Map<String, OfferedAction> currentOfferedActions = new LinkedHashMap<>();
   private long lastHelpRequestedMs = 0;
 
@@ -156,13 +157,26 @@ public final class AgentController {
       return false;
     }
     lastHelpRequestedMs = nowMs;
+    helpRequestSequence++;
     transitionTo(AgentState.BLOCKED_AWAITING_HELP, "Help requested from player");
     return true;
+  }
+
+  public long helpRequestSequence() {
+    return helpRequestSequence;
   }
 
   public void clearHelp() {
     if (state == AgentState.BLOCKED_AWAITING_HELP) {
       transitionTo(AgentState.IDLE, "Help cleared / path resumed");
     }
+  }
+
+  /** Clears help only when the accepted request is still the current one. */
+  public boolean clearHelp(long expectedSequence) {
+    if (expectedSequence <= 0 || expectedSequence != helpRequestSequence
+        || state != AgentState.BLOCKED_AWAITING_HELP) return false;
+    transitionTo(AgentState.IDLE, "Help cleared / path resumed");
+    return true;
   }
 }

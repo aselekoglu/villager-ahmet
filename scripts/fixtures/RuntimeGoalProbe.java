@@ -17,14 +17,21 @@ import java.util.function.BooleanSupplier;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import net.citizensnpcs.api.npc.NPC;
+import net.citizensnpcs.api.ai.NavigatorParameters;
+import net.citizensnpcs.api.ai.PathStrategy;
+import net.citizensnpcs.api.ai.PathfinderType;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.attribute.Attribute;
+import org.bukkit.attribute.AttributeInstance;
+import org.bukkit.attribute.AttributeModifier;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.EntityType;
+import org.bukkit.entity.Mob;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import net.citizensnpcs.api.event.NPCTeleportEvent;
@@ -34,18 +41,41 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.command.PluginCommand;
+import org.bukkit.util.BoundingBox;
+import org.bukkit.util.VoxelShape;
 
 /** Opt-in, disposable Paper/Citizens runtime probe for enabled production-goal wiring. */
 public final class RuntimeGoalProbe extends JavaPlugin implements Listener {
   private static final UUID OWNER = UUID.fromString("6d9ea6da-7fb1-4b4c-a7e3-e8a7d64a0a11");
   private static final UUID OPERATOR = UUID.fromString("e4f09903-86f4-4a7a-bf27-f143b15f46e0");
   private static final UUID FOREIGN = UUID.fromString("b9c82ef1-2079-48bf-83b0-56ca51a0a3ab");
-  private static final int DEADLINE_TICKS = 2400;
+  // 2,400 existing + 100 foreign-wait + 800 resumed-delivery ticks = 3,300; no added margin.
+  private static final int DEADLINE_TICKS = 3300;
+  private static final int FOREIGN_ROUTE_WAIT_TICKS = 100;
+  private static final int CITIZENS_ASTAR_DEFAULT_ITERATIONS_PER_TICK = 250;
+  private static final int CITIZENS_ASTAR_DEFAULT_MAX_ITERATIONS = 1024;
+  private final boolean budgetControlOnly = Boolean.getBoolean("ahmet.goalBudgetControlZero");
+  private final boolean deliveryPathControlOnly = Boolean.getBoolean("ahmet.goalDeliveryPathControl");
+  private final boolean activationShamControlOnly = Boolean.getBoolean("ahmet.goalActivationShamControl");
+  private boolean pathfinderComparisonStarted;
+  private boolean pathfinderTypeChanged;
+  private PathfinderType originalControlPathfinder;
+  private boolean activationControlStarted;
+  private boolean activationTickChanged;
+  private boolean activationTickRestored;
+  private long originalActivationTick;
+  private long activationControlTargetTick;
   private Plugin ahmet;
   private Object task;
   private Object controller;
   private Object journal;
   private NPC npc;
+  private NavigatorParameters foreignNavigatorDefaults;
+  private double foreignOriginalTeleportMargin;
+  private int foreignOriginalStationaryTicks;
+  private float foreignOriginalSpeed;
+  private boolean foreignNavigatorDefaultsChanged;
+  private PathStrategy foreignRouteStrategy;
   private World world;
   private Location home;
   private Location chestLocation;
@@ -66,14 +96,26 @@ public final class RuntimeGoalProbe extends JavaPlugin implements Listener {
   private HttpServer mockBridge;
   private ExecutorService bridgeExecutor;
   private final AtomicInteger decisionCalls = new AtomicInteger();
+  private final AtomicInteger chatCalls = new AtomicInteger();
   private String bridgeToken;
   private String lastExplorationDiagnosticKey;
   private int explorationStateDiagnosticLines;
   private int explorationPeriodicDiagnosticLines;
+  private Location budgetDeliveryWaitStart;
+  private long budgetDeliveryWaitStartedAtMillis;
+  private String lastBudgetDeliveryDiagnosticKey;
+  private int budgetDeliveryStateDiagnosticLines;
+  private int budgetDeliveryPeriodicDiagnosticLines;
 
   @Override public void onEnable() {
     if (!Boolean.getBoolean("ahmet.goalProbe")) {
       getLogger().warning("AHMET_GOAL_PROBE_DISABLED: set -Dahmet.goalProbe=true only for a disposable server");
+      Bukkit.getPluginManager().disablePlugin(this);
+      return;
+    }
+    if ((budgetControlOnly && deliveryPathControlOnly)
+        || (activationShamControlOnly && !deliveryPathControlOnly)) {
+      getLogger().severe("AHMET_GOAL_CONTROL_CONFIG_ERROR: choose one diagnostic control mode");
       Bukkit.getPluginManager().disablePlugin(this);
       return;
     }
@@ -120,7 +162,9 @@ public final class RuntimeGoalProbe extends JavaPlugin implements Listener {
       lastLocation = npc.getEntity().getLocation().clone();
       normalMovementMonitoring = true;
       getLogger().info("AHMET_GOAL_STAGE_PASS name=setup npcType=" + npc.getEntity().getType() + " home=" + loc(home)
-          + " productionGoalsEnabled=" + ahmet.getConfig().getBoolean("options.production-goals-enabled"));
+          + " productionGoalsEnabled=" + ahmet.getConfig().getBoolean("options.production-goals-enabled")
+          + " budgetMode=" + (budgetControlOnly ? "controlled-zero-cap" : "acceptance-32-cap")
+          + " deliveryPathControl=" + deliveryPathControlOnly);
       stage = "harvest-cancel-deliver";
       getLogger().info("AHMET_GOAL_STAGE_START name=harvest-cancel-deliver");
       startHarvestScenario();
@@ -322,6 +366,10 @@ public final class RuntimeGoalProbe extends JavaPlugin implements Listener {
                       && sameBlock(npc.getNavigator().getTargetAsLocation(), firstRoute)
                       && firstStart.distance(npc.getEntity().getLocation()) > 0.4, () -> {
                     try {
+                      getLogger().info("AHMET_GOAL_NATIVE_PATH_CONTROL_BASELINE phase=known-moving-exploration"
+                          + " start=" + precise(firstStart) + " target=" + precise(firstRoute)
+                          + " current=" + precise(npc.getEntity().getLocation())
+                          + " nativeState={" + nativeMotionSnapshot() + "}");
                       await("first-exploration-leg-arrival", 300,
                           () -> !npc.getNavigator().isNavigating()
                               && "REST_IDLE".equals(String.valueOf(fieldQuiet(ahmet, "navigationPurpose")))
@@ -331,7 +379,8 @@ public final class RuntimeGoalProbe extends JavaPlugin implements Listener {
                                   && npc.getEntity().getLocation().distance(firstRoute) <= 3.5,
                                   "first exploration leg did not arrive with EXPLORE purpose preserved: target=" + loc(firstRoute));
                               getLogger().info("AHMET_GOAL_STAGE_PASS name=first-exploration-leg start-move-arrival purpose=EXPLORE_RESOURCES target="
-                                  + loc(firstRoute) + " arrival=" + loc(npc.getEntity().getLocation()));
+                                  + loc(firstRoute) + " arrival=" + loc(npc.getEntity().getLocation())
+                                  + " arrivedNativeState={" + nativeMotionSnapshot() + "}");
                               await("fourth-exploration-leg-start", 900,
                                   () -> integer(ahmet, "explorationAttempts") == 4
                                       && "EXPLORE_RESOURCES".equals(String.valueOf(fieldQuiet(ahmet, "navigationPurpose")))
@@ -362,7 +411,13 @@ public final class RuntimeGoalProbe extends JavaPlugin implements Listener {
                                                   "fourth exploration leg did not arrive or attempt count changed");
                                               int[] noFifthTicks = {0};
                                               await("no-fifth-exploration-attempt", 100,
-                                                  () -> ++noFifthTicks[0] >= 60, () -> {
+                                                  () -> {
+                                                    require(integer(ahmet, "explorationAttempts") <= 4
+                                                        && !"EXPLORE_RESOURCES".equals(String.valueOf(fieldQuiet(ahmet, "navigationPurpose")))
+                                                        && !npc.getNavigator().isNavigating(),
+                                                        "production admitted another exploration route after leg four");
+                                                    return ++noFifthTicks[0] >= 60;
+                                                  }, () -> {
                                                 try {
                                                   require(integer(ahmet, "explorationAttempts") <= 4
                                                       && !"EXPLORE_RESOURCES".equals(String.valueOf(fieldQuiet(ahmet, "navigationPurpose")))
@@ -443,7 +498,7 @@ public final class RuntimeGoalProbe extends JavaPlugin implements Listener {
                           "positive control did not resume the same task with a committed harvest");
                       getLogger().info("AHMET_GOAL_STAGE_PASS name=unlocked-positive-control-harvest sameTask=true"
                           + " collected=1 cargo=1 committedHistory=true liveProviderCalls=0");
-                      complete();
+                      runStage2MandatoryDelivery(taskId, eligible);
                     } catch (Throwable error) { fail(error); }
                   });
             } catch (Throwable error) { fail(error); }
@@ -451,6 +506,1249 @@ public final class RuntimeGoalProbe extends JavaPlugin implements Listener {
         } catch (Throwable error) { fail(error); }
       });
     } catch (Throwable error) { fail(error); }
+  }
+
+  private void runStage2MandatoryDelivery(String taskId, Block harvestedSource) {
+    try {
+      ahmet.getConfig().set("options.max-distance-from-home", 32);
+      Location controlledHome = new Location(world, 12.5, 120, 12.5);
+      require(controlledHome.getBlock().isPassable()
+          && controlledHome.clone().subtract(0, 1, 0).getBlock().getType() == Material.SMOOTH_STONE
+          && controlledHome.clone().add(0, 1, 0).getBlock().isPassable()
+          && npc.getEntity().getLocation().distance(controlledHome) > 4.0
+          && chestLocation.distance(controlledHome) > 4.0,
+          "controlled idle-home route destination is not safe or sufficiently far");
+      set(ahmet, "home", controlledHome);
+      set(ahmet, "protectedHome", null);
+      set(ahmet, "protectHomeRadius", 0);
+      invoke(ahmet, "persist");
+
+      int collected = integer(task, "collected");
+      int cargo = integer(task, "cargo");
+      require(bool(task, "active") && collected == 1 && cargo == 1
+          && string(task, "taskId").equals(taskId) && harvestedSource.getType() == Material.AIR,
+          "stage-two budget scenario did not start with the actual partial harvest");
+      set(task, "requested", collected); // Controlled readiness setup; cargo and collection remain production-earned.
+      int productiveCap = budgetControlOnly ? 0 : 32;
+      set(controller, "productiveTransitionCount", productiveCap);
+      require(bool(task, "active") && integer(task, "collected") == collected && integer(task, "cargo") == cargo,
+          "productive-budget setup changed task counters");
+      int chestBefore = countChest();
+      int depositedBefore = integer(task, "deposited");
+      long generationBefore = number(controller, "jobGeneration");
+      String budgetRouteStage = deliveryPathControlOnly ? "native-path-control-delivery-route"
+          : budgetControlOnly ? "budget-control-zero-native-route" : "budget32-mandatory-delivery-native-route";
+      String budgetFinishStage = budgetControlOnly
+          ? "budget-control-zero-delivery-finish" : "budget32-mandatory-delivery-finish";
+      String modeName = deliveryPathControlOnly ? "native-path-control"
+          : budgetControlOnly ? "budget-control-zero" : "budget32-mandatory-delivery";
+      getLogger().info("AHMET_GOAL_STAGE_START name=" + modeName
+          + " controlledReady=true productiveTransitions=" + productiveCap + " cargo=" + cargo);
+
+      await(budgetRouteStage, 180,
+          () -> npc.getNavigator().isNavigating() && "DELIVER_CARGO".equals(String.valueOf(controllerGoal())), () -> {
+            try {
+              require(integer(controller, "productiveTransitionCount") == productiveCap
+                  && bool(task, "active") && integer(task, "cargo") == cargo
+                  && integer(task, "collected") == collected && string(task, "taskId").equals(taskId),
+                  "productive cap changed before mandatory delivery started");
+              Location nativeTarget = assertNativeChestRoute();
+              getLogger().info("AHMET_GOAL_STAGE_PASS name=" + budgetRouteStage
+                  + " goal=DELIVER_CARGO nativeTarget=" + precise(nativeTarget)
+                  + " productiveTransitions=" + productiveCap + " controlledReadyState=true");
+              if (deliveryPathControlOnly) {
+                runNativeDeliveryPathControl(taskId, collected, cargo, chestBefore, depositedBefore,
+                    generationBefore, productiveCap, harvestedSource, nativeTarget);
+                return;
+              }
+              await(budgetFinishStage, 1200,
+                  () -> !bool(task, "active") && integer(task, "cargo") == 0, () -> {
+                    try {
+                      require(countChest() == chestBefore + cargo
+                          && integer(task, "deposited") == depositedBefore + cargo
+                          && integer(task, "collected") == collected && integer(task, "cargo") == 0
+                          && string(task, "taskId").equals(taskId)
+                          && number(controller, "jobGeneration") > generationBefore
+                          && integer(controller, "productiveTransitionCount") == 0
+                          && harvestedSource.getType() == Material.AIR,
+                          "mandatory delivery at the productive cap did not conserve the harvested item");
+                      getLogger().info("AHMET_GOAL_STAGE_PASS name=" + budgetFinishStage + " deposited="
+                          + cargo + " productiveTransitionsBeforeFinish=" + productiveCap
+                          + " resetOnTaskGeneration=true sourceUnchanged=true");
+                      if (budgetControlOnly) {
+                        completeBudgetControl(taskId, productiveCap);
+                      } else {
+                        createIdleHomeRoute("idle-home-route-for-invalid-command", this::testRejectedAdmissionPreservesHomeRoute);
+                      }
+                    } catch (Throwable error) { fail(error); }
+                  });
+            } catch (Throwable error) { fail(error); }
+          });
+    } catch (Throwable error) { fail(error); }
+  }
+
+  private void completeBudgetControl(String taskId, int productiveCap) {
+    require(teleports == 0 && walkedTicks > 0 && maxStep <= 1.5,
+        "zero-cap delivery control violated the normal movement oracle");
+    if (terminal) return;
+    terminal = true;
+    if (deadline != null) deadline.cancel();
+    stopFixtureAdvancement();
+    getLogger().info("AHMET_GOAL_BUDGET_CONTROL_RESULT outcome=actual-delivery completed=true"
+        + " taskId=" + taskId + " productiveTransitionsAtAdmission=" + productiveCap
+        + " cargo=" + integer(task, "cargo") + " deposited=" + integer(task, "deposited")
+        + " liveProviderCalls=0 overallAcceptance=false");
+    Bukkit.getScheduler().runTaskLater(this, Bukkit::shutdown, 2L);
+  }
+
+  /** Diagnostic only: hold the plugin step, observe one Citizens chest route, then one adjacent standing route if stalled. */
+  private void runNativeDeliveryPathControl(String taskId, int collected, int cargo, int chestBefore,
+      int depositedBefore, long generationBefore, int productiveCap, Block harvestedSource,
+      Location chestNativeTarget) {
+    try {
+      require(deliveryPathControlOnly && !budgetControlOnly && productiveCap == 32,
+          "native path control must use its dedicated 32-cap diagnostic mode");
+      require(bool(task, "active") && Boolean.parseBoolean(safeReadyToDeliver()) && integer(task, "cargo") == cargo
+          && integer(task, "collected") == collected && string(task, "taskId").equals(taskId)
+          && integer(controller, "productiveTransitionCount") == productiveCap,
+          "native path control did not enter with the accepted delivery state");
+      require(chestNativeTarget != null && sameBlock(chestNativeTarget, npc.getNavigator().getTargetAsLocation()),
+          "native path control lost the production-created chest target before observation");
+      Location chestStart = npc.getEntity().getLocation().clone();
+      Location pluginChestTarget = chestLocation.clone().add(0.5, 0, 0.5);
+      double chestDistanceAtStart = chestStart.distance(chestNativeTarget);
+      double chestWalkedAtStart = walked;
+      set(ahmet, "deciding", true); // Pauses only the production controller loop; Citizens navigation continues.
+      getLogger().info("AHMET_GOAL_NATIVE_PATH_CONTROL_START taskId=" + taskId
+          + " currentGoal=" + controllerGoal() + " purpose=" + fieldQuiet(ahmet, "navigationPurpose")
+          + " start=" + precise(chestStart) + " nativeChestTarget=" + precise(chestNativeTarget)
+          + " productiveTransitions=" + productiveCap + " pause=deciding-true teleport=false");
+      int[] chestTicks = {0};
+      await("native-path-chest-target-observe", 100, () -> {
+        chestTicks[0]++;
+        assertNativePathControlInvariants(taskId, collected, cargo, chestBefore, depositedBefore,
+            generationBefore, productiveCap, harvestedSource, pluginChestTarget, chestNativeTarget);
+        if (chestTicks[0] % 20 == 0 || chestTicks[0] == 100) {
+          logNativePathControlSample("chest", chestTicks[0], chestNativeTarget);
+        }
+        return chestTicks[0] >= 100;
+      }, () -> {
+        try {
+          Location chestEnd = npc.getEntity().getLocation().clone();
+          double sampledWalking = walked - chestWalkedAtStart;
+          double distanceToChestTarget = chestEnd.distance(chestNativeTarget);
+          double targetDistanceProgress = chestDistanceAtStart - distanceToChestTarget;
+          String chestOutcome = distanceToChestTarget <= 2.5 ? "arrived-near-target"
+              : sampledWalking > 0.25 ? targetDistanceProgress > 0.25
+                  ? "observed-progress-toward-target" : "observed-movement"
+                  : "no-sampled-movement-100ticks";
+          require(bool(task, "active") && integer(task, "cargo") == cargo
+              && integer(task, "collected") == collected && integer(task, "deposited") == depositedBefore
+              && string(task, "taskId").equals(taskId)
+              && integer(controller, "productiveTransitionCount") == productiveCap
+              && countChest() == chestBefore && harvestedSource.getType() == Material.AIR
+              && number(controller, "jobGeneration") == generationBefore && teleports == 0,
+              "chest route control changed task, cargo, chest, source, generation, or teleport state");
+          getLogger().info("AHMET_GOAL_NATIVE_PATH_CONTROL_CHEST_RESULT outcome=" + chestOutcome
+              + " ticks=" + chestTicks[0] + " start=" + precise(chestStart) + " end=" + precise(chestEnd)
+              + " sampledWalking=" + numberText(sampledWalking)
+              + " targetDistanceProgress=" + numberText(targetDistanceProgress)
+              + " distanceToTarget=" + numberText(distanceToChestTarget)
+              + " nativeNavigating=" + npc.getNavigator().isNavigating()
+              + " nativeTarget=" + precise(npc.getNavigator().getTargetAsLocation()));
+          if (!"no-sampled-movement-100ticks".equals(chestOutcome)) {
+            completeNativePathControl(taskId, productiveCap, chestOutcome, "not-run");
+            return;
+          }
+          runAdjacentStandingPathControl(taskId, collected, cargo, chestBefore, depositedBefore,
+              generationBefore, productiveCap, harvestedSource, chestNativeTarget, chestStart);
+        } catch (Throwable error) { fail(error); }
+      });
+    } catch (Throwable error) { fail(error); }
+  }
+
+  private void runAdjacentStandingPathControl(String taskId, int collected, int cargo, int chestBefore,
+      int depositedBefore, long generationBefore, int productiveCap, Block harvestedSource,
+      Location chestNativeTarget, Location originalPosition) {
+    try {
+      Location adjacent = new Location(world, chestLocation.getBlockX() + 1.5,
+          chestLocation.getBlockY(), chestLocation.getBlockZ() + 0.5);
+      Block floor = adjacent.clone().subtract(0, 1, 0).getBlock();
+      Block feet = adjacent.getBlock();
+      Block head = adjacent.clone().add(0, 1, 0).getBlock();
+      require(floor.getType().isSolid() && feet.isPassable() && head.isPassable()
+          && !sameBlock(adjacent, chestLocation),
+          "adjacent standing control location is not a clear supported cell: " + precise(adjacent));
+      npc.getNavigator().cancelNavigation();
+      npc.getNavigator().getDefaultParameters().destinationTeleportMargin(-1).stationaryTicks(-1);
+      npc.getNavigator().setTarget(adjacent);
+      Location adjacentNativeTarget = npc.getNavigator().getTargetAsLocation();
+      require(adjacentNativeTarget != null && sameLocationWithin(adjacent, adjacentNativeTarget, 0.01),
+          "Citizens did not retain the explicit adjacent standing target; actual=" + precise(adjacentNativeTarget));
+      Location adjacentStart = npc.getEntity().getLocation().clone();
+      Location pluginChestTarget = chestLocation.clone().add(0.5, 0, 0.5);
+      double adjacentDistanceAtStart = adjacentStart.distance(adjacentNativeTarget);
+      double adjacentWalkedAtStart = walked;
+      getLogger().info("AHMET_GOAL_NATIVE_PATH_CONTROL_ADJACENT_START taskId=" + taskId
+          + " from=" + precise(adjacentStart) + " target=" + precise(adjacentNativeTarget)
+          + " floor=" + floor.getType() + " feet=" + feet.getType() + " head=" + head.getType()
+          + " afterChestOutcome=no-sampled-movement-100ticks teleport=false");
+      int[] adjacentTicks = {0};
+      await("native-path-adjacent-standing-observe", 100, () -> {
+        adjacentTicks[0]++;
+        assertNativePathControlInvariants(taskId, collected, cargo, chestBefore, depositedBefore,
+            generationBefore, productiveCap, harvestedSource, pluginChestTarget, adjacentNativeTarget);
+        if (adjacentTicks[0] % 20 == 0 || adjacentTicks[0] == 100) {
+          logNativePathControlSample("adjacent", adjacentTicks[0], adjacentNativeTarget);
+        }
+        return adjacentTicks[0] >= 100;
+      }, () -> {
+        try {
+          Location adjacentEnd = npc.getEntity().getLocation().clone();
+          double sampledWalking = walked - adjacentWalkedAtStart;
+          double remaining = adjacentEnd.distance(adjacentNativeTarget);
+          double targetDistanceProgress = adjacentDistanceAtStart - remaining;
+          String outcome = remaining <= 1.5 ? "arrived-near-target"
+              : sampledWalking > 0.25 ? targetDistanceProgress > 0.25
+                  ? "observed-progress-toward-target" : "observed-movement"
+                  : "no-sampled-movement-100ticks";
+          require(bool(task, "active") && integer(task, "cargo") == cargo
+              && integer(task, "collected") == collected && integer(task, "deposited") == depositedBefore
+              && string(task, "taskId").equals(taskId)
+              && integer(controller, "productiveTransitionCount") == productiveCap
+              && countChest() == chestBefore && harvestedSource.getType() == Material.AIR
+              && number(controller, "jobGeneration") == generationBefore && teleports == 0
+              && bool(ahmet, "deciding"),
+              "adjacent route control changed task, cargo, chest, source, generation, pause, or teleport state");
+          getLogger().info("AHMET_GOAL_NATIVE_PATH_CONTROL_ADJACENT_RESULT outcome=" + outcome
+              + " ticks=" + adjacentTicks[0] + " start=" + precise(adjacentStart) + " end=" + precise(adjacentEnd)
+              + " sampledWalking=" + numberText(sampledWalking)
+              + " targetDistanceProgress=" + numberText(targetDistanceProgress)
+              + " distanceToTarget=" + numberText(remaining)
+              + " nativeNavigating=" + npc.getNavigator().isNavigating()
+              + " nativeTarget=" + precise(npc.getNavigator().getTargetAsLocation())
+              + " originalPosition=" + precise(originalPosition) + " chestTarget=" + precise(chestNativeTarget));
+          if ("no-sampled-movement-100ticks".equals(outcome)) {
+            runCitizensPathfinderControl(taskId, collected, cargo, chestBefore, depositedBefore,
+                generationBefore, productiveCap, harvestedSource, chestNativeTarget, adjacent,
+                originalPosition);
+          } else {
+            completeNativePathControl(taskId, productiveCap, "no-sampled-movement-100ticks", outcome);
+          }
+        } catch (Throwable error) { fail(error); }
+      });
+    } catch (Throwable error) { fail(error); }
+  }
+
+  /** Orthogonal control: same adjacent cell, Citizens A* planner instead of Minecraft path strategy. */
+  private void runCitizensPathfinderControl(String taskId, int collected, int cargo, int chestBefore,
+      int depositedBefore, long generationBefore, int productiveCap, Block harvestedSource,
+      Location chestNativeTarget, Location adjacent, Location originalPosition) {
+    try {
+      int iterationsPerTick = readCitizensAStarSetting("CITIZENS_PATHFINDER_ASTAR_ITERATIONS_PER_TICK");
+      int maxIterations = readCitizensAStarSetting("CITIZENS_PATHFINDER_MAXIMUM_ASTAR_ITERATIONS");
+      require(iterationsPerTick > 0 && iterationsPerTick <= CITIZENS_ASTAR_DEFAULT_ITERATIONS_PER_TICK
+          && maxIterations > 0 && maxIterations <= CITIZENS_ASTAR_DEFAULT_MAX_ITERATIONS,
+          "Citizens A* effective work settings exceed the pinned finite defaults; perTick=" + iterationsPerTick
+              + " maxIterations=" + maxIterations + " caps=" + CITIZENS_ASTAR_DEFAULT_ITERATIONS_PER_TICK
+              + "/" + CITIZENS_ASTAR_DEFAULT_MAX_ITERATIONS);
+      var navigator = npc.getNavigator();
+      var defaults = navigator.getDefaultParameters();
+      originalControlPathfinder = defaults.pathfinderType();
+      require(originalControlPathfinder == PathfinderType.MINECRAFT
+          && defaults.destinationTeleportMargin() == -1 && defaults.stationaryTicks() == -1,
+          "alternate pathfinder control requires the existing no-teleport MINECRAFT baseline; pathfinder="
+              + originalControlPathfinder + " teleportMargin=" + defaults.destinationTeleportMargin()
+              + " stationaryTicks=" + defaults.stationaryTicks());
+      require(bool(ahmet, "deciding") && npc.getEntity().getLocation().distanceSquared(originalPosition) < 0.0001
+          && integer(task, "cargo") == cargo && integer(task, "collected") == collected
+          && string(task, "taskId").equals(taskId),
+          "alternate pathfinder control did not retain the stationary adjacent-route state");
+
+      pathfinderComparisonStarted = true;
+      navigator.cancelNavigation();
+      require(!navigator.isNavigating() && navigator.getLocalParameters() == defaults,
+          "Citizens did not return to default parameters after cancelling the native route");
+      // Carry the existing fail-closed navigation margins forward; the only changed parameter is pathfinderType.
+      defaults.pathfinderType(PathfinderType.CITIZENS);
+      pathfinderTypeChanged = true;
+      navigator.setTarget(adjacent);
+      Location alternateTarget = navigator.getTargetAsLocation();
+      Object strategy = navigator.getPathStrategy();
+      require(navigator.isNavigating() && alternateTarget != null
+          && sameLocationWithin(adjacent, alternateTarget, 0.01)
+          && strategy != null && "net.citizensnpcs.npc.ai.AStarNavigationStrategy".equals(strategy.getClass().getName())
+          && navigator.getLocalParameters().pathfinderType() == PathfinderType.CITIZENS
+          && defaults.destinationTeleportMargin() == -1 && defaults.stationaryTicks() == -1,
+          "Citizens A* did not preserve the adjacent target, strategy, or no-teleport margins");
+
+      Location pluginChestTarget = chestLocation.clone().add(0.5, 0, 0.5);
+      Location alternateStart = npc.getEntity().getLocation().clone();
+      double alternateDistanceAtStart = alternateStart.distance(alternateTarget);
+      double alternateWalkedAtStart = walked;
+      getLogger().info("AHMET_GOAL_PATHFINDER_COMPARISON_START taskId=" + taskId
+          + " baselinePathfinder=MINECRAFT alternatePathfinder=CITIZENS strategy=" + strategy.getClass().getName()
+          + " from=" + precise(alternateStart) + " target=" + precise(alternateTarget)
+          + " astarPerTick=" + iterationsPerTick + " astarMaxIterations=" + maxIterations
+          + " teleportMargin=" + defaults.destinationTeleportMargin()
+          + " stationaryTicks=" + defaults.stationaryTicks() + " parameterChanges=pathfinderType-only");
+      int[] alternateTicks = {0};
+      int[] stoppedAtTick = {-1};
+      await("native-path-citizens-astar-adjacent-observe", 100, () -> {
+        alternateTicks[0]++;
+        assertNativePathControlInvariants(taskId, collected, cargo, chestBefore, depositedBefore,
+            generationBefore, productiveCap, harvestedSource, pluginChestTarget, alternateTarget);
+        boolean navigating = navigator.isNavigating();
+        PathStrategy currentStrategy = navigator.getPathStrategy();
+        require(navigator.getLocalParameters().pathfinderType() == PathfinderType.CITIZENS
+            && (!navigating || (currentStrategy == strategy && currentStrategy != null
+                && "net.citizensnpcs.npc.ai.AStarNavigationStrategy".equals(currentStrategy.getClass().getName())))
+            && defaults.destinationTeleportMargin() == -1 && defaults.stationaryTicks() == -1,
+            "Citizens A* route or no-teleport path parameters changed during observation");
+        if (!navigating && stoppedAtTick[0] < 0) {
+          stoppedAtTick[0] = alternateTicks[0];
+          getLogger().info("AHMET_GOAL_PATHFINDER_COMPARISON_ALT_STOPPED tick=" + stoppedAtTick[0]
+              + " position=" + precise(npc.getEntity().getLocation())
+              + " distanceToTarget=" + numberText(npc.getEntity().getLocation().distance(alternateTarget))
+              + " strategy=" + (currentStrategy == null ? "null" : currentStrategy.getClass().getName())
+              + " continueObservingUntilTick=100");
+        }
+        if (alternateTicks[0] % 20 == 0 || alternateTicks[0] == 100) {
+          logNativePathControlSample("citizens-astar-adjacent", alternateTicks[0], alternateTarget);
+        }
+        return alternateTicks[0] >= 100;
+      }, () -> {
+        try {
+          Location alternateEnd = npc.getEntity().getLocation().clone();
+          double sampledWalking = walked - alternateWalkedAtStart;
+          double remaining = alternateEnd.distance(alternateTarget);
+          double targetDistanceProgress = alternateDistanceAtStart - remaining;
+          boolean routeStillActive = navigator.isNavigating() && navigator.getPathStrategy() == strategy;
+          String outcome = remaining <= 1.5 ? "arrived-near-target"
+              : sampledWalking > 0.25 ? targetDistanceProgress > 0.25
+                  ? "observed-progress-toward-target" : "observed-movement"
+              : stoppedAtTick[0] >= 0 ? "path-stopped-before-target" : "no-sampled-movement-100ticks";
+          assertNativePathControlInvariants(taskId, collected, cargo, chestBefore, depositedBefore,
+              generationBefore, productiveCap, harvestedSource, pluginChestTarget, alternateTarget);
+          require(alternateTicks[0] == 100 && integer(task, "cargo") == cargo
+              && integer(task, "collected") == collected && integer(task, "deposited") == depositedBefore
+              && countChest() == chestBefore && harvestedSource.getType() == Material.AIR
+              && number(controller, "jobGeneration") == generationBefore && teleports == 0,
+              "Citizens A* comparison changed task, item, world, generation, or teleport state");
+          getLogger().info("AHMET_GOAL_PATHFINDER_COMPARISON_ALT_RESULT engine=CITIZENS"
+              + " outcome=" + outcome + " ticks=" + alternateTicks[0]
+              + " start=" + precise(alternateStart) + " end=" + precise(alternateEnd)
+              + " target=" + precise(alternateTarget) + " sampledWalking=" + numberText(sampledWalking)
+              + " targetDistanceProgress=" + numberText(targetDistanceProgress)
+              + " astarPerTick=" + iterationsPerTick + " astarMaxIterations=" + maxIterations
+              + " taskAndWorldUnchanged=true teleports=" + teleports);
+          if ("no-sampled-movement-100ticks".equals(outcome) && routeStillActive) {
+            runActivationWindowControl(taskId, collected, cargo, chestBefore, depositedBefore,
+                generationBefore, productiveCap, harvestedSource, pluginChestTarget, alternateTarget,
+                (PathStrategy) strategy, iterationsPerTick, maxIterations);
+          } else {
+            if ("no-sampled-movement-100ticks".equals(outcome)) outcome = "path-stopped-before-activation-control";
+            completePathfinderComparisonControl(taskId, productiveCap, iterationsPerTick, maxIterations,
+                "no-sampled-movement-100ticks", "no-sampled-movement-100ticks", outcome);
+          }
+        } catch (Throwable error) { fail(error); }
+      });
+    } catch (Throwable error) { fail(error); }
+  }
+
+  private int readCitizensAStarSetting(String settingName) throws Exception {
+    ClassLoader citizensLoader = NPC.class.getClassLoader();
+    Class<?> settingType = Class.forName("net.citizensnpcs.Settings$Setting", false, citizensLoader);
+    Object setting = settingType.getField(settingName).get(null);
+    return ((Number) settingType.getMethod("asInt").invoke(setting)).intValue();
+  }
+
+  /** The only activation mutation in this opt-in disposable control: extend the pinned Paper field. */
+  private void runActivationWindowControl(String taskId, int collected, int cargo, int chestBefore,
+      int depositedBefore, long generationBefore, int productiveCap, Block harvestedSource,
+      Location expectedPluginTarget, Location expectedNativeTarget, PathStrategy expectedStrategy,
+      int iterationsPerTick, int maxIterations) {
+    try {
+      var navigator = npc.getNavigator();
+      require(deliveryPathControlOnly && pathfinderComparisonStarted && pathfinderTypeChanged
+          && bool(ahmet, "deciding") && navigator.isNavigating()
+          && navigator.getPathStrategy() == expectedStrategy
+          && "net.citizensnpcs.npc.ai.AStarNavigationStrategy".equals(expectedStrategy.getClass().getName())
+          && navigator.getLocalParameters().pathfinderType() == PathfinderType.CITIZENS
+          && sameLocationWithin(expectedNativeTarget, navigator.getTargetAsLocation(), 0.01),
+          "activation control requires the same active Citizens A* adjacent route");
+      require(bool(task, "active") && string(task, "taskId").equals(taskId)
+          && integer(task, "collected") == collected && integer(task, "cargo") == cargo
+          && integer(task, "deposited") == depositedBefore && countChest() == chestBefore
+          && harvestedSource.getType() == Material.AIR && number(controller, "jobGeneration") == generationBefore
+          && integer(controller, "productiveTransitionCount") == productiveCap && teleports == 0,
+          "activation control did not preserve the ready-cargo task and source state");
+
+      ClassLoader paperLoader = NPC.class.getClassLoader();
+      Class<?> nmsEntityType = Class.forName("net.minecraft.world.entity.Entity", false, paperLoader);
+      Class<?> serverType = Class.forName("net.minecraft.server.MinecraftServer", false, paperLoader);
+      Object handle = getPaperEntityHandle(npc.getEntity());
+      var activatedTickField = nmsEntityType.getField("activatedTick");
+      int serverTick = serverType.getField("currentTick").getInt(null);
+      boolean defaultActivation = nmsEntityType.getField("defaultActivationState").getBoolean(handle);
+      int entityTickCount = nmsEntityType.getField("tickCount").getInt(handle);
+      long currentActivatedTick = activatedTickField.getLong(handle);
+      boolean temporarilyActive = nmsEntityType.getField("isTemporarilyActive").getBoolean(handle);
+      Object activationType = nmsEntityType.getField("activationType").get(handle);
+      require(!defaultActivation && entityTickCount >= 200 && currentActivatedTick < serverTick,
+          "activation comparison is inconclusive for default or startup-active entity state");
+      originalActivationTick = currentActivatedTick;
+      activationControlTargetTick = activationShamControlOnly
+          ? currentActivatedTick : (long) serverTick + 200L;
+      activationControlStarted = true;
+      if (!activationShamControlOnly) {
+        activationTickChanged = true; // Cleanup restores even if reflection write/verification throws midway.
+        activatedTickField.setLong(handle, activationControlTargetTick);
+      }
+      require(activatedTickField.getLong(handle) == activationControlTargetTick,
+          "Paper activatedTick control value did not match its expected value");
+
+      Location start = npc.getEntity().getLocation().clone();
+      double distanceAtStart = start.distance(expectedNativeTarget);
+      double walkedAtStart = walked;
+      getLogger().info(activationControlMarker("START") + " taskId=" + taskId
+          + " engine=CITIZENS strategy=AStarNavigationStrategy"
+          + " start=" + precise(start) + " target=" + precise(expectedNativeTarget)
+          + " originalActivatedTick=" + originalActivationTick + " serverTick=" + serverTick
+          + " mode=" + (activationShamControlOnly ? "SHAM" : "EXTENDED")
+          + " activatedTickWrite=" + (activationShamControlOnly ? "none" : "currentTickPlus200")
+          + " assignedActivatedTick=" + activationControlTargetTick
+          + " activationType=" + activationType + " defaultActivation=" + defaultActivation
+          + " temporarilyActiveBeforeWrite=" + temporarilyActive + " entityTickCount=" + entityTickCount
+          + " deciding=true otherChanges=none teleport=false");
+
+      int[] ticks = {0};
+      int[] pathStoppedAt = {-1};
+      int[] activationExpiredAt = {-1};
+      await("native-path-activation-window-observe", 100, () -> {
+        ticks[0]++;
+        assertNativePathControlInvariants(taskId, collected, cargo, chestBefore, depositedBefore,
+            generationBefore, productiveCap, harvestedSource, expectedPluginTarget, expectedNativeTarget);
+        boolean navigating = navigator.isNavigating();
+        PathStrategy currentStrategy = navigator.getPathStrategy();
+        require(navigator.getLocalParameters().pathfinderType() == PathfinderType.CITIZENS
+            && (!navigating || (currentStrategy == expectedStrategy
+                && sameLocationWithin(expectedNativeTarget, navigator.getTargetAsLocation(), 0.01)))
+            && navigator.getDefaultParameters().destinationTeleportMargin() == -1
+            && navigator.getDefaultParameters().stationaryTicks() == -1,
+            "activation control replaced the active path or changed Citizens route parameters");
+        if (!navigating && pathStoppedAt[0] < 0) {
+          pathStoppedAt[0] = ticks[0];
+          getLogger().info(activationControlMarker("PATH_STOPPED") + " tick=" + ticks[0]
+              + " position=" + precise(npc.getEntity().getLocation())
+              + " distanceToTarget=" + numberText(npc.getEntity().getLocation().distance(expectedNativeTarget))
+              + " continueObservingUntilTick=100 noReissue=true");
+        }
+        boolean activationStillFuture;
+        try { activationStillFuture = paperActivationWindowIsFuture(npc.getEntity()); }
+        catch (Exception error) { throw new IllegalStateException("could not read Paper activation window", error); }
+        if (!activationStillFuture && activationExpiredAt[0] < 0) {
+          activationExpiredAt[0] = ticks[0];
+          getLogger().warning(activationControlMarker("WINDOW_EXPIRED") + " tick=" + ticks[0]
+              + " continueObservingUntilTick=100");
+        }
+        if (ticks[0] % 20 == 0 || ticks[0] == 100) {
+          logNativePathControlSample(activationShamControlOnly
+              ? "activation-sham-astar" : "activation-extended-astar", ticks[0], expectedNativeTarget);
+        }
+        return ticks[0] >= 100;
+      }, () -> {
+        try {
+          Location end = npc.getEntity().getLocation().clone();
+          double sampledWalking = walked - walkedAtStart;
+          double remaining = end.distance(expectedNativeTarget);
+          double targetProgress = distanceAtStart - remaining;
+          String outcome = remaining <= 1.5 ? "arrived-near-target"
+              : sampledWalking > 0.25 ? targetProgress > 0.25
+                  ? "observed-progress-toward-target" : "observed-movement"
+              : "no-sampled-movement-100ticks";
+          require(ticks[0] == 100 && bool(task, "active") && string(task, "taskId").equals(taskId)
+              && integer(task, "collected") == collected && integer(task, "cargo") == cargo
+              && integer(task, "deposited") == depositedBefore && countChest() == chestBefore
+              && harvestedSource.getType() == Material.AIR && number(controller, "jobGeneration") == generationBefore
+              && integer(controller, "productiveTransitionCount") == productiveCap
+              && "DELIVER_CARGO".equals(String.valueOf(controllerGoal()))
+              && sameLocationWithin(expectedPluginTarget,
+                  (Location) fieldQuiet(ahmet, "navigationGoal"), 0.0001)
+              && !bool(ahmet, "recoveryBlocked") && "false".equals(pendingOperationsSafe())
+              && teleports == 0 && maxStep <= 1.5,
+              "activation window changed task, cargo, source, chest, goal, journal, recovery, or movement bounds");
+          getLogger().info(activationControlMarker("OBSERVATION") + " outcome=" + outcome
+              + " ticks=" + ticks[0] + " pathStoppedAtTick=" + pathStoppedAt[0]
+              + " activationExpiredAtTick=" + activationExpiredAt[0]
+              + " start=" + precise(start) + " end=" + precise(end)
+              + " target=" + precise(expectedNativeTarget) + " sampledWalking=" + numberText(sampledWalking)
+              + " targetProgress=" + numberText(targetProgress)
+              + " originalActivatedTick=" + originalActivationTick
+              + " mode=" + (activationShamControlOnly ? "SHAM" : "EXTENDED")
+              + " activatedTickWrite=" + (activationShamControlOnly ? "none" : "currentTickPlus200")
+              + " assignedActivatedTick=" + activationControlTargetTick
+              + " cargo=" + integer(task, "cargo") + " deposited=" + integer(task, "deposited")
+              + " teleports=" + teleports + " overallAcceptance=false");
+          completeActivationControl(taskId, productiveCap, iterationsPerTick, maxIterations, outcome,
+              pathStoppedAt[0], activationExpiredAt[0]);
+        } catch (Throwable error) { fail(error); }
+      });
+    } catch (Throwable error) { fail(error); }
+  }
+
+  private Object getPaperEntityHandle(org.bukkit.entity.Entity entity) throws Exception {
+    ClassLoader paperLoader = NPC.class.getClassLoader();
+    Class<?> impl = Class.forName("net.citizensnpcs.nms.v1_21_R5.util.NMSImpl", false, paperLoader);
+    return impl.getMethod("getHandle", org.bukkit.entity.Entity.class).invoke(null, entity);
+  }
+
+  private boolean paperActivationWindowIsFuture(org.bukkit.entity.Entity entity) throws Exception {
+    ClassLoader paperLoader = NPC.class.getClassLoader();
+    Class<?> entityType = Class.forName("net.minecraft.world.entity.Entity", false, paperLoader);
+    Class<?> serverType = Class.forName("net.minecraft.server.MinecraftServer", false, paperLoader);
+    Object handle = getPaperEntityHandle(entity);
+    return entityType.getField("activatedTick").getLong(handle)
+        >= serverType.getField("currentTick").getInt(null);
+  }
+
+  private void assertNativePathControlInvariants(String taskId, int collected, int cargo, int chestBefore,
+      int depositedBefore, long generationBefore, int productiveCap, Block harvestedSource,
+      Location expectedPluginTarget, Location expectedNativeTarget) {
+    Location currentPluginTarget = (Location) fieldQuiet(ahmet, "navigationGoal");
+    boolean navigating = npc.getNavigator().isNavigating();
+    Location currentNativeTarget = npc.getNavigator().getTargetAsLocation();
+    require(bool(task, "active") && string(task, "taskId").equals(taskId)
+        && integer(task, "collected") == collected && integer(task, "cargo") == cargo
+        && integer(task, "deposited") == depositedBefore && countChest() == chestBefore
+        && chestLocation.getBlock().getType() == Material.CHEST && harvestedSource.getType() == Material.AIR
+        && number(controller, "jobGeneration") == generationBefore
+        && integer(controller, "productiveTransitionCount") == productiveCap
+        && "DELIVER_CARGO".equals(String.valueOf(controllerGoal()))
+        && "DELIVER_CARGO".equals(String.valueOf(fieldQuiet(ahmet, "navigationPurpose")))
+        && sameLocationWithin(expectedPluginTarget, currentPluginTarget, 0.0001)
+        && (!navigating || sameLocationWithin(expectedNativeTarget, currentNativeTarget, 0.01))
+        && bool(ahmet, "deciding") && !bool(ahmet, "recoveryBlocked")
+        && "false".equals(pendingOperationsSafe()) && teleports == 0,
+        "paused native path control changed task, cargo, chest, source, generation, route target, journal, or teleport state");
+  }
+
+  private void logNativePathControlSample(String route, int ticks, Location expectedNativeTarget) {
+    Location current = npc.getEntity().getLocation();
+    boolean navigating = npc.getNavigator().isNavigating();
+    Location actualNativeTarget = npc.getNavigator().getTargetAsLocation();
+    String nativeTargetStatus = !navigating ? "navigator-stopped"
+        : sameLocationWithin(expectedNativeTarget, actualNativeTarget, 0.01) ? "matches-expected" : "mismatch";
+    getLogger().info("AHMET_GOAL_NATIVE_PATH_CONTROL_SAMPLE route=" + route + " ticks=" + ticks
+        + " position=" + precise(current) + " currentGoal=" + controllerGoal()
+        + " purpose=" + fieldQuiet(ahmet, "navigationPurpose")
+        + " pluginTarget=" + precise((Location) fieldQuiet(ahmet, "navigationGoal"))
+        + " nativeNavigating=" + navigating
+        + " nativeTarget=" + precise(actualNativeTarget)
+        + " nativeTargetStatus=" + nativeTargetStatus
+        + " deciding=" + bool(ahmet, "deciding")
+        + " nativeState={" + nativeMotionSnapshot() + "}");
+  }
+
+  /** Bounded, read-only Paper/Citizens state captured on the server thread. */
+  private String nativeMotionSnapshot() {
+    if (npc == null || !npc.isSpawned()) return "npc=unspawned";
+    var entity = npc.getEntity();
+    var navigator = npc.getNavigator();
+    PathStrategy strategy = navigator.getPathStrategy();
+    NavigatorParameters parameters = navigator.getLocalParameters();
+    if (parameters == null) parameters = navigator.getDefaultParameters();
+    int pathPoints = 0;
+    boolean pathTruncated = false;
+    var path = strategy == null ? null : strategy.getPath();
+    boolean pathAvailable = path != null;
+    if (pathAvailable) {
+      var iterator = path.iterator();
+      while (iterator.hasNext() && pathPoints < 32) { iterator.next(); pathPoints++; }
+      pathTruncated = iterator.hasNext();
+    }
+    Mob mob = entity instanceof Mob value ? value : null;
+    var chunk = entity.getChunk();
+    var velocity = entity.getVelocity();
+    return "entityId=" + entity.getEntityId()
+        + ",valid=" + entity.isValid() + ",dead=" + entity.isDead() + ",ticking=" + entity.isTicking()
+        + ",onGround=" + entity.isOnGround() + ",gravity=" + entity.hasGravity()
+        + ",velocity=" + rounded(velocity.getX()) + "/" + rounded(velocity.getY()) + "/" + rounded(velocity.getZ())
+        + ",vehicle=" + entity.isInsideVehicle() + ",frozen=" + entity.isFrozen() + ",freezeTicks=" + entity.getFreezeTicks()
+        + ",ai=" + (mob != null && mob.hasAI())
+        + ",aware=" + (mob != null && mob.isAware())
+        + ",chunk=" + chunk.getX() + "/" + chunk.getZ() + ":loaded=" + chunk.isLoaded()
+        + ":entitiesLoaded=" + chunk.isEntitiesLoaded() + ":loadLevel=" + chunk.getLoadLevel()
+        + ",navigatorPaused=" + navigator.isPaused() + ",navigating=" + navigator.isNavigating()
+        + ",strategy=" + (strategy == null ? "null" : strategy.getClass().getName())
+        + ",strategyTarget=" + precise(strategy == null ? null : strategy.getTargetAsLocation())
+        + ",strategyDestination=" + precise(strategy == null ? null : strategy.getCurrentDestination())
+        + ",strategyCancel=" + (strategy == null ? "null" : strategy.getCancelReason())
+        + ",moveControl={" + nativeMoveControlSnapshot(entity) + "}"
+        + ",activation={" + nativeActivationSnapshot(entity) + "}"
+        + ",movementSpeed={" + movementSpeedSnapshot(mob) + "}"
+        + ",collision={" + collisionSnapshot(entity) + "}"
+        + ",pathAvailable=" + pathAvailable + ",pathPointsObserved=" + pathPoints + ",pathTruncated=" + pathTruncated
+        + ",targetType=" + navigator.getTargetType()
+        + ",speed=" + rounded(parameters.speed()) + ",baseSpeed=" + rounded(parameters.baseSpeed())
+        + ",speedModifier=" + rounded(parameters.speedModifier())
+        + ",stationaryTicks=" + parameters.stationaryTicks()
+        + ",pathfinder=" + parameters.pathfinderType();
+  }
+
+  /** Read Paper's pinned activation-range fields without invoking its state-mutating checkIfActive method. */
+  private String nativeActivationSnapshot(org.bukkit.entity.Entity entity) {
+    try {
+      ClassLoader paperLoader = NPC.class.getClassLoader();
+      Class<?> impl = Class.forName("net.citizensnpcs.nms.v1_21_R5.util.NMSImpl", false, paperLoader);
+      Object handle = impl.getMethod("getHandle", org.bukkit.entity.Entity.class).invoke(null, entity);
+      Class<?> entityType = Class.forName("net.minecraft.world.entity.Entity", false, paperLoader);
+      Class<?> serverType = Class.forName("net.minecraft.server.MinecraftServer", false, paperLoader);
+      long activatedTick = entityType.getField("activatedTick").getLong(handle);
+      int currentTick = serverType.getField("currentTick").getInt(null);
+      return "available=true,type=" + entityType.getField("activationType").get(handle)
+          + ",default=" + entityType.getField("defaultActivationState").getBoolean(handle)
+          + ",activatedTick=" + activatedTick + ",serverTick=" + currentTick
+          + ",temporarilyActive=" + entityType.getField("isTemporarilyActive").getBoolean(handle)
+          + ",entityTickCount=" + entityType.getField("tickCount").getInt(handle);
+    } catch (ReflectiveOperationException | LinkageError error) {
+      return "available=false,reason=" + error.getClass().getSimpleName();
+    }
+  }
+
+  /** Read-only view of the task route guard and Citizens activation metadata. */
+  private String activationRouteSnapshot() {
+    if (npc == null || !npc.isSpawned()) return "available=false,reason=npc-unspawned";
+    try {
+      var metadata = npc.data();
+      boolean hasRange = metadata.has(NPC.Metadata.ACTIVATION_RANGE);
+      Object range = metadata.get(NPC.Metadata.ACTIVATION_RANGE, null);
+      Object guard = fieldQuiet(ahmet, "activationRangeGuard");
+      Object route = fieldQuiet(ahmet, "taskNavigationRoute");
+      Object recordedStrategy = route == null ? null : fieldQuiet(route, "strategy");
+      Location recordedTarget = route == null ? null : (Location) fieldQuiet(route, "nativeTarget");
+      PathStrategy currentStrategy = npc.getNavigator().getPathStrategy();
+      Location currentTarget = npc.getNavigator().getTargetAsLocation();
+      String matches;
+      try { matches = String.valueOf(invoke(route, "matches", new Class<?>[] { NPC.class }, npc)); }
+      catch (Exception error) { matches = "unavailable:" + error.getClass().getSimpleName(); }
+      String tracks;
+      try { tracks = String.valueOf(invoke(route, "tracksRoute")); }
+      catch (Exception error) { tracks = "unavailable:" + error.getClass().getSimpleName(); }
+      String guardOwns;
+      try { guardOwns = String.valueOf(invoke(guard, "ownsOverride")); }
+      catch (Exception error) { guardOwns = "unavailable:" + error.getClass().getSimpleName(); }
+      Object retry = fieldQuiet(ahmet, "navigationRetry");
+      return "available=true,activationRange={has=" + hasRange + ",value=" + range
+          + "},guardOwnsOverride=" + guardOwns + ",route={matches=" + matches + ",tracks=" + tracks
+          + ",recordedStrategy=" + strategyIdentity(recordedStrategy)
+          + ",recordedTarget=" + precise(recordedTarget)
+          + ",currentStrategy=" + strategyIdentity(currentStrategy)
+          + ",currentTarget=" + precise(currentTarget)
+          + ",navigating=" + npc.getNavigator().isNavigating() + "}"
+          + ",task={active=" + bool(task, "active") + ",purpose=" + fieldQuiet(ahmet, "navigationPurpose")
+          + ",goal=" + controllerGoalSafe() + "},deciding=" + bool(ahmet, "deciding")
+          + ",recoveryBlocked=" + bool(ahmet, "recoveryBlocked")
+          + ",pendingOperations=" + pendingOperationsSafe()
+          + ",retryPending=" + safeMethod(retry, "pending")
+          + ",nativeActivation={" + nativeActivationSnapshot(npc.getEntity()) + "}";
+    } catch (Throwable error) {
+      return "available=false,reason=" + error.getClass().getSimpleName();
+    }
+  }
+
+  private static String strategyIdentity(Object strategy) {
+    return strategy == null ? "null" : strategy.getClass().getSimpleName() + "@"
+        + Integer.toHexString(System.identityHashCode(strategy));
+  }
+
+  /** Read effective villager movement speed and at most six modifier summaries. */
+  private String movementSpeedSnapshot(Mob mob) {
+    if (mob == null) return "available=false,reason=not-mob";
+    AttributeInstance speed = mob.getAttribute(Attribute.MOVEMENT_SPEED);
+    if (speed == null) return "available=false,reason=attribute-missing";
+    var modifiers = speed.getModifiers().iterator();
+    StringBuilder details = new StringBuilder();
+    int count = 0;
+    while (modifiers.hasNext() && count < 6) {
+      AttributeModifier modifier = modifiers.next();
+      if (count > 0) details.append(';');
+      details.append(modifier.getKey()).append(':').append(modifier.getOperation()).append(':')
+          .append(rounded(modifier.getAmount()));
+      count++;
+    }
+    return "available=true,base=" + rounded(speed.getBaseValue()) + ",value=" + rounded(speed.getValue())
+        + ",default=" + rounded(speed.getDefaultValue()) + ",modifierCount=" + speed.getModifiers().size()
+        + ",modifiers=" + details + ",modifiersTruncated=" + modifiers.hasNext();
+  }
+
+  /** Check actual entity-box overlap with collision shapes in a fixed, already-loaded 3x3x3 neighborhood. */
+  private String collisionSnapshot(org.bukkit.entity.Entity entity) {
+    BoundingBox entityBox = entity.getBoundingBox();
+    Location location = entity.getLocation();
+    int centerX = location.getBlockX(), centerY = location.getBlockY(), centerZ = location.getBlockZ();
+    int checked = 0, skippedUnloaded = 0, shapeCount = 0, overlaps = 0;
+    boolean shapeTruncated = false;
+    StringBuilder overlapBlocks = new StringBuilder();
+    for (int x = centerX - 1; x <= centerX + 1; x++) {
+      for (int y = centerY - 1; y <= centerY + 1; y++) {
+        for (int z = centerZ - 1; z <= centerZ + 1; z++) {
+          if (!world.isChunkLoaded(x >> 4, z >> 4)) { skippedUnloaded++; continue; }
+          checked++;
+          Block block = world.getBlockAt(x, y, z);
+          VoxelShape shape = block.getCollisionShape();
+          int perBlockShapes = 0;
+          for (BoundingBox localShape : shape.getBoundingBoxes()) {
+            if (perBlockShapes >= 8) { shapeTruncated = true; break; }
+            perBlockShapes++;
+            shapeCount++;
+            if (localShape.clone().shift(x, y, z).overlaps(entityBox)) {
+              overlaps++;
+              if (overlaps <= 6) {
+                if (overlapBlocks.length() > 0) overlapBlocks.append(';');
+                overlapBlocks.append(x).append('/').append(y).append('/').append(z).append(':').append(block.getType());
+              }
+            }
+          }
+        }
+      }
+    }
+    return "available=true,checked=" + checked + ",skippedUnloaded=" + skippedUnloaded
+        + ",shapeBoxes=" + shapeCount + ",overlapCount=" + overlaps
+        + ",overlapBlocks=" + overlapBlocks + ",overlapListTruncated=" + (overlaps > 6)
+        + ",shapeTruncated=" + shapeTruncated + ",entityBox=" + entityBox;
+  }
+
+  /** Read the pinned Citizens 2.0.41 v1_21_R5 MoveControl fields without linking to Paper internals. */
+  private String nativeMoveControlSnapshot(org.bukkit.entity.Entity entity) {
+    try {
+      ClassLoader citizensLoader = NPC.class.getClassLoader();
+      Class<?> impl = Class.forName("net.citizensnpcs.nms.v1_21_R5.util.NMSImpl", false, citizensLoader);
+      var getHandle = impl.getMethod("getHandle", org.bukkit.entity.Entity.class);
+      Object handle = getHandle.invoke(null, entity);
+      Class<?> mobAI = Class.forName("net.citizensnpcs.nms.v1_21_R5.util.MobAI", false, citizensLoader);
+      Object adapter = mobAI.getMethod("from", getHandle.getReturnType()).invoke(null, handle);
+      if (adapter == null) return "available=false,reason=no-mob-adapter";
+      Object moveControl = mobAI.getMethod("getMoveControl").invoke(adapter);
+      if (moveControl == null) return "available=false,reason=no-move-control";
+      Class<?> citizensControl = Class.forName(
+          "net.citizensnpcs.nms.v1_21_R5.util.EntityMoveControl", false, citizensLoader);
+      if (citizensControl.isInstance(moveControl)) {
+        return "available=true,kind=citizens,moving=" + citizensControl.getMethod("b").invoke(moveControl)
+            + ",speedModifier=" + rounded(((Number) citizensControl.getMethod("c").invoke(moveControl)).doubleValue())
+            + ",wanted=" + rounded(((Number) citizensControl.getMethod("d").invoke(moveControl)).doubleValue())
+            + "/" + rounded(((Number) citizensControl.getMethod("e").invoke(moveControl)).doubleValue())
+            + "/" + rounded(((Number) citizensControl.getMethod("f").invoke(moveControl)).doubleValue());
+      }
+      if ("net.minecraft.world.entity.ai.control.MoveControl".equals(moveControl.getClass().getName())) {
+        Class<?> vanillaControl = moveControl.getClass();
+        String operation = "unavailable";
+        String operationRead = "unknown";
+        try {
+          var operationField = vanillaControl.getDeclaredField("operation");
+          if (operationField.trySetAccessible()) {
+            operation = String.valueOf(operationField.get(moveControl));
+            operationRead = "read";
+          } else operationRead = "inaccessible";
+        } catch (ReflectiveOperationException error) {
+          operationRead = error.getClass().getSimpleName();
+        }
+        return "available=true,kind=paper-mojang,hasWanted=" + vanillaControl.getMethod("hasWanted").invoke(moveControl)
+            + ",operation=" + operation + ",operationRead=" + operationRead
+            + ",speedModifier=" + rounded(((Number) vanillaControl.getMethod("getSpeedModifier").invoke(moveControl)).doubleValue())
+            + ",wanted=" + rounded(((Number) vanillaControl.getMethod("getWantedX").invoke(moveControl)).doubleValue())
+            + "/" + rounded(((Number) vanillaControl.getMethod("getWantedY").invoke(moveControl)).doubleValue())
+            + "/" + rounded(((Number) vanillaControl.getMethod("getWantedZ").invoke(moveControl)).doubleValue());
+      }
+      return "available=false,reason=unsupported-control,type=" + moveControl.getClass().getName();
+    } catch (ReflectiveOperationException | LinkageError error) {
+      return "available=false,reason=" + error.getClass().getSimpleName();
+    }
+  }
+
+  private void completeNativePathControl(String taskId, int productiveCap, String chestOutcome,
+      String adjacentOutcome) {
+    require(teleports == 0 && walkedTicks > 0 && maxStep <= 1.5
+        && bool(task, "active") && integer(task, "cargo") == 1
+        && string(task, "taskId").equals(taskId)
+        && integer(controller, "productiveTransitionCount") == productiveCap,
+        "native path control violated its bounded movement or unchanged-cargo oracle");
+    if (terminal) return;
+    terminal = true;
+    if (deadline != null) deadline.cancel();
+    stopFixtureAdvancement();
+    getLogger().info("AHMET_GOAL_DELIVERY_PATH_CONTROL_RESULT outcome=bounded-control-complete taskId=" + taskId
+        + " pluginDeliveryTarget=" + precise((Location) fieldQuiet(ahmet, "navigationGoal"))
+        + " chestRoute=" + chestOutcome + " adjacentRoute=" + adjacentOutcome
+        + " cargo=" + integer(task, "cargo") + " deposited=" + integer(task, "deposited")
+        + " teleports=" + teleports + " maxStep=" + numberText(maxStep)
+        + " liveProviderCalls=0 overallAcceptance=false");
+    Bukkit.getScheduler().runTaskLater(this, Bukkit::shutdown, 2L);
+  }
+
+  private void completePathfinderComparisonControl(String taskId, int productiveCap,
+      int iterationsPerTick, int maxIterations, String chestOutcome, String minecraftAdjacentOutcome,
+      String citizensAdjacentOutcome) {
+    require(pathfinderComparisonStarted && originalControlPathfinder == PathfinderType.MINECRAFT
+        && teleports == 0 && walkedTicks > 0 && maxStep <= 1.5
+        && bool(task, "active") && integer(task, "cargo") == 1 && integer(task, "deposited") == 0
+        && string(task, "taskId").equals(taskId)
+        && integer(controller, "productiveTransitionCount") == productiveCap,
+        "pathfinder comparison violated its bounded movement or unchanged-cargo oracle");
+    if (terminal) return;
+    terminal = true;
+    if (deadline != null) deadline.cancel();
+    boolean cleanupSucceeded = stopFixtureAdvancement();
+    if (!cleanupSucceeded) {
+      getLogger().severe("AHMET_GOAL_PATHFINDER_COMPARISON_CONTROL_RESULT outcome=cleanup-failure"
+          + " terminalNoAcceptance=true pluginEnabled=" + (ahmet != null && ahmet.isEnabled())
+          + " pathfinderChanged=" + pathfinderTypeChanged + " pauseHeld="
+          + (ahmet == null ? "UNKNOWN" : fieldQuiet(ahmet, "deciding"))
+          + " paperShutdown=true");
+      Bukkit.getScheduler().runTaskLater(this, Bukkit::shutdown, 2L);
+      return;
+    }
+    getLogger().info("AHMET_GOAL_PATHFINDER_COMPARISON_CONTROL_RESULT outcome=bounded-control-complete"
+        + " taskId=" + taskId + " baselinePathfinder=MINECRAFT alternatePathfinder=CITIZENS"
+        + " chestRoute=" + chestOutcome + " minecraftAdjacentRoute=" + minecraftAdjacentOutcome
+        + " citizensAdjacentRoute=" + citizensAdjacentOutcome
+        + " astarPerTick=" + iterationsPerTick + " astarMaxIterations=" + maxIterations
+        + " cargo=" + integer(task, "cargo") + " deposited=" + integer(task, "deposited")
+        + " teleports=" + teleports + " maxStep=" + numberText(maxStep)
+        + " liveProviderCalls=0 overallAcceptance=false");
+    Bukkit.getScheduler().runTaskLater(this, Bukkit::shutdown, 2L);
+  }
+
+  private void completeActivationControl(String taskId, int productiveCap,
+      int iterationsPerTick, int maxIterations, String outcome, int pathStoppedAtTick,
+      int activationExpiredAtTick) {
+    require(activationControlStarted
+        && (activationShamControlOnly ? !activationTickChanged : activationTickChanged)
+        && pathfinderComparisonStarted
+        && originalControlPathfinder == PathfinderType.MINECRAFT
+        && teleports == 0 && walkedTicks > 0 && maxStep <= 1.5
+        && bool(ahmet, "deciding") && bool(task, "active")
+        && integer(task, "cargo") == 1 && integer(task, "deposited") == 0
+        && string(task, "taskId").equals(taskId)
+        && integer(controller, "productiveTransitionCount") == productiveCap,
+        "activation control violated its one-variable or unchanged-cargo oracle");
+    if (terminal) return;
+    terminal = true;
+    if (deadline != null) deadline.cancel();
+    boolean cleanupSucceeded = stopFixtureAdvancement();
+    if (!cleanupSucceeded) {
+      getLogger().severe(activationResultMarker() + " outcome=cleanup-failure"
+          + " terminalNoAcceptance=true pluginEnabled=" + (ahmet != null && ahmet.isEnabled())
+          + " activationTickChanged=" + activationTickChanged + " pauseHeld="
+          + (ahmet == null ? "UNKNOWN" : fieldQuiet(ahmet, "deciding"))
+          + " activationRestore=" + activationRestoreOutcome() + " paperShutdown=true");
+      Bukkit.getScheduler().runTaskLater(this, Bukkit::shutdown, 2L);
+      return;
+    }
+    getLogger().info(activationResultMarker() + " outcome=bounded-control-complete"
+        + " taskId=" + taskId + " engine=CITIZENS strategy=AStarNavigationStrategy"
+        + " activationOutcome=" + outcome + " pathStoppedAtTick=" + pathStoppedAtTick
+        + " activationExpiredAtTick=" + activationExpiredAtTick
+        + " mode=" + (activationShamControlOnly ? "SHAM" : "EXTENDED")
+        + " activatedTickWrite=" + (activationShamControlOnly ? "none" : "currentTickPlus200")
+        + " originalActivatedTick=" + originalActivationTick
+        + " assignedActivatedTick=" + activationControlTargetTick
+        + " astarPerTick=" + iterationsPerTick + " astarMaxIterations=" + maxIterations
+        + " cargo=" + integer(task, "cargo") + " deposited=" + integer(task, "deposited")
+        + " teleports=" + teleports + " maxStep=" + numberText(maxStep)
+        + " activationRestore=" + activationRestoreOutcome() + " overallAcceptance=false");
+    Bukkit.getScheduler().runTaskLater(this, Bukkit::shutdown, 2L);
+  }
+
+  private String activationResultMarker() {
+    return activationShamControlOnly ? "AHMET_GOAL_ACTIVATION_SHAM_CONTROL_RESULT"
+        : "AHMET_GOAL_ACTIVATION_CONTROL_RESULT";
+  }
+
+  private String activationControlMarker(String suffix) {
+    return activationShamControlOnly ? "AHMET_GOAL_ACTIVATION_SHAM_CONTROL_" + suffix
+        : "AHMET_GOAL_ACTIVATION_CONTROL_" + suffix;
+  }
+
+  private String activationRestoreOutcome() {
+    if (activationShamControlOnly) return "not-needed";
+    return activationTickRestored ? "restored" : "NOT_VERIFIED";
+  }
+
+  private void createIdleHomeRoute(String stageName, Runnable next) {
+    try {
+      require(!bool(task, "active") && integer(task, "cargo") == 0, "idle route must start without an active task or cargo");
+      String completedTaskId = string(task, "taskId");
+      long generation = number(controller, "jobGeneration");
+      command(owner, "ahmet home");
+      require(messagesContain("eve doğru yönlendirildi"), "operator home command did not report acceptance");
+      await(stageName, 220,
+          () -> bool(ahmet, "returningHome") && !bool(task, "active") && integer(task, "cargo") == 0
+              && "RETURN_HOME".equals(String.valueOf(fieldQuiet(ahmet, "navigationPurpose")))
+              && npc.getNavigator().isNavigating(), () -> {
+            try {
+              Location pluginTarget = (Location) field(ahmet, "navigationGoal");
+              Location nativeTarget = npc.getNavigator().getTargetAsLocation();
+              require(pluginTarget != null && nativeTarget != null && sameBlock(pluginTarget, nativeTarget)
+                  && string(task, "taskId").equals(completedTaskId)
+                  && number(controller, "jobGeneration") == generation,
+                  "idle home route is not a real unchanged RETURN_HOME route");
+              getLogger().info("AHMET_GOAL_STAGE_PASS name=" + stageName + " purpose=RETURN_HOME nativeTarget="
+                  + precise(nativeTarget) + " generation=" + generation);
+              next.run();
+            } catch (Throwable error) { fail(error); }
+          });
+    } catch (Throwable error) { fail(error); }
+  }
+
+  private void testRejectedAdmissionPreservesHomeRoute() {
+    try {
+      Location pluginTarget = (Location) field(ahmet, "navigationGoal");
+      Location nativeTarget = npc.getNavigator().getTargetAsLocation();
+      String taskId = string(task, "taskId");
+      long generation = number(controller, "jobGeneration");
+      command(owner, "ahmet collect diamond 1");
+      require(messagesContain("Bu kaynak desteklenmiyor") && !bool(task, "active")
+          && string(task, "taskId").equals(taskId) && number(controller, "jobGeneration") == generation
+          && bool(ahmet, "returningHome") && pluginTarget.equals(field(ahmet, "navigationGoal"))
+          && npc.getNavigator().isNavigating() && sameBlock(nativeTarget, npc.getNavigator().getTargetAsLocation()),
+          "invalid /collect changed the real idle home route or missed its rejection branch");
+      getLogger().info("AHMET_GOAL_STAGE_PASS name=invalid-command-preserves-idle-home-route"
+          + " taskId=" + taskId + " generation=" + generation + " nativeTarget=" + precise(nativeTarget));
+      runAcceptedCommandHandoff();
+    } catch (Throwable error) { fail(error); }
+  }
+
+  private void runAcceptedCommandHandoff() {
+    try {
+      Block source = placeDirtAhead();
+      Location oldPluginTarget = (Location) field(ahmet, "navigationGoal");
+      Location oldNativeTarget = npc.getNavigator().getTargetAsLocation();
+      String oldTaskId = string(task, "taskId");
+      long oldGeneration = number(controller, "jobGeneration");
+      require(bool(ahmet, "returningHome") && npc.getNavigator().isNavigating()
+          && oldPluginTarget != null && oldNativeTarget != null,
+          "accepted command handoff setup lacks a real idle home route");
+      command(owner, "ahmet collect dirt 1");
+      require(bool(task, "active") && !string(task, "taskId").equals(oldTaskId)
+          && number(controller, "jobGeneration") > oldGeneration && !bool(ahmet, "returningHome")
+          && fieldQuiet(ahmet, "navigationGoal") == null && !npc.getNavigator().isNavigating()
+          && "HARVEST_RESOURCE".equals(String.valueOf(fieldQuiet(ahmet, "navigationPurpose"))),
+          "accepted /collect did not clear the live idle-home route before admission");
+      getLogger().info("AHMET_GOAL_STAGE_PASS name=accepted-command-clears-idle-home-route"
+          + " oldPluginTarget=" + precise(oldPluginTarget) + " oldNativeTarget=" + precise(oldNativeTarget)
+          + " newTaskId=" + string(task, "taskId") + " generation=" + number(controller, "jobGeneration"));
+      await("command-harvest-native-route", 300,
+          () -> npc.getNavigator().isNavigating()
+              && "HARVEST_RESOURCE".equals(String.valueOf(fieldQuiet(ahmet, "navigationPurpose")))
+              && "HARVEST_RESOURCE".equals(String.valueOf(controllerGoal()))
+              && sameBlock((Location) fieldQuiet(ahmet, "treeTarget"), source.getLocation()), () -> {
+            try {
+              Location nativeTarget = npc.getNavigator().getTargetAsLocation();
+              require(nativeTarget != null && bool(task, "active") && integer(task, "requested") == 1,
+                  "accepted command did not start the real bounded harvest route");
+              getLogger().info("AHMET_GOAL_STAGE_PASS name=command-harvest-native-route source=" + loc(source.getLocation())
+                  + " target=" + precise(nativeTarget));
+              runCappedHarvestScenario(source, string(task, "taskId"));
+            } catch (Throwable error) { fail(error); }
+          });
+    } catch (Throwable error) { fail(error); }
+  }
+
+  private void runCappedHarvestScenario(Block source, String taskId) {
+    try {
+      int routeClearCap = ((Number) invoke(invoke(controller, "budget"), "maxRouteClears")).intValue();
+      int jobClearCap = maxJobClearCount();
+      require(routeClearCap == 3 && jobClearCap > 0, "unexpected pinned clear caps route=" + routeClearCap + " job=" + jobClearCap);
+      Location originalPluginTarget = (Location) field(ahmet, "navigationGoal");
+      Location originalNativeTarget = npc.getNavigator().getTargetAsLocation();
+      require(originalPluginTarget != null && originalNativeTarget != null && source.getType() == Material.DIRT,
+          "clear-cap setup requires an admitted active native harvest route");
+      set(ahmet, "routeClears", routeClearCap);
+      set(task, "cleared", jobClearCap);
+      double walkedBefore = walked;
+      Location npcStart = npc.getEntity().getLocation().clone();
+      int[] movingTicks = {0};
+      getLogger().info("AHMET_GOAL_STAGE_START name=clear-caps-harvest-native-progress routeClears="
+          + routeClearCap + " jobClears=" + jobClearCap + " controlledCounterSetup=true");
+      await("clear-caps-harvest-native-progress", 80, () -> {
+        require(bool(task, "active") && string(task, "taskId").equals(taskId)
+            && integer(task, "collected") == 0 && integer(task, "cargo") == 0
+            && integer(task, "cleared") == jobClearCap && integer(ahmet, "routeClears") == routeClearCap
+            && source.getType() == Material.DIRT
+            && !"BLOCKED_AWAITING_HELP".equals(String.valueOf(fieldQuiet(controller, "state"))),
+            "clear caps blocked or mutated an otherwise valid harvest task");
+        if (npc.getNavigator().isNavigating()
+            && "HARVEST_RESOURCE".equals(String.valueOf(controllerGoal()))
+            && sameBlock(originalNativeTarget, npc.getNavigator().getTargetAsLocation())
+            && walked - walkedBefore > 0.4) movingTicks[0]++;
+        return movingTicks[0] >= 5;
+      }, () -> {
+        try {
+          require(npcStart.distance(npc.getEntity().getLocation()) > 0.4 && source.getType() == Material.DIRT
+              && integer(task, "cleared") == jobClearCap && integer(ahmet, "routeClears") == routeClearCap,
+              "capped route did not walk while preserving the eligible source and clear counters");
+          getLogger().info("AHMET_GOAL_STAGE_PASS name=clear-caps-harvest-native-progress ticks=5"
+              + " goal=HARVEST_RESOURCE source=" + loc(source.getLocation()) + " routeClears=" + routeClearCap
+              + " jobClears=" + jobClearCap + " walkingBlocks=" + rounded(walked - walkedBefore)
+              + " controlledCounterSetup=true noProviderClearChoice=true");
+          int chestBefore = countChest();
+          await("clear-caps-harvest-real-delivery", 700,
+              () -> !bool(task, "active") && integer(task, "cargo") == 0
+                  && integer(task, "collected") == 1 && integer(task, "deposited") == 1,
+              () -> {
+                try {
+                  require(source.getType() == Material.AIR && countChest() == chestBefore + 1
+                      && string(task, "taskId").equals(taskId) && integer(task, "cleared") == jobClearCap,
+                      "capped harvest did not remove the eligible source and deposit one actual item");
+                  getLogger().info("AHMET_GOAL_STAGE_PASS name=clear-caps-harvest-real-delivery sourceRemoved=true"
+                      + " deposited=1 jobClearsStill=" + jobClearCap);
+                  createIdleHomeRoute("idle-home-route-for-chat", this::runAcceptedChatHandoff);
+                } catch (Throwable error) { fail(error); }
+              });
+        } catch (Throwable error) { fail(error); }
+      });
+    } catch (Throwable error) { fail(error); }
+  }
+
+  private void runAcceptedChatHandoff() {
+    try {
+      Block source = placeDirtAhead();
+      Location oldPluginTarget = (Location) field(ahmet, "navigationGoal");
+      Location oldNativeTarget = npc.getNavigator().getTargetAsLocation();
+      String oldTaskId = string(task, "taskId");
+      long oldGeneration = number(controller, "jobGeneration");
+      require(oldPluginTarget != null && oldNativeTarget != null && bool(ahmet, "returningHome")
+          && npc.getNavigator().isNavigating() && !bool(task, "active") && integer(task, "cargo") == 0,
+          "chat handoff setup lacks an idle native home route");
+      int chatsBefore = chatCalls.get();
+      command(owner, "ahmet ask collect dirt");
+      await("mock-chat-clears-idle-home-route", 180,
+          () -> bool(task, "active") && !string(task, "taskId").equals(oldTaskId)
+              && number(controller, "jobGeneration") > oldGeneration && chatCalls.get() == chatsBefore + 1, () -> {
+            try {
+              Location currentPluginTarget = (Location) field(ahmet, "navigationGoal");
+              Location currentNativeTarget = npc.getNavigator().getTargetAsLocation();
+              Location selectedSource = (Location) field(ahmet, "treeTarget");
+              boolean routeClearedTransiently = currentPluginTarget == null
+                  && currentNativeTarget == null && !npc.getNavigator().isNavigating();
+              boolean sourceBoundHarvestRoute = currentPluginTarget != null && currentNativeTarget != null
+                  && npc.getNavigator().isNavigating()
+                  && "HARVEST_RESOURCE".equals(String.valueOf(controllerGoal()))
+                  && sameBlock(selectedSource, source.getLocation())
+                  && currentPluginTarget.distanceSquared(source.getLocation().clone().add(0.5, 0, 0.5)) <= 2.9 * 2.9
+                  && sameBlock(currentPluginTarget, currentNativeTarget);
+              require(integer(task, "requested") == 1 && "item:DIRT".equals(string(task, "materialPreference"))
+                  && string(task, "owner").equals(OWNER.toString()) && !bool(ahmet, "returningHome")
+                  && "HARVEST_RESOURCE".equals(String.valueOf(fieldQuiet(ahmet, "navigationPurpose")))
+                  && (routeClearedTransiently || sourceBoundHarvestRoute)
+                  && (currentNativeTarget == null || !sameBlock(oldNativeTarget, currentNativeTarget)),
+                  "accepted mock chat did not replace the actual idle-home target with a cleared state or source-bound harvest route");
+              getLogger().info("AHMET_GOAL_STAGE_PASS name=mock-chat-clears-idle-home-route"
+                  + " handoff=" + (routeClearedTransiently ? "cleared-transient" : "source-bound-harvest-route")
+                  + " oldPluginTarget=" + precise(oldPluginTarget) + " oldNativeTarget=" + precise(oldNativeTarget)
+                  + " currentPluginTarget=" + precise(currentPluginTarget) + " currentNativeTarget=" + precise(currentNativeTarget)
+                  + " newTaskId=" + string(task, "taskId") + " generation=" + number(controller, "jobGeneration")
+                  + " chatSource=fixture-mock-heuristic chatCalls=" + chatCalls.get());
+              runChatHarvestAndDelivery(source, string(task, "taskId"));
+            } catch (Throwable error) { fail(error); }
+          });
+    } catch (Throwable error) { fail(error); }
+  }
+
+  private void runChatHarvestAndDelivery(Block source, String taskId) {
+    int chestBefore = countChest();
+    await("mock-chat-real-harvest-delivery", 800,
+        () -> !bool(task, "active") && integer(task, "cargo") == 0
+            && integer(task, "collected") == 1 && integer(task, "deposited") == 1,
+        () -> {
+          try {
+            require(source.getType() == Material.AIR && countChest() == chestBefore + 1
+                && string(task, "taskId").equals(taskId) && chatCalls.get() == 1,
+                "mock chat job did not execute and deposit the exact one-item task");
+            getLogger().info("AHMET_GOAL_STAGE_PASS name=mock-chat-real-harvest-delivery"
+                + " sourceRemoved=true deposited=1 fixtureMockChat=true liveProviderCalls=0");
+            runForeignRouteWaitProbe();
+          } catch (Throwable error) { fail(error); }
+        });
+  }
+
+  private void runForeignRouteWaitProbe() {
+    try {
+      Block source = world.getBlockAt(4, 120, 1);
+      source.setType(Material.DIRT, false);
+      Location foreignTarget = new Location(world, 3.5, 120, 4.5);
+      foreignNavigatorDefaults = npc.getNavigator().getDefaultParameters();
+      foreignOriginalTeleportMargin = foreignNavigatorDefaults.destinationTeleportMargin();
+      foreignOriginalStationaryTicks = foreignNavigatorDefaults.stationaryTicks();
+      foreignOriginalSpeed = foreignNavigatorDefaults.speed();
+      foreignNavigatorDefaultsChanged = true;
+      foreignNavigatorDefaults.destinationTeleportMargin(-1).stationaryTicks(-1).speed(0.01f);
+      npc.getNavigator().setTarget(foreignTarget);
+      foreignRouteStrategy = npc.getNavigator().getPathStrategy();
+      Location targetReadback = npc.getNavigator().getTargetAsLocation();
+      require(targetReadback != null,
+          "pinned Citizens Navigator hid its active foreign route target before task admission");
+      Location nativeTarget = targetReadback.clone();
+      boolean activationOverrideBefore = activationGuardOwnsOverride();
+      require(npc.getNavigator().isNavigating() && foreignRouteStrategy != null && nativeTarget != null
+          && !npc.getNavigator().isPaused() && fieldQuiet(ahmet, "navigationGoal") == null
+          && !activationOverrideBefore
+          && Math.sqrt(horizontalDistanceSquared(nativeTarget, home)) <= 10.0,
+          "fixture could not establish an active, slow in-bound foreign Citizens route before admission");
+      int chestBefore = countChest();
+      int chatsBefore = chatCalls.get();
+      int decisionsBefore = decisionCalls.get();
+      command(owner, "ahmet collect dirt 1");
+      require(bool(task, "active") && OWNER.toString().equals(string(task, "owner")),
+          "bounded wait task was not admitted for its authorized owner");
+      String taskId = string(task, "taskId");
+      long generation = number(controller, "jobGeneration");
+      int productiveBefore = integer(controller, "productiveTransitionCount");
+      long helpSequenceBefore = number(controller, "helpRequestSequence");
+      long lastHelpRequestedMs = number(controller, "lastHelpRequestedMs");
+      Object controllerBudget = invoke(controller, "budget");
+      long helpCooldownMs = ((Number) invoke(controllerBudget, "helpCooldownMs")).longValue();
+      long helpCooldownDeadlineMs = lastHelpRequestedMs + helpCooldownMs;
+      long cooldownRemainingAtStartMs = Math.max(0, helpCooldownDeadlineMs - System.currentTimeMillis());
+      long cooldownRemainingTicks = (cooldownRemainingAtStartMs + 49) / 50;
+      int foreignWaitTimeoutTicks = Math.toIntExact(FOREIGN_ROUTE_WAIT_TICKS + cooldownRemainingTicks + 1);
+      require(npc.getNavigator().isNavigating() && npc.getNavigator().getPathStrategy() == foreignRouteStrategy
+          && !npc.getNavigator().isPaused()
+          && sameLocationWithin(nativeTarget, npc.getNavigator().getTargetAsLocation(), 0.001),
+          "task admission canceled or replaced the foreign native route");
+      getLogger().info("AHMET_GOAL_STAGE_START name=foreign-route-bounded-wait taskId=" + taskId
+          + " generation=" + generation + " target=" + precise(nativeTarget)
+          + " source=" + loc(source.getLocation()) + " deadlineTicks=" + FOREIGN_ROUTE_WAIT_TICKS
+          + " timeoutTicks=" + foreignWaitTimeoutTicks + " controllerHelpCooldownMs=" + helpCooldownMs
+          + " lastAcceptedHelpMs=" + lastHelpRequestedMs + " remainingCooldownAtStartMs=" + cooldownRemainingAtStartMs);
+
+      boolean[] cooldownRejectionLogged = {false};
+      boolean[] helpAcceptanceLogged = {false};
+      long[] lastLoggedHelpAttemptTick = {-1};
+      await("foreign-route-bounded-wait", foreignWaitTimeoutTicks, () -> {
+        long observedWaitTicks = foreignWaitElapsedTicks();
+        long observedHelpSequence = number(controller, "helpRequestSequence");
+        long remainingCooldownMs = Math.max(0, helpCooldownDeadlineMs - System.currentTimeMillis());
+        long lastHelpAttemptTick = foreignWaitLastHelpAttemptTick();
+        if (!cooldownRejectionLogged[0] && observedWaitTicks >= FOREIGN_ROUTE_WAIT_TICKS
+            && observedHelpSequence == helpSequenceBefore && lastHelpAttemptTick >= 0
+            && lastHelpAttemptTick > lastLoggedHelpAttemptTick[0]) {
+          cooldownRejectionLogged[0] = true;
+          lastLoggedHelpAttemptTick[0]=lastHelpAttemptTick;
+          getLogger().info("AHMET_GOAL_FOREIGN_HELP_RETRY outcome="
+              + (remainingCooldownMs > 0 ? "cooldown-rejected" : "retry-after-cooldown")
+              + " observedWaitTicks=" + observedWaitTicks + " helpRequestSequence=" + observedHelpSequence
+              + " source=controller.lastHelpRequestedMs+controller.budget.helpCooldownMs"
+              + " cooldownMs=" + helpCooldownMs + " remainingCooldownMs=" + remainingCooldownMs);
+        }
+        if (!helpAcceptanceLogged[0] && observedHelpSequence == helpSequenceBefore + 1) {
+          helpAcceptanceLogged[0] = true;
+          getLogger().info("AHMET_GOAL_FOREIGN_HELP_RETRY outcome=accepted observedWaitTicks=" + observedWaitTicks
+              + " helpRequestSequence=" + observedHelpSequence + " cooldownMs=" + helpCooldownMs
+              + " remainingCooldownMs=" + remainingCooldownMs);
+        }
+        require(bool(task, "active") && taskId.equals(string(task, "taskId"))
+            && OWNER.toString().equals(string(task, "owner")) && number(controller, "jobGeneration") == generation
+            && integer(task, "requested") == 1 && integer(task, "collected") == 0
+            && integer(task, "cargo") == 0 && integer(task, "deposited") == 0 && !safeReadyToDeliver().equals("true")
+            && observedHelpSequence == helpSequenceBefore
+                + ("BLOCKED_AWAITING_HELP".equals(String.valueOf(fieldQuiet(controller, "state"))) ? 1 : 0)
+            && (observedHelpSequence == helpSequenceBefore
+                || (observedWaitTicks >= FOREIGN_ROUTE_WAIT_TICKS && System.currentTimeMillis() >= helpCooldownDeadlineMs))
+            && integer(controller, "productiveTransitionCount") == productiveBefore
+            && chatCalls.get() == chatsBefore && decisionCalls.get() == decisionsBefore
+            && source.getType() == Material.DIRT && countChest() == chestBefore
+            && npc.getNavigator().isNavigating() && !npc.getNavigator().isPaused()
+            && npc.getNavigator().getPathStrategy() == foreignRouteStrategy
+            && sameLocationWithin(nativeTarget, npc.getNavigator().getTargetAsLocation(), 0.001)
+            && !taskNavigationRouteMatches() && activationGuardOwnsOverride() == activationOverrideBefore,
+            "foreign wait changed job, productive budget, source, chest, or exact foreign route");
+        return "BLOCKED_AWAITING_HELP".equals(String.valueOf(fieldQuiet(controller, "state")))
+            && "REQUEST_PLAYER_HELP".equals(String.valueOf(controllerGoal()));
+      }, () -> {
+        try {
+          long waitedTicks = foreignWaitElapsedTicks();
+          long nowMs = System.currentTimeMillis();
+          require("Başka bir Citizens hareketi devam ettiği için Ahmet görevine devam edemiyor; bu hareketi durdurun veya bitmesini bekleyin."
+              .equals(fieldQuiet(ahmet, "lastPlayerHelpReason"))
+              && waitedTicks >= FOREIGN_ROUTE_WAIT_TICKS
+              && nowMs >= helpCooldownDeadlineMs
+              && number(controller, "helpRequestSequence") == helpSequenceBefore + 1
+              && !pendingOperations() && integer(task, "collected") == 0 && integer(task, "cargo") == 0
+              && integer(task, "deposited") == 0,
+              "foreign route wait did not expose its bounded help reason without world or cargo changes");
+          getLogger().info("AHMET_GOAL_STAGE_PASS name=foreign-route-bounded-wait limitTicks=" + FOREIGN_ROUTE_WAIT_TICKS
+              + " observedTicks=" + waitedTicks + " cooldownMs=" + helpCooldownMs
+              + " goal=REQUEST_PLAYER_HELP state=BLOCKED_AWAITING_HELP sameStrategy=true sameTarget=true activeForeignRoute=true"
+              + " unchangedSource=true unchangedChest=true collected=0 cargo=0 productiveTransitions=" + productiveBefore
+              + " chatCallsUnchanged=true decisionCallsUnchanged=true");
+
+          // Explicit fixture cleanup releases only the route installed by this probe.
+          require(restoreForeignRouteFixture(),"could not restore the fixture-owned foreign route/default navigator parameters");
+          int chestAtResume = countChest();
+          await("foreign-route-same-job-resume-and-delivery", 800,
+              () -> !bool(task, "active") && integer(task, "cargo") == 0
+                  && integer(task, "collected") == 1 && integer(task, "deposited") == 1,
+              () -> {
+                try {
+                  require(source.getType() == Material.AIR && countChest() == chestAtResume + 1
+                      && taskId.equals(string(task, "taskId")) && OWNER.toString().equals(string(task, "owner"))
+                      && number(controller, "jobGeneration") > generation
+                      && !"BLOCKED_AWAITING_HELP".equals(String.valueOf(fieldQuiet(controller, "state")))
+                      && chatCalls.get() == 1,
+                      "same authorized task did not resume after explicit foreign-route release and deliver its item");
+                  getLogger().info("AHMET_GOAL_STAGE_PASS name=foreign-route-same-job-resume-and-delivery"
+                      + " sameTaskId=" + taskId + " sameOwner=true generationAdvancedOnNormalCompletion=true"
+                      + " sourceRemoved=true deposited=1 foreignHelpCleared=true liveProviderCalls=0");
+                  complete();
+                } catch (Throwable error) { fail(error); }
+              });
+        } catch (Throwable error) { fail(error); }
+      });
+    } catch (Throwable error) { fail(error); }
+  }
+
+  private Block placeDirtAhead() {
+    int x = npc.getEntity().getLocation().getBlockX();
+    int z = npc.getEntity().getLocation().getBlockZ();
+    int[][] offsets = {{8, 0}, {-8, 0}, {0, 8}, {0, -8}, {6, 6}, {-6, 6}, {6, -6}, {-6, -6}};
+    for (int[] offset : offsets) {
+      int targetX = x + offset[0], targetZ = z + offset[1];
+      if (Math.abs(targetX) > 14 || Math.abs(targetZ) > 14) continue;
+      Block block = world.getBlockAt(targetX, 120, targetZ);
+      if (sameBlock(block.getLocation(), chestLocation) || !block.getType().isAir()
+          || !world.getBlockAt(targetX, 119, targetZ).getType().isSolid()
+          || !world.getBlockAt(targetX, 121, targetZ).isPassable()
+          || !world.getBlockAt(targetX, 122, targetZ).isPassable()) continue;
+      block.setType(Material.DIRT, false);
+      require(block.getType() == Material.DIRT, "fixture failed to place a supported DIRT source");
+      return block;
+    }
+    throw new IllegalStateException("no bounded, loaded, supported DIRT placement was available near Ahmet");
+  }
+
+  private int maxJobClearCount() throws Exception {
+    Field cap = task.getClass().getDeclaredField("MAX_JOB_CLEARS");
+    cap.setAccessible(true);
+    return cap.getInt(null);
+  }
+
+  private Location assertNativeChestRoute() throws Exception {
+    Location productionTarget = chestLocation.clone().add(0.5, 0, 0.5);
+    Location citizensStandTarget = productionTarget.clone().add(0, 1, 0);
+    Location nativeTarget = npc.getNavigator().getTargetAsLocation();
+    require(chestLocation.getBlock().getType() == Material.CHEST
+        && chestLocation.clone().add(0, -1, 0).getBlock().getType() == Material.SMOOTH_STONE
+        && chestLocation.clone().add(0, 1, 0).getBlock().isPassable()
+        && chestLocation.clone().add(0, 2, 0).getBlock().isPassable(),
+        "fixture chest support/headroom does not match the pinned Citizens normalization case");
+    require(productionTarget.equals(field(ahmet, "navigationGoal")) && nativeTarget != null
+        && nativeTarget.distanceSquared(citizensStandTarget) <= 0.0001,
+        "Citizens delivery target did not equal the pinned stand-above normalization; plugin="
+            + loc((Location) field(ahmet, "navigationGoal")) + " expectedNative=" + loc(citizensStandTarget)
+            + " actualNative=" + loc(nativeTarget));
+    return nativeTarget;
   }
 
   private void assertHeldTask(String taskId, Block eligible, Material material, int collected, int cargo,
@@ -470,6 +1768,13 @@ public final class RuntimeGoalProbe extends JavaPlugin implements Listener {
       explorationStateDiagnosticLines = 0;
       explorationPeriodicDiagnosticLines = 0;
     }
+    if (isBudgetDeliveryFinishStage(name)) {
+      lastBudgetDeliveryDiagnosticKey = null;
+      budgetDeliveryStateDiagnosticLines = 0;
+      budgetDeliveryPeriodicDiagnosticLines = 0;
+      budgetDeliveryWaitStart = npc == null || !npc.isSpawned() ? null : npc.getEntity().getLocation().clone();
+      budgetDeliveryWaitStartedAtMillis = System.currentTimeMillis();
+    }
     getLogger().info("AHMET_GOAL_STAGE_START name=" + name + " timeoutTicks=" + timeoutTicks);
     Bukkit.getScheduler().runTaskTimer(this, timer -> {
       if (terminal) { timer.cancel(); return; }
@@ -479,16 +1784,126 @@ public final class RuntimeGoalProbe extends JavaPlugin implements Listener {
         if (name.equals("first-exploration-leg-start")) {
           recordExplorationDiagnostic(elapsed, stageTimeout || (elapsed % 50 == 0));
         }
+        if (isBudgetDeliveryFinishStage(name)) {
+          recordBudgetDeliveryDiagnostic(elapsed, stageTimeout || (elapsed % 100 == 0));
+        }
+        if (name.equals("first-exploration-leg-moves-with-purpose")
+            && (elapsed == 1 || elapsed == 20 || elapsed == 100 || elapsed == timeoutTicks)) {
+          getLogger().info("AHMET_GOAL_ACTIVATION_RUNTIME_DIAG stage=" + name + " stageTicks=" + elapsed
+              + " paperTick=" + Bukkit.getCurrentTick() + " " + activationRouteSnapshot());
+        }
         if (condition.getAsBoolean()) {
           timer.cancel(); getLogger().info("AHMET_GOAL_STAGE_PASS name=" + name + " ticks=" + elapsed); next.run();
         } else if (stageTimeout) {
           timer.cancel(); throw new IllegalStateException("stage timeout=" + name + " ticks=" + elapsed
               + (name.equals("first-exploration-leg-start")
                   ? " state=" + explorationDiagnosticSnapshot()
+              : isBudgetDeliveryFinishStage(name)
+                      ? " deliveryState=" + budgetDeliveryDiagnosticSnapshot(elapsed)
                   : " location=" + loc(npc == null || !npc.isSpawned() ? null : npc.getEntity().getLocation())));
         }
       } catch (Throwable error) { timer.cancel(); fail(error); }
     }, 1L, 1L);
+  }
+
+  private boolean isBudgetDeliveryFinishStage(String name) {
+    return name.equals("budget32-mandatory-delivery-finish") || name.equals("budget-control-zero-delivery-finish");
+  }
+
+  private void recordBudgetDeliveryDiagnostic(int ticks, boolean periodic) {
+    String snapshot = budgetDeliveryDiagnosticSnapshot(ticks);
+    String key = budgetDeliveryDiagnosticKey();
+    if (periodic) {
+      // Reserve thirteen of 25 records for 100-tick samples through the 1,200-tick deadline and one spare.
+      if (budgetDeliveryPeriodicDiagnosticLines >= 13) return;
+      budgetDeliveryPeriodicDiagnosticLines++;
+    } else {
+      if (key.equals(lastBudgetDeliveryDiagnosticKey) || budgetDeliveryStateDiagnosticLines >= 12) return;
+      budgetDeliveryStateDiagnosticLines++;
+    }
+    lastBudgetDeliveryDiagnosticKey = key;
+    getLogger().info("AHMET_GOAL_BUDGET_DELIVERY_DIAG mode=" + (budgetControlOnly ? "controlled-zero-cap"
+        : deliveryPathControlOnly ? "native-path-control-32-cap" : "acceptance-32-cap")
+        + " stageTicks=" + ticks + " reason="
+        + (periodic ? "periodic-or-timeout" : "state-change") + " " + snapshot);
+  }
+
+  private String budgetDeliveryDiagnosticKey() {
+    Object watchdog = fieldQuiet(ahmet, "navigationWatchdog");
+    Object retry = fieldQuiet(ahmet, "navigationRetry");
+    return "taskId=" + string(task, "taskId") + "|active=" + bool(task, "active")
+        + "|ready=" + safeReadyToDeliver() + "|cargo=" + integer(task, "cargo")
+        + "|collected=" + integer(task, "collected") + "|deposited=" + integer(task, "deposited")
+        + "|productive=" + fieldQuiet(controller, "productiveTransitionCount")
+        + "|currentGoal=" + controllerGoalSafe() + "|controllerState=" + fieldQuiet(controller, "state")
+        + "|purpose=" + fieldQuiet(ahmet, "navigationPurpose")
+        + "|pluginTarget=" + precise((Location) fieldQuiet(ahmet, "navigationGoal"))
+        + "|nativeNavigating=" + (npc != null && npc.isSpawned() && npc.getNavigator().isNavigating())
+        + "|nativeTarget=" + precise(npc == null || !npc.isSpawned() ? null : npc.getNavigator().getTargetAsLocation())
+        + "|retryPending=" + safeMethod(retry, "pending")
+        + "|retryAt=" + fieldQuiet(retry, "restartAtMillis")
+        + "|watchdogInitialized=" + fieldQuiet(watchdog, "initialized")
+        + "|watchdogStalls=" + fieldQuiet(watchdog, "stalledAttempts")
+        + "|watchdogBestDistanceSq=" + fieldQuiet(watchdog, "bestDistanceSquared")
+        + "|watchdogLastProgressAt=" + fieldQuiet(watchdog, "lastProgressAtMillis")
+        + "|deciding=" + bool(ahmet, "deciding")
+        + "|recoveryBlocked=" + bool(ahmet, "recoveryBlocked")
+        + "|pending=" + pendingOperationsSafe();
+  }
+
+  private String budgetDeliveryDiagnosticSnapshot(int stageTicks) {
+    Location current = npc == null || !npc.isSpawned() ? null : npc.getEntity().getLocation();
+    Location nativeTarget = npc == null || !npc.isSpawned() ? null : npc.getNavigator().getTargetAsLocation();
+    Object watchdog = fieldQuiet(ahmet, "navigationWatchdog");
+    Object retry = fieldQuiet(ahmet, "navigationRetry");
+    long now = System.currentTimeMillis();
+    double distanceToTargetSq = current == null || nativeTarget == null ? Double.NaN : current.distanceSquared(nativeTarget);
+    double movementSinceStart = current == null || budgetDeliveryWaitStart == null
+        ? Double.NaN : current.distance(budgetDeliveryWaitStart);
+    return "stageTicks=" + stageTicks + " paperTick=" + Bukkit.getCurrentTick()
+        + " elapsedWallMs=" + Math.max(0, now - budgetDeliveryWaitStartedAtMillis)
+        + " npc=" + precise(current) + " npcMovedFromStageStart=" + numberText(movementSinceStart)
+        + " navigationPurpose=" + fieldQuiet(ahmet, "navigationPurpose")
+        + " currentGoal=" + controllerGoalSafe() + " controllerState=" + fieldQuiet(controller, "state")
+        + " pluginNavigationGoal=" + precise((Location) fieldQuiet(ahmet, "navigationGoal"))
+        + " nativeNavigating=" + (npc != null && npc.isSpawned() && npc.getNavigator().isNavigating())
+        + " nativeTargetType=" + (npc == null || !npc.isSpawned() ? "null" : npc.getNavigator().getTargetType())
+        + " nativeTarget=" + precise(nativeTarget) + " distanceToNativeTargetSq=" + numberText(distanceToTargetSq)
+        + " task={id:" + string(task, "taskId") + ",owner:" + string(task, "owner") + ",active:" + bool(task, "active")
+        + ",readyToDeliver:" + safeReadyToDeliver() + ",requested:" + integer(task, "requested")
+        + ",collected:" + integer(task, "collected") + ",cargo:" + integer(task, "cargo")
+        + ",deposited:" + integer(task, "deposited") + ",jobClears:" + integer(task, "cleared") + "}"
+        + " productiveTransitions=" + fieldQuiet(controller, "productiveTransitionCount")
+        + " recoveryBlocked=" + bool(ahmet, "recoveryBlocked") + " pendingOperations=" + pendingOperationsSafe()
+        + " deciding=" + bool(ahmet, "deciding")
+        + " navigationRetry={pending:" + safeMethod(retry, "pending") + ",restartAt:" + fieldQuiet(retry, "restartAtMillis") + "}"
+        + " watchdog={initialized:" + fieldQuiet(watchdog, "initialized")
+        + ",stalledAttempts:" + fieldQuiet(watchdog, "stalledAttempts")
+        + ",bestDistanceSq:" + fieldQuiet(watchdog, "bestDistanceSquared")
+        + ",lastProgressAt:" + fieldQuiet(watchdog, "lastProgressAtMillis")
+        + ",progressAgeMs:" + progressAge(now, watchdog) + "}";
+  }
+
+  private String safeReadyToDeliver() {
+    try { return String.valueOf(invoke(task, "readyToDeliver")); }
+    catch (Exception ignored) { return "UNKNOWN"; }
+  }
+
+  private String pendingOperationsSafe() {
+    try { return String.valueOf(pendingOperations()); }
+    catch (Exception ignored) { return "UNKNOWN"; }
+  }
+
+  private static String safeMethod(Object target, String name) {
+    if (target == null) return "UNKNOWN";
+    try { return String.valueOf(invoke(target, name)); }
+    catch (Exception ignored) { return "UNKNOWN"; }
+  }
+
+  private static String progressAge(long now, Object watchdog) {
+    Object raw = fieldQuiet(watchdog, "lastProgressAtMillis");
+    return raw instanceof Number number && number.longValue() > 0
+        ? String.valueOf(Math.max(0, now - number.longValue())) : "UNKNOWN";
   }
 
   private void recordExplorationDiagnostic(int ticks, boolean periodic) {
@@ -606,7 +2021,7 @@ public final class RuntimeGoalProbe extends JavaPlugin implements Listener {
     getLogger().info("AHMET_GOAL_RUNTIME_PROBE_PASS npcType=" + npc.getEntity().getType()
         + " walkingBlocks=" + rounded(walked) + " walkingTicks=" + walkedTicks + " maxStep=" + rounded(maxStep)
         + " spawnExcluded=true normalTeleports=" + teleports + " maxStepLimit=1.5 deterministicMockDecisions=" + decisionCalls.get()
-        + " liveProviderCalls=0 recoveryEvidence=injected-lock-only");
+        + " deterministicMockChats=" + chatCalls.get() + " liveProviderCalls=0 recoveryEvidence=injected-lock-only");
     Bukkit.getScheduler().runTaskLater(this, Bukkit::shutdown, 2L);
   }
 
@@ -614,16 +2029,147 @@ public final class RuntimeGoalProbe extends JavaPlugin implements Listener {
     if (terminal) return; terminal = true;
     if (deadline != null) deadline.cancel();
     stopFixtureAdvancement();
-    getLogger().severe("AHMET_GOAL_RUNTIME_PROBE_FAIL stage=" + stage + " reason="
+    String marker = activationControlStarted ? activationResultMarker()
+        : pathfinderComparisonStarted ? "AHMET_GOAL_PATHFINDER_COMPARISON_CONTROL_RESULT"
+        : deliveryPathControlOnly ? "AHMET_GOAL_DELIVERY_PATH_CONTROL_RESULT"
+        : budgetControlOnly ? "AHMET_GOAL_BUDGET_CONTROL_RESULT" : "AHMET_GOAL_RUNTIME_PROBE_FAIL";
+    getLogger().severe(marker
+        + " stage=" + stage + " outcome=bounded-failure reason="
         + error.getClass().getSimpleName() + ": " + safeMessage(error));
     Bukkit.getScheduler().runTaskLater(this, Bukkit::shutdown, 2L);
   }
 
-  private void stopFixtureAdvancement() {
-    try { if (npc != null && npc.isSpawned()) npc.getNavigator().cancelNavigation(); }
-    catch (Throwable ignored) { }
+  private boolean stopFixtureAdvancement() {
+    boolean foreignFixtureWasActive=foreignRouteStrategy!=null||foreignNavigatorDefaultsChanged;
+    boolean cleanupSucceeded = restoreForeignRouteFixture();
+    boolean pathfinderRestored = !pathfinderTypeChanged;
+    boolean activationCleanupSatisfied = !activationTickChanged;
+    try { if (!foreignFixtureWasActive&&npc != null && npc.isSpawned()) npc.getNavigator().cancelNavigation(); }
+    catch (Throwable error) {
+      if (pathfinderComparisonStarted) {
+        cleanupSucceeded = false;
+        getLogger().severe("AHMET_GOAL_PATH_CONTROL_CLEANUP_FAILURE outcome=navigation-stop-failed reason="
+            + error.getClass().getSimpleName());
+      }
+    }
     try { if (mockBridge != null) mockBridge.stop(0); } catch (Throwable ignored) { }
     try { if (bridgeExecutor != null) bridgeExecutor.shutdownNow(); } catch (Throwable ignored) { }
+    if (deliveryPathControlOnly && ahmet != null) {
+      try { if (ahmet.isEnabled()) set(ahmet, "deciding", true); }
+      catch (Throwable error) {
+        cleanupSucceeded = false;
+        getLogger().severe("AHMET_GOAL_PATH_CONTROL_CLEANUP_FAILURE outcome=could-not-assert-pause reason="
+            + error.getClass().getSimpleName());
+      }
+      try { if (ahmet.isEnabled()) Bukkit.getPluginManager().disablePlugin(ahmet); }
+      catch (Throwable error) {
+        cleanupSucceeded = false;
+        getLogger().severe("AHMET_GOAL_PATH_CONTROL_CLEANUP_FAILURE outcome=plugin-disable-threw pause-retained="
+            + bool(ahmet, "deciding") + " reason=" + error.getClass().getSimpleName());
+      }
+      if (!ahmet.isEnabled()) {
+        if (pathfinderTypeChanged) {
+          try {
+            require(npc != null && npc.isSpawned() && !npc.getNavigator().isNavigating()
+                && originalControlPathfinder == PathfinderType.MINECRAFT,
+                "cannot safely restore pathfinder until plugin is disabled and navigation is stopped");
+            var defaults = npc.getNavigator().getDefaultParameters();
+            require(defaults.pathfinderType() == PathfinderType.CITIZENS
+                && defaults.destinationTeleportMargin() == -1 && defaults.stationaryTicks() == -1,
+                "alternate pathfinder or no-teleport margins changed before cleanup");
+            defaults.pathfinderType(originalControlPathfinder);
+            require(defaults.pathfinderType() == PathfinderType.MINECRAFT
+                && defaults.destinationTeleportMargin() == -1 && defaults.stationaryTicks() == -1,
+                "original pathfinder restoration failed or changed no-teleport margins");
+            getLogger().info("AHMET_GOAL_PATH_CONTROL_CLEANUP outcome=plugin-disabled-navigation-stopped"
+                + " pathfinderRestored=MINECRAFT teleportMargin=-1 stationaryTicks=-1");
+            pathfinderRestored = true;
+          } catch (Throwable error) {
+            cleanupSucceeded = false;
+            getLogger().severe("AHMET_GOAL_PATH_CONTROL_CLEANUP_FAILURE outcome=pathfinder-restore-failed reason="
+                + error.getClass().getSimpleName() + " pluginDisabled=true");
+          }
+        }
+        if (activationTickChanged) {
+          try {
+            require(npc != null && npc.isSpawned() && !npc.getNavigator().isNavigating(),
+                "cannot safely restore activatedTick until plugin is disabled and navigation is stopped");
+            ClassLoader paperLoader = NPC.class.getClassLoader();
+            Class<?> entityType = Class.forName("net.minecraft.world.entity.Entity", false, paperLoader);
+            Object handle = getPaperEntityHandle(npc.getEntity());
+            var activatedTickField = entityType.getField("activatedTick");
+            long observedBeforeRestore = activatedTickField.getLong(handle);
+            activatedTickField.setLong(handle, originalActivationTick);
+            require(activatedTickField.getLong(handle) == originalActivationTick,
+                "original activatedTick restoration did not read back");
+            activationTickRestored = true;
+            activationCleanupSatisfied = true;
+            getLogger().info("AHMET_GOAL_ACTIVATION_CONTROL_CLEANUP outcome=plugin-disabled-navigation-stopped"
+                + " activatedTickRestored=" + originalActivationTick
+                + " observedBeforeRestore=" + observedBeforeRestore);
+          } catch (Throwable error) {
+            cleanupSucceeded = false;
+            getLogger().severe("AHMET_GOAL_ACTIVATION_CONTROL_CLEANUP_FAILURE outcome=activation-restore-failed reason="
+                + error.getClass().getSimpleName() + " pluginDisabled=true");
+          }
+        }
+        if (cleanupSucceeded && pathfinderRestored && activationCleanupSatisfied) {
+          try {
+            set(ahmet, "deciding", false);
+            getLogger().info("AHMET_GOAL_PATH_CONTROL_CLEANUP outcome=plugin-disabled-pause-restored=true");
+          } catch (Throwable error) {
+            cleanupSucceeded = false;
+            try { set(ahmet, "deciding", true); } catch (Throwable ignored) { }
+            getLogger().severe("AHMET_GOAL_PATH_CONTROL_CLEANUP_FAILURE outcome=plugin-disabled-pause-restore-failed reason="
+                + error.getClass().getSimpleName());
+          }
+        } else {
+          try { set(ahmet, "deciding", true); } catch (Throwable ignored) { }
+          getLogger().severe("AHMET_GOAL_PATH_CONTROL_CLEANUP_FAILURE outcome=terminal-cleanup-incomplete"
+              + " pluginDisabled=true pathfinderRestored=" + pathfinderRestored
+              + " activationCleanupSatisfied=" + activationCleanupSatisfied
+              + " activationRestore=" + activationRestoreOutcome() + " pauseHeld=true");
+        }
+      } else {
+        cleanupSucceeded = false;
+        getLogger().severe("AHMET_GOAL_PATH_CONTROL_CLEANUP_FAILURE outcome=plugin-still-enabled pause-retained="
+            + fieldQuiet(ahmet, "deciding"));
+      }
+    } else if (pathfinderComparisonStarted) {
+      cleanupSucceeded = false;
+      getLogger().severe("AHMET_GOAL_PATH_CONTROL_CLEANUP_FAILURE outcome=plugin-reference-missing pauseState=UNKNOWN");
+    }
+    return cleanupSucceeded;
+  }
+
+  /** Restores only navigator defaults changed by the foreign-route fixture and cancels only its exact strategy. */
+  private boolean restoreForeignRouteFixture() {
+    boolean restored=true;
+    try {
+      if(foreignRouteStrategy!=null&&npc!=null&&npc.isSpawned()
+          &&npc.getNavigator().getPathStrategy()==foreignRouteStrategy){
+        npc.getNavigator().cancelNavigation();
+      }
+    } catch(Throwable error) {
+      restored=false;
+      getLogger().severe("AHMET_GOAL_FOREIGN_ROUTE_CLEANUP_FAILURE outcome=owned-route-cancel-failed reason="
+          +error.getClass().getSimpleName());
+    }
+    try {
+      if(foreignNavigatorDefaultsChanged&&foreignNavigatorDefaults!=null){
+        foreignNavigatorDefaults.destinationTeleportMargin(foreignOriginalTeleportMargin)
+            .stationaryTicks(foreignOriginalStationaryTicks).speed(foreignOriginalSpeed);
+      }
+    } catch(Throwable error) {
+      restored=false;
+      getLogger().severe("AHMET_GOAL_FOREIGN_ROUTE_CLEANUP_FAILURE outcome=defaults-restore-failed reason="
+          +error.getClass().getSimpleName());
+    } finally {
+      foreignRouteStrategy=null;
+      foreignNavigatorDefaults=null;
+      foreignNavigatorDefaultsChanged=false;
+    }
+    return restored;
   }
 
   private void startMockBridge() throws Exception {
@@ -631,6 +2177,7 @@ public final class RuntimeGoalProbe extends JavaPlugin implements Listener {
     bridgeExecutor = Executors.newFixedThreadPool(2);
     mockBridge.setExecutor(bridgeExecutor);
     mockBridge.createContext("/api/decide", this::mockDecision);
+    mockBridge.createContext("/api/chat", this::mockChat);
     mockBridge.createContext("/api/event", exchange -> {
       try {
         boolean allowed = authorized(exchange);
@@ -649,6 +2196,21 @@ public final class RuntimeGoalProbe extends JavaPlugin implements Listener {
       if (!authorized(exchange)) { respond(exchange, 401, "{}"); return; }
       decisionCalls.incrementAndGet();
       respond(exchange, 200, "{\"id\":\"target_a\",\"source\":\"heuristic\",\"model\":\"fixture-mock\"}");
+    } catch (Exception ignored) {
+      try { respond(exchange, 400, "{}"); } catch (Exception alsoIgnored) { }
+    }
+  }
+
+  private void mockChat(HttpExchange exchange) {
+    try {
+      if (!"POST".equals(exchange.getRequestMethod())) { respond(exchange, 405, "{}"); return; }
+      byte[] body = exchange.getRequestBody().readNBytes(16_001);
+      if (body.length > 16_000) { respond(exchange, 413, "{}"); return; }
+      if (!authorized(exchange)) { respond(exchange, 401, "{}"); return; }
+      chatCalls.incrementAndGet();
+      respond(exchange, 200, "{\"reply\":\"Controlled fixture request accepted.\","
+          + "\"taskSource\":\"heuristic\",\"task\":{\"type\":\"collect_item\","
+          + "\"itemId\":\"minecraft:dirt\",\"amount\":1},\"cancel\":false,\"goHome\":false}");
     } catch (Exception ignored) {
       try { respond(exchange, 400, "{}"); } catch (Exception alsoIgnored) { }
     }
@@ -726,6 +2288,27 @@ public final class RuntimeGoalProbe extends JavaPlugin implements Listener {
   private static Object fieldQuiet(Object target, String name) {
     try { return field(target, name); } catch (Exception e) { return null; }
   }
+  private boolean taskNavigationRouteMatches() {
+    try { return (boolean) invoke(field(ahmet, "taskNavigationRoute"), "matches", new Class<?>[] { NPC.class }, npc); }
+    catch (Exception error) { throw new IllegalStateException("could not inspect task route ownership", error); }
+  }
+  private boolean activationGuardOwnsOverride() {
+    try { return invokeBoolean(field(ahmet, "activationRangeGuard"), "ownsOverride"); }
+    catch (Exception error) { throw new IllegalStateException("could not inspect activation override", error); }
+  }
+  private long productionGlobalTick() {
+    try { return ((Number) invoke(field(ahmet, "productionGoalAdapter"), "globalStepId",
+        new Class<?>[] { int.class }, Bukkit.getCurrentTick())).longValue(); }
+    catch (Exception error) { throw new IllegalStateException("could not read production tick", error); }
+  }
+  private long foreignWaitElapsedTicks() {
+    try { return productionGlobalTick() - number(field(ahmet, "foreignNavigationWait"), "firstTick"); }
+    catch (Exception error) { throw new IllegalStateException("could not inspect foreign wait duration", error); }
+  }
+  private long foreignWaitLastHelpAttemptTick() {
+    try { return number(field(ahmet, "foreignNavigationWait"), "lastHelpAttemptTick"); }
+    catch (Exception error) { throw new IllegalStateException("could not inspect foreign help retry", error); }
+  }
   private static void set(Object target, String name, Object value) throws Exception { findField(target, name).set(target, value); }
   private static boolean bool(Object target, String name) { return (boolean) fieldQuiet(target, name); }
   private static int integer(Object target, String name) { return ((Number) fieldQuiet(target, name)).intValue(); }
@@ -764,6 +2347,10 @@ public final class RuntimeGoalProbe extends JavaPlugin implements Listener {
   private static boolean sameBlock(Location a, Location b) {
     return a != null && b != null && a.getWorld().equals(b.getWorld()) && a.getBlockX() == b.getBlockX()
         && a.getBlockY() == b.getBlockY() && a.getBlockZ() == b.getBlockZ();
+  }
+  private static boolean sameLocationWithin(Location expected, Location actual, double tolerance) {
+    return expected != null && actual != null && expected.getWorld().equals(actual.getWorld())
+        && expected.distanceSquared(actual) <= tolerance * tolerance;
   }
   private static String loc(Location value) { return value == null ? "null" : value.getBlockX()+","+value.getBlockY()+","+value.getBlockZ(); }
   private static String rounded(double value) { return String.format(java.util.Locale.ROOT, "%.3f", value); }

@@ -157,6 +157,36 @@ class ProductionGoalPolicyTest {
   }
 
   @Test
+  void exhaustedWatchdogRetryBudgetRequestsHelpWhileActualRetryRemainsProductive() {
+    AgentController controller = controller();
+    var giveUp = context(0, "task-1", OWNER, 1).routeBlocked(true)
+        .routeRetryAvailable(false).navigationPurpose(AgentGoal.HARVEST_RESOURCE).build();
+    assertEquals(AgentGoal.REQUEST_PLAYER_HELP, selectAndApply(controller, observation(), giveUp));
+
+    controller.nextGeneration();
+    var retry = context(1, "task-2", OWNER, 2).routeBlocked(true)
+        .routeRetryAvailable(true).navigationPurpose(AgentGoal.HARVEST_RESOURCE).build();
+    assertEquals(AgentGoal.HARVEST_RESOURCE, selectAndApply(controller, observation(), retry));
+  }
+
+  @Test
+  void criticalDeliveryAndSafeHomeGoalsPreemptExpiredForeignRouteWait() {
+    AgentController controller = controller();
+    var delivery = context(0, "task-1", OWNER, 1).foreignNavigationWaitExpired(true)
+        .readyToDeliver(true).cargo(1).build();
+    assertEquals(AgentGoal.DELIVER_CARGO, selectAndApply(controller, observation(), delivery));
+
+    controller.nextGeneration();
+    var safeHome = context(1, "task-2", OWNER, 2).foreignNavigationWaitExpired(true)
+        .requiredSafeReturn(true).routeRetryAvailable(true).build();
+    assertEquals(AgentGoal.RETURN_HOME, selectAndApply(controller, observation(), safeHome));
+
+    controller.nextGeneration();
+    var inBoundWait = context(2, "task-3", OWNER, 3).foreignNavigationWaitExpired(true).build();
+    assertEquals(AgentGoal.REQUEST_PLAYER_HELP, selectAndApply(controller, observation(), inBoundWait));
+  }
+
+  @Test
   void pendingAndExhaustedScansHaveDifferentGoals() {
     AgentController controller = controller();
     var pending = context(0, "task-1", OWNER, 1).scanPending(true).build();

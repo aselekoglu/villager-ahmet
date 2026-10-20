@@ -53,6 +53,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.LongConsumer;
 
 public final class AhmetPlugin extends JavaPlugin implements Listener, TabCompleter {
   private NPC npc;
@@ -71,6 +72,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private int routeClears=0;
   private final NavigationWatchdog navigationWatchdog=new NavigationWatchdog();
   private final NavigationRetry navigationRetry=new NavigationRetry();
+  private final ForeignNavigationWait foreignNavigationWait=new ForeignNavigationWait();
   private final OwnedNavigationRoute taskNavigationRoute=new OwnedNavigationRoute();
   private final FailedTargets failedTargets=new FailedTargets();
   private Location home;
@@ -90,11 +92,13 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private boolean scanEvaluated=false;
   private long scanCompletedAtMs=0;
   private long lastWarningMs=0;
+  private String lastPlayerHelpReason;
   private long treeRetryAfterMs=0;
   private boolean recoveryBlocked=false;
   private Location explorationTarget;
   private int explorationAttempts=0;
   private static final int MAX_EXPLORATION_ATTEMPTS=4;
+  private static final String FOREIGN_NAVIGATION_HELP_REASON="Başka bir Citizens hareketi devam ettiği için Ahmet görevine devam edemiyor; bu hareketi durdurun veya bitmesini bekleyin.";
   private Location homeStepTarget;
   private int homeStepAttempt=0;
   private boolean returningHome=false;
@@ -454,27 +458,59 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
 
   private boolean authorizeProductionGoal(AgentGoal executorBranch,Location current,long now,
       boolean routeBlocked,boolean clearOfferedByLiveJev){
-    boolean enabled=getConfig().getBoolean("options.production-goals-enabled",false);
-    ProductionGoalAdapter.Result result=productionGoalAdapter.authorize(enabled,controller,Bukkit::isPrimaryThread,
-        ()->captureProductionGoalFacts(current,routeBlocked,clearOfferedByLiveJev),executorBranch);
-    if(result.status()==ProductionGoalAdapter.Status.DISABLED||result.applied())return true;
-    if(result.goal()==AgentGoal.REQUEST_PLAYER_HELP&&controller.recordHelpRequest(now)){
-      say("Güvenli şekilde devam edebilmem için yardıma ihtiyacım var.");
+    return authorizeProductionGoal(executorBranch,current,now,routeBlocked,clearOfferedByLiveJev,
+        navigationRetry.pending(),false,null,null);
+  }
+
+  private boolean authorizeProductionGoal(AgentGoal executorBranch,Location current,long now,
+      boolean routeBlocked,boolean clearOfferedByLiveJev,boolean routeRetryAvailable){
+    return authorizeProductionGoal(executorBranch,current,now,routeBlocked,clearOfferedByLiveJev,
+        routeRetryAvailable,false,null,null);
+  }
+
+  private boolean authorizeProductionGoal(AgentGoal executorBranch,Location current,long now,
+      boolean routeBlocked,boolean clearOfferedByLiveJev,boolean routeRetryAvailable,
+      boolean foreignNavigationWaitExpired,String helpMessage,LongConsumer helpAccepted){
+    ProductionGoalAdapter.Result result=evaluateProductionGoal(executorBranch,current,routeBlocked,
+        clearOfferedByLiveJev,routeRetryAvailable,foreignNavigationWaitExpired);
+    if(result.status()==ProductionGoalAdapter.Status.DISABLED)return true;
+    if(result.applied()){
+      if(result.goal()==AgentGoal.REQUEST_PLAYER_HELP)recordProductionHelp(now,helpMessage,helpAccepted);
+      return true;
+    }
+    if(result.goal()==AgentGoal.REQUEST_PLAYER_HELP){
+      recordProductionHelp(now,helpMessage,helpAccepted);
     }
     return false;
   }
 
+  private ProductionGoalAdapter.Result evaluateProductionGoal(AgentGoal executorBranch,Location current,
+      boolean routeBlocked,boolean clearOfferedByLiveJev,boolean routeRetryAvailable,
+      boolean foreignNavigationWaitExpired){
+    boolean enabled=getConfig().getBoolean("options.production-goals-enabled",false);
+    return productionGoalAdapter.authorize(enabled,controller,Bukkit::isPrimaryThread,
+        ()->captureProductionGoalFacts(current,routeBlocked,clearOfferedByLiveJev,routeRetryAvailable,
+            foreignNavigationWaitExpired),executorBranch);
+  }
+
+  private void recordProductionHelp(long now,String helpMessage,LongConsumer helpAccepted){
+    if(controller.recordHelpRequest(now)){
+      if(helpAccepted!=null)helpAccepted.accept(controller.helpRequestSequence());
+      lastPlayerHelpReason=helpMessage==null?"Güvenli şekilde devam edebilmem için yardıma ihtiyacım var.":helpMessage;
+      say(lastPlayerHelpReason);
+    }
+  }
+
   private ProductionGoalAdapter.Facts captureProductionGoalFacts(Location current,boolean routeBlocked,
-      boolean clearOfferedByLiveJev){
+      boolean clearOfferedByLiveJev,boolean routeRetryAvailable,boolean foreignNavigationWaitExpired){
     boolean pending=journal==null||journal.pendingHarvest().isPresent()||journal.pendingDeposit().isPresent()
         ||journal.pendingClear().isPresent();
     boolean scanPending=task.active&&!task.readyToDeliver()&&(!targetScanner.complete()||!scanEvaluated);
     boolean scanExhausted=task.active&&!task.readyToDeliver()&&targetScanner.complete()&&scanEvaluated&&!productionCandidateAvailable;
-    boolean navigationInProgress=navigationGoal!=null||(npc!=null&&npc.isSpawned()&&npc.getNavigator().isNavigating());
+    boolean navigationInProgress=navigationGoal!=null&&taskNavigationRoute.matches(npc);
     Location effectiveHome=getEffectiveHome();
     boolean outsideSafeHome=outsideHomeBoundary(current,effectiveHome);
-    UUID owner=null;
-    try{if(task.owner!=null&&!task.owner.isBlank())owner=UUID.fromString(task.owner);}catch(IllegalArgumentException ignored){}
+    UUID owner=taskOwner();
     long serverStep=productionGoalAdapter.globalStepId(Bukkit.getCurrentTick());
     ProductionGoalPolicy.SafetyContext safety=ProductionGoalPolicy.SafetyContext
         .builder(controller.jobGeneration(),task.taskId,owner,serverStep)
@@ -482,7 +518,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         .recoveryBlocked(recoveryBlocked).transactionPending(pending)
         .committedJournalHistory(journal!=null&&journal.hasOperations())
         .navigationInProgress(navigationInProgress).routeBlocked(routeBlocked)
-        .routeRetryAvailable(navigationRetry.pending()||routeBlocked).clearOfferedByLiveJev(clearOfferedByLiveJev)
+        .routeRetryAvailable(routeRetryAvailable).foreignNavigationWaitExpired(foreignNavigationWaitExpired)
+        .clearOfferedByLiveJev(clearOfferedByLiveJev)
         .targetAvailable(treeTarget!=null||productionCandidateAvailable).scanPending(scanPending)
         .scanExhausted(scanExhausted).explorationAllowed(explorationAttempts<MAX_EXPLORATION_ATTEMPTS)
         .navigationPurpose(navigationPurpose).returningHome(!task.active&&returningHome)
@@ -493,6 +530,11 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         navigationGoal,task.taskId,task.active,task.materialPreference,task.requested,task.collected,task.cargo,
         task.deposited,task.cleared,routeClears,explorationAttempts,List.of(),System.currentTimeMillis());
     return new ProductionGoalAdapter.Facts(observation,safety);
+  }
+
+  private UUID taskOwner(){
+    try{return task.owner==null||task.owner.isBlank()?null:UUID.fromString(task.owner);}
+    catch(IllegalArgumentException ignored){return null;}
   }
 
   private boolean outsideHomeBoundary(Location current,Location effectiveHome){
@@ -521,16 +563,34 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
 
   private void stepOwnedNavigation(){
     advanceSchedule();
-    if(scheduleAdapter.ownsTurn())return;
+    if(scheduleAdapter.ownsTurn()){
+      foreignNavigationWait.resetWaitForSafetyBlock();
+      return;
+    }
     if(recoveryBlocked || journal.pendingHarvest().isPresent() || journal.pendingDeposit().isPresent()
-        || journal.pendingClear().isPresent() || npc==null || !npc.isSpawned() || deciding)return;
+        || journal.pendingClear().isPresent()){
+      foreignNavigationWait.resetWaitForSafetyBlock();
+      return;
+    }
+    if(npc==null || !npc.isSpawned()){
+      foreignNavigationWait.resetWaitForSafetyBlock();
+      return;
+    }
     final Location current=npc.getEntity().getLocation();
     final long now=System.currentTimeMillis();
     final boolean productionGoalsEnabled=getConfig().getBoolean("options.production-goals-enabled",false);
+    boolean foreignRoute=task.active&&npc.getNavigator().isNavigating()&&!taskNavigationRoute.matches(npc);
+    long serverTick=productionGoalAdapter.globalStepId(Bukkit.getCurrentTick());
+    ForeignNavigationWait.Observation foreignWait=foreignNavigationWait.observe(task.active,task.taskId,
+        taskOwner(),controller.jobGeneration(),serverTick,foreignRoute);
+    if(foreignWait.helpSequenceToClear()!=null
+        &&controller.clearHelp(foreignWait.helpSequenceToClear())
+        &&FOREIGN_NAVIGATION_HELP_REASON.equals(lastPlayerHelpReason))lastPlayerHelpReason=null;
+    if(deciding)return;
     boolean safeReturnRequired=productionGoalsEnabled&&task.active&&!task.readyToDeliver()
         &&outsideHomeBoundary(current,getEffectiveHome());
     boolean safeHomeRouteExists=productionGoalsEnabled
-        &&(navigationGoal!=null||navigationRetry.pending()||npc.getNavigator().isNavigating());
+        &&!foreignRoute&&(navigationGoal!=null||navigationRetry.pending()||npc.getNavigator().isNavigating());
     ProductionGoalAdapter.SafeHomeAction safeHomeAction=productionGoalAdapter.ensureSafeHomeRoute(
         productionGoalsEnabled,safeReturnRequired,task.readyToDeliver(),navigationPurpose,
         navigationPurpose==AgentGoal.RETURN_HOME&&safeHomeRouteExists,this::clearNavigation,()->{
@@ -549,6 +609,31 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         });
     if(safeHomeAction==ProductionGoalAdapter.SafeHomeAction.PREEMPTED_AND_PLANNED
         ||safeHomeAction==ProductionGoalAdapter.SafeHomeAction.PLANNED)return;
+    if(foreignRoute&&task.active&&task.readyToDeliver()){
+      if(!authorizeProductionGoal(AgentGoal.DELIVER_CARGO,current,now,false,false))return;
+      if(chestLocation==null||!chestLocation.getWorld().equals(current.getWorld())){
+        warn("Teslimat sandığı kayıp veya başka dünyada.");return;
+      }
+      if(current.distanceSquared(chestLocation.clone().add(.5,0,.5))>3.2*3.2)
+        navigate(NavigationTarget.fromBlock(chestLocation),AgentGoal.DELIVER_CARGO);
+      else execute("deposit");
+      return;
+    }
+    if(deciding)return;
+    if(foreignRoute){
+      if(foreignWait.status()==ForeignNavigationWait.Status.HELP_DUE
+          &&foreignNavigationWait.beginHelpAttempt(serverTick)){
+        if(productionGoalsEnabled){
+          authorizeProductionGoal(AgentGoal.REQUEST_PLAYER_HELP,current,now,true,false,false,true,
+              FOREIGN_NAVIGATION_HELP_REASON,foreignNavigationWait::markHelpAccepted);
+        }else if(controller.recordHelpRequest(now)){
+          foreignNavigationWait.markHelpAccepted(controller.helpRequestSequence());
+          lastPlayerHelpReason=FOREIGN_NAVIGATION_HELP_REASON;
+          say(lastPlayerHelpReason);
+        }
+      }
+      return;
+    }
     if(navigationRetry.pending()){
       if(!navigationRetry.consumeIfDue(now))return;
       AgentGoal retryGoal=currentNavigationGoal(current);
@@ -599,7 +684,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
           }
         }
         AgentGoal retryGoal=currentNavigationGoal(current);
-        if(!authorizeProductionGoal(retryGoal,current,now,true,false)){
+        if(!authorizeProductionGoal(retryGoal,current,now,true,false,true)){
           navigationRetry.schedule(now);
           return;
         }
@@ -610,30 +695,32 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         navigationGoal=null;navigationWatchdog.reset();
         routeClears=0;
         AgentGoal failedRouteGoal=currentNavigationGoal(current);
-        if(!authorizeProductionGoal(failedRouteGoal,current,now,true,false))return;
-        if(explorationTarget!=null){
-          explorationTarget=null;
-          treeRetryAfterMs=now+1000;
-          return;
-        }
-        if(homeStepTarget!=null){
-          homeStepTarget=null;
-          homeStepAttempt++;
-          treeRetryAfterMs=now+1000;
-          return;
-        }
-        if(task.active){
-          if(!task.readyToDeliver()){
-            if(treeTarget!=null){Block failed=treeTarget.getBlock();failedTargets.mark(failed.getWorld().getName(),failed.getX(),failed.getY(),failed.getZ(),now);}
-            treeTarget=null;treeRetryAfterMs=now+2000;
-            if(partialDeliveryPolicy.unreachableRoute(task.cargo>0)){beginPartialDelivery("Üç farklı kaynağa giden yolu bulamadım");return;}
-          }else treeRetryAfterMs=now+30000;
-          if(controller.recordHelpRequest(now)){
-            say("Önümdeki yolu açamadım, devam edebilmem için bana yardım eder misin?");
-          }else{
-            warn(task.readyToDeliver()?"Sandığa giden yolu bulamadım. Sandık çevresindeki yolu açın.":"Ahmet üç kez yol bulamadı. Yolu açıp tekrar deneyeceğim.");
+        ProductionGoalAdapter.Result policyResult=evaluateProductionGoal(failedRouteGoal,current,true,false,
+            false,false);
+        boolean enabled=productionGoalsEnabled;
+        AgentGoal policyGoal=policyResult.status()==ProductionGoalAdapter.Status.DISABLED?null:policyResult.goal();
+        NavigationGiveUpRecovery.Facts facts=new NavigationGiveUpRecovery.Facts(explorationTarget!=null,
+            homeStepTarget!=null,task.active,task.readyToDeliver(),treeTarget!=null,task.cargo>0,enabled,
+            policyGoal,now);
+        NavigationGiveUpRecovery.apply(facts,new NavigationGiveUpRecovery.Effects(){
+          @Override public void clearExplorationTarget(){explorationTarget=null;}
+          @Override public void clearHomeStepTarget(){homeStepTarget=null;}
+          @Override public void incrementHomeStepAttempt(){homeStepAttempt++;}
+          @Override public void markTreeTargetFailed(long failedAt){
+            Block failed=treeTarget.getBlock();
+            failedTargets.mark(failed.getWorld().getName(),failed.getX(),failed.getY(),failed.getZ(),failedAt);
           }
-        }
+          @Override public void clearTreeTarget(){treeTarget=null;}
+          @Override public void setRetryAfter(long retryAtMillis){treeRetryAfterMs=retryAtMillis;}
+          @Override public boolean beginPartialDelivery(boolean cargoAvailable){
+            if(!partialDeliveryPolicy.unreachableRoute(cargoAvailable))return false;
+            AhmetPlugin.this.beginPartialDelivery("Üç farklı kaynağa giden yolu bulamadım");
+            return true;
+          }
+          @Override public void requestHelp(String reason){
+            if(controller.recordHelpRequest(now))say(reason);else warn(reason);
+          }
+        });
         return;
       }else if(outcome==NavigationWatchdog.Outcome.WAIT&&!npc.getNavigator().isNavigating())return;
     }
@@ -979,7 +1066,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         return;
       }
 
-      if(!authorizeProductionGoal(AgentGoal.HARVEST_RESOURCE,npc.getEntity().getLocation(),System.currentTimeMillis(),true,false))return;
+      if(!authorizeProductionGoal(AgentGoal.HARVEST_RESOURCE,npc.getEntity().getLocation(),System.currentTimeMillis(),true,false,true))return;
       navigationRetry.schedule(System.currentTimeMillis());
     }));
     return true;

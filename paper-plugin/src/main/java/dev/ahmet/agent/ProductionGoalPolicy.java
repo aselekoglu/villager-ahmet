@@ -43,6 +43,7 @@ public final class ProductionGoalPolicy {
     if (context.taskId() == null || context.ownerId() == null) return AgentGoal.REQUEST_PLAYER_HELP;
     if (context.readyToDeliver()) return AgentGoal.DELIVER_CARGO;
     if (context.requiredSafeReturn()) return AgentGoal.RETURN_HOME;
+    if (context.foreignNavigationWaitExpired()) return AgentGoal.REQUEST_PLAYER_HELP;
 
     if (context.routeBlocked()) {
       if (context.clearOfferedByLiveJev()
@@ -119,6 +120,7 @@ public final class ProductionGoalPolicy {
       boolean navigationInProgress,
       boolean routeBlocked,
       boolean routeRetryAvailable,
+      boolean foreignNavigationWaitExpired,
       boolean clearOfferedByLiveJev,
       boolean targetAvailable,
       boolean scanPending,
@@ -163,6 +165,7 @@ public final class ProductionGoalPolicy {
           .recoveryBlocked(recoveryBlocked).transactionPending(transactionPending)
           .committedJournalHistory(committedJournalHistory).navigationInProgress(navigationInProgress)
           .routeBlocked(routeBlocked).routeRetryAvailable(routeRetryAvailable)
+          .foreignNavigationWaitExpired(foreignNavigationWaitExpired)
           .clearOfferedByLiveJev(clearOfferedByLiveJev).targetAvailable(targetAvailable)
           .scanPending(scanPending).scanExhausted(scanExhausted).explorationAllowed(explorationAllowed)
           .navigationPurpose(navigationPurpose).returningHome(returningHome).requiredSafeReturn(requiredSafeReturn)
@@ -183,6 +186,7 @@ public final class ProductionGoalPolicy {
       private boolean navigationInProgress;
       private boolean routeBlocked;
       private boolean routeRetryAvailable;
+      private boolean foreignNavigationWaitExpired;
       private boolean clearOfferedByLiveJev;
       private boolean targetAvailable;
       private boolean scanPending;
@@ -215,6 +219,7 @@ public final class ProductionGoalPolicy {
       public Builder navigationInProgress(boolean value) { navigationInProgress = value; return this; }
       public Builder routeBlocked(boolean value) { routeBlocked = value; return this; }
       public Builder routeRetryAvailable(boolean value) { routeRetryAvailable = value; return this; }
+      public Builder foreignNavigationWaitExpired(boolean value) { foreignNavigationWaitExpired = value; return this; }
       public Builder clearOfferedByLiveJev(boolean value) { clearOfferedByLiveJev = value; return this; }
       public Builder targetAvailable(boolean value) { targetAvailable = value; return this; }
       public Builder scanPending(boolean value) { scanPending = value; return this; }
@@ -229,7 +234,7 @@ public final class ProductionGoalPolicy {
       public SafetyContext build() {
         return new SafetyContext(jobGeneration, taskId, ownerId, serverStepId, taskActive, cargo,
             readyToDeliver, recoveryBlocked, transactionPending, committedJournalHistory,
-            navigationInProgress, routeBlocked, routeRetryAvailable, clearOfferedByLiveJev,
+            navigationInProgress, routeBlocked, routeRetryAvailable, foreignNavigationWaitExpired, clearOfferedByLiveJev,
             targetAvailable, scanPending, scanExhausted, explorationAllowed, navigationPurpose, returningHome, requiredSafeReturn,
             routeClears, jobClears, explorationAttempts);
       }

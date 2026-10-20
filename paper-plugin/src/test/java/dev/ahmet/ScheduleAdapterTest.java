@@ -14,6 +14,8 @@ import org.bukkit.entity.Villager;
 import org.bukkit.util.Vector;
 import org.junit.jupiter.api.Test;
 
+import java.lang.ref.WeakReference;
+import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
 import java.util.HashMap;
 import java.util.Map;
@@ -291,6 +293,30 @@ class ScheduleAdapterTest {
         adapter.tick(npc,home,new Location(otherWorld,0,64,0),true,false,false,32,safe,noRoute,chunks);
         assertTrue(adapter.status().contains("bound bed is in another world"),adapter.status());
         assertFalse(adapter.status().contains("bound bed chunk is unloaded"),adapter.status());
+    }
+
+    @Test
+    void unloadedBedWorldReferenceFallsBackWithoutCallingBedWorldOrChunkAccess() throws Exception {
+        World world=world("bed-world-unloaded");
+        Location home=new Location(world,.5,64,.5);
+        Location bed=new Location(world,0,64,0);
+        Field worldReference=Location.class.getDeclaredField("world");
+        worldReference.setAccessible(true);
+        worldReference.set(bed,new WeakReference<World>(null));
+        AtomicInteger chunkAccesses=new AtomicInteger();
+        ScheduleAdapter.ChunkAccess chunks=new ScheduleAdapter.ChunkAccess(){
+            @Override public boolean loaded(World accessed,int x,int z){chunkAccesses.incrementAndGet();return true;}
+            @Override public Material material(World accessed,int x,int y,int z){chunkAccesses.incrementAndGet();return Material.RED_BED;}
+            @Override public BlockData data(World accessed,int x,int y,int z){chunkAccesses.incrementAndGet();return null;}
+            @Override public boolean safeStandingCell(Location location){chunkAccesses.incrementAndGet();return true;}
+        };
+        ScheduleAdapter adapter=new ScheduleAdapter(()->1_000L);
+        NPC npc=fakeNpc(home);
+
+        for(int tick=0;tick<20;tick++)assertDoesNotThrow(()->adapter.tick(npc,home,bed,true,false,false,32,
+            location->true,(from,to)->null,chunks));
+        assertTrue(adapter.status().contains("bound bed world is unloaded"),adapter.status());
+        assertEquals(0,chunkAccesses.get(),"an unloaded bed Location must be rejected before bed block/chunk access");
     }
 
     @Test

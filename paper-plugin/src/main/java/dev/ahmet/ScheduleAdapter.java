@@ -300,8 +300,15 @@ final class ScheduleAdapter {
     private void deferNoCandidate(String reason) { if(fallbackCause==null)fallbackCause=reason;retries.unavailable(clock.getAsLong());state.idle(reason); }
 
     private String validateBoundBed(Location bed,Location current,Location home,int maxDistance,ChunkAccess access){
-        World world=bed.getWorld();int x=bed.getBlockX(),y=bed.getBlockY(),z=bed.getBlockZ();
+        World world;
+        try{world=bed.getWorld();}
+        catch(IllegalArgumentException error){
+            if(!"World unloaded".equals(error.getMessage()))throw error;
+            return "bound bed world is unloaded";
+        }
+        if(world==null)return "bound bed world is unloaded";
         if(world!=current.getWorld()||world!=home.getWorld())return "bound bed is in another world";
+        int x=bed.getBlockX(),y=bed.getBlockY(),z=bed.getBlockZ();
         if(!withinHeight(world,y)||!access.loaded(world,x,z))return "bound bed chunk is unloaded";
         if(bed.distanceSquared(home)>(double)maxDistance*maxDistance)return "bound bed exceeds configured home distance";
         Pair pair=pair(world,x,y,z,access);return pair.error;

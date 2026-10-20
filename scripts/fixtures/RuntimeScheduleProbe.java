@@ -57,6 +57,7 @@ public final class RuntimeScheduleProbe extends JavaPlugin implements Listener {
   private Location bedFoot;
   private Location chest;
   private Block proxyTarget;
+  private World wrongWorldProxy;
   private final List<String> messages = new ArrayList<>();
   private Player proxy;
   private boolean restartVerify;
@@ -370,13 +371,14 @@ public final class RuntimeScheduleProbe extends JavaPlugin implements Listener {
         () -> fallbackAtHomeOrHeading("bound bed chunk is unloaded"),
         () -> {
           require(loads[0] == 0 && !world.isChunkLoaded((int)chunkX,(int)chunkZ), "stale-bed check loaded the bound chunk");
-          World otherWorld = fakeWorld("wrong-world-probe");
-          setFieldUnchecked(ahmet, "scheduleBed", new Location(otherWorld, 4, 120, 0));
+          wrongWorldProxy = fakeWorld("wrong-world-probe");
+          setFieldUnchecked(ahmet, "scheduleBed", new Location(wrongWorldProxy, 4, 120, 0));
           await("wrong-world bed rejects before world access", NAV_TIMEOUT_TICKS,
               () -> fallbackAtHomeOrHeading("bound bed is in another world"),
               () -> {
                 require(loads[0] == 0, "wrong-world validation loaded the stale chunk");
                 require(wrongWorldAccesses==0,"wrong-world validation accessed the untrusted World proxy");
+                wrongWorldProxy=null;
                 org.bukkit.event.HandlerList.unregisterAll(counter);
                 restoreFinalArena();
               });
