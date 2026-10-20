@@ -13,6 +13,7 @@ import org.bukkit.Tag;
 import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.Chest;
+import org.bukkit.entity.Entity;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
@@ -99,11 +100,14 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private boolean returningHome=false;
   private Location scheduleBed;
   private final ActivationRangeGuard activationRangeGuard=new ActivationRangeGuard();
+  private CitizensActivation citizensActivation;
+  private boolean activationFailureLogged;
   private final ScheduleAdapter scheduleAdapter=new ScheduleAdapter(System::currentTimeMillis,
       this::beginOwnedNavigation,this::endOwnedNavigation);
 
   @Override public void onEnable() {
     saveDefaultConfig();brain=new BrainClient(this);
+    citizensActivation=CitizensActivation.bind(Bukkit.getPluginManager().getPlugin("Citizens"),Bukkit.getVersion(),Entity.class);
     try {
       MaterialCatalog.write(getDataFolder().toPath().resolve("item-catalog-1.21.6.json"));
     } catch (IOException e) {
@@ -1286,6 +1290,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private void beginOwnedNavigation(){
     if(!Bukkit.isPrimaryThread()||npc==null)return;
     activationRangeGuard.reconcile(activationMetadata(npc),true);
+    maintainOwnedRouteActivation(true);
   }
 
   private void endOwnedNavigation(){
@@ -1300,7 +1305,35 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         ||journal.pendingDeposit().isPresent()||journal.pendingClear().isPresent();
     boolean taskRoute=ActivationRangeGuard.taskRouteEligible(taskNavigationRoute.matches(npc),recoveryBlocked,
         pendingOperation,deciding,navigationGoal!=null,navigationRetry.pending());
-    activationRangeGuard.reconcile(activationMetadata(npc),scheduleRoute||taskRoute);
+    boolean eligible=scheduleRoute||taskRoute;
+    activationRangeGuard.reconcile(activationMetadata(npc),eligible);
+    maintainOwnedRouteActivation(eligible);
+  }
+
+  private void maintainOwnedRouteActivation(boolean eligible){
+    if(!Bukkit.isPrimaryThread()||!eligible||npc==null||!npc.isSpawned())return;
+    var metadata=activationMetadata(npc);
+    if(!activationRangeGuard.shouldForceActivation(metadata,true))return;
+    try{
+      if(citizensActivation==null)throw new CitizensActivation.Failure("citizens-helper-unavailable");
+      citizensActivation.activate(npc.getEntity(),Bukkit.getCurrentTick(),Bukkit::isPrimaryThread);
+    }catch(CitizensActivation.Failure failure){
+      boolean cleanupFailed=stopOwnedRoutesAfterActivationFailure();
+      if(!activationFailureLogged){
+        activationFailureLogged=true;
+        getLogger().warning("Owned villager route stopped: pinned Citizens activation unavailable ("+failure.code()+")"
+            +(cleanupFailed?"; route cleanup incomplete":"; owned routes cleared")+".");
+      }
+      throw failure;
+    }
+  }
+
+  private boolean stopOwnedRoutesAfterActivationFailure(){
+    boolean failed=false;
+    try{taskNavigationRoute.cancelIfOwned(npc);}catch(RuntimeException|Error cleanupFailure){failed=true;}
+    try{scheduleAdapter.suspend(npc,"activation helper failure");}catch(RuntimeException|Error cleanupFailure){failed=true;}
+    try{activationRangeGuard.clear();}catch(RuntimeException|Error cleanupFailure){failed=true;}
+    return failed;
   }
 
   private ActivationRangeGuard.MetadataAccess activationMetadata(NPC target){

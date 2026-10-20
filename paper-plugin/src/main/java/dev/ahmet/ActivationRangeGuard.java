@@ -30,6 +30,16 @@ final class ActivationRangeGuard {
 
     boolean ownsOverride() { return ownedMetadata != null; }
 
+    boolean shouldForceActivation(MetadataAccess currentNpc, boolean eligibleRoute) {
+        if (!eligibleRoute || currentNpc == null || !currentNpc.spawned()) return false;
+        boolean ownedOverride = ownedMetadata != null && currentNpc.identity() == ownedMetadata.identity()
+                && currentNpc.hasActivationRange()
+                && Integer.valueOf(ROUTE_ACTIVATION_RANGE).equals(currentNpc.activationRange());
+        boolean explicitOperatorOverride = currentNpc.hasActivationRange()
+                && Integer.valueOf(ROUTE_ACTIVATION_RANGE).equals(currentNpc.activationRange());
+        return ownedOverride || explicitOperatorOverride;
+    }
+
     static boolean taskRouteEligible(boolean matchingOwnedRoute,boolean recoveryBlocked,
             boolean pendingOperation,boolean deciding,boolean hasLogicalGoal,boolean retryPending) {
         return matchingOwnedRoute&&!recoveryBlocked&&!pendingOperation&&!deciding&&hasLogicalGoal&&!retryPending;
