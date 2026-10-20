@@ -114,7 +114,7 @@ All entity, world, inventory, Bukkit and Citizens access remains on Paper's main
 
 If the bound bed is in another world, or its world is unloaded, the schedule fails closed to the saved home; it does not load that world or teleport the NPC. Exact final source, runtime and package-candidate evidence is recorded in `docs/VALIDATION_RESULTS.md`. Publication and deployment remain separate release gates.
 
-Goal-policy unit and disposable runtime results are recorded in `docs/VALIDATION_RESULTS.md`. The final four-entry package has been rebuilt locally and verified with ZIP SHA-256 `5781ea3489fef9f5828f0c21cc980a414ed9f8c8602a1057b9ce3adb0788c207`; the local `dist/` directory is gitignored. Source publication and deployment remain open. Diagnostic field interventions are fixture-only and do not count as normal runtime, provider, human, or crash acceptance.
+Goal-policy unit and disposable runtime results are recorded in `docs/VALIDATION_RESULTS.md`. The final four-entry package has been rebuilt locally and verified with ZIP SHA-256 `5781ea3489fef9f5828f0c21cc980a414ed9f8c8602a1057b9ce3adb0788c207`; the local `dist/` directory is gitignored. Source publication and deployment/read-back are complete. Diagnostic field interventions are fixture-only and do not count as normal runtime, provider, human, or crash acceptance; human gameplay, current-path provider behavior and forced-crash acceptance remain open.
 
 ## Gameplay assumptions
 
