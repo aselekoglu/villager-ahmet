@@ -65,6 +65,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private final CompositeProtectionHook protectionHook=new CompositeProtectionHook();
   private final AgentController controller=new AgentController(new ActionPreconditions(protectionHook,ActionBudget.DEFAULT));
   private final ProductionGoalAdapter productionGoalAdapter=new ProductionGoalAdapter();
+  private final BukkitPresentationAdapter presentation=new BukkitPresentationAdapter();
   private Location chestLocation;
   private Location treeTarget;
   private Location navigationGoal;
@@ -189,9 +190,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     getConfig().set(key+".world",value.getWorld().getName());getConfig().set(key+".x",value.getBlockX());getConfig().set(key+".y",value.getBlockY());getConfig().set(key+".z",value.getBlockZ());
   }
   private void say(String message){
-    if(npc==null || !npc.isSpawned())return;
-    Location here=npc.getEntity().getLocation();
-    for(Player p:here.getWorld().getPlayers())if(p.getLocation().distanceSquared(here)<24*24)p.sendMessage("§6[Ahmet] §f"+message);
+    presentation.sayNearby(npc,message);
   }
   @Override public boolean onCommand(CommandSender sender,Command cmd,String label,String[] args) {
     if(!cmd.getName().equalsIgnoreCase("ahmet"))return false;
@@ -365,8 +364,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       Bukkit.getScheduler().runTask(this,()->interact(player,message)));
   }
   @EventHandler public void onInteract(PlayerInteractEntityEvent event){
-    if(npc!=null && npc.isSpawned() && npc.getEntity().getUniqueId().equals(event.getRightClicked().getUniqueId())){
-      event.setCancelled(true);event.getPlayer().sendMessage("§6[Ahmet] §fSelam! Bana sohbetten 'Ahmet, ...' yazabilirsin.");
+    if(presentation.isAhmet(npc,event.getRightClicked())){
+      event.setCancelled(true);presentation.replyToActor(npc,event.getPlayer(),"Selam! Bana sohbetten 'Ahmet, ...' yazabilirsin.");
     }
   }
   @EventHandler public void lockPendingDepositClick(InventoryClickEvent event){
@@ -450,7 +449,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
           case CHEST_REQUIRED -> answer="Önce Ahmet'le aynı dünyada bir teslimat sandığı bağla: sandığa bakıp /ahmet chest kullan.";
         }
       }
-      say(answer);
+      presentation.replyToActor(npc,player,answer);
     }));
   }
   private void clearPriorNavigationForTaskAdmission(){clearNavigation();returningHome=false;homeStepAttempt=0;}
@@ -563,6 +562,9 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
 
   private void stepOwnedNavigation(){
     advanceSchedule();
+    boolean presentationBlocked=task.active||task.cargo>0||recoveryBlocked||journal.hasOperations()
+        ||deciding||returningHome||scheduleAdapter.ownsNavigation();
+    presentation.tickLook(npc,presentationBlocked,Integer.toUnsignedLong(Bukkit.getCurrentTick()));
     if(scheduleAdapter.ownsTurn()){
       foreignNavigationWait.resetWaitForSafetyBlock();
       return;
@@ -1118,6 +1120,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       task.harvestOne(outputMaterial);
       persist();
       journal.completeHarvest();
+      presentation.committedWorkCue(npc,true);
       treeTarget=null;
       navigationGoal=null;
       navigationWatchdog.reset();
@@ -1152,6 +1155,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       persist();
       saveJournalWorlds(chest.getWorld());
       journal.clearAfterWorldSave();
+      if(plan.moved()>0)presentation.committedWorkCue(npc,true);
       if(plan.moved()<amount){warn("Sandık dolu; "+task.cargo+" kaynak hâlâ yanımda.");return;}
       if(task.cargo>0)return;
       finishTaskIfReady();
