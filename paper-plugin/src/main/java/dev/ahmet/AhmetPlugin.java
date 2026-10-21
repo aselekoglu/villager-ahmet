@@ -29,6 +29,7 @@ import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.util.Vector;
 
@@ -56,62 +57,263 @@ import java.util.UUID;
 import java.util.function.LongConsumer;
 
 public final class AhmetPlugin extends JavaPlugin implements Listener, TabCompleter {
+  public static final String PRIMARY_VILLAGER_ID = "ahmet";
+  public static final int MAX_VILLAGERS = 4;
+
+  private String activeVillagerId = PRIMARY_VILLAGER_ID;
+  private String activeDisplayName = "Ahmet";
+  private VillagerRole role = VillagerRole.ALL_ROUNDER;
+  private boolean roleStateValid = true;
+  private boolean rosterStateValid = true;
+  private final ResourceLockRegistry resourceLocks = new ResourceLockRegistry();
+  private LocalEconomyLedger economyLedger;
+  private final Map<String, VillagerSlot> villagerSlots = new LinkedHashMap<>();
+
   private NPC npc;
   private BrainClient brain;
   private OperationJournal journal;
   private SavedNpcReference savedNpcReference;
-  private final WoodTask task=new WoodTask();
-  private final PlayerPlacedWoodRegistry playerPlacedWood=new PlayerPlacedWoodRegistry();
-  private final CompositeProtectionHook protectionHook=new CompositeProtectionHook();
-  private final AgentController controller=new AgentController(new ActionPreconditions(protectionHook,ActionBudget.DEFAULT));
-  private final ProductionGoalAdapter productionGoalAdapter=new ProductionGoalAdapter();
-  private final BukkitPresentationAdapter presentation=new BukkitPresentationAdapter();
+  private WoodTask task = new WoodTask();
+  private final PlayerPlacedWoodRegistry playerPlacedWood = new PlayerPlacedWoodRegistry();
+  private final CompositeProtectionHook protectionHook = new CompositeProtectionHook();
+  private AgentController controller = new AgentController(new ActionPreconditions(protectionHook, ActionBudget.DEFAULT));
+  private ProductionGoalAdapter productionGoalAdapter = new ProductionGoalAdapter();
+  private final BukkitPresentationAdapter presentation = new BukkitPresentationAdapter();
   private Location chestLocation;
   private Location treeTarget;
   private Location navigationGoal;
-  private AgentGoal navigationPurpose=AgentGoal.REST_IDLE;
-  private int routeClears=0;
-  private final NavigationWatchdog navigationWatchdog=new NavigationWatchdog();
-  private final NavigationRetry navigationRetry=new NavigationRetry();
-  private final ForeignNavigationWait foreignNavigationWait=new ForeignNavigationWait();
-  private final OwnedNavigationRoute taskNavigationRoute=new OwnedNavigationRoute();
-  private final FailedTargets failedTargets=new FailedTargets();
+  private AgentGoal navigationPurpose = AgentGoal.REST_IDLE;
+  private int routeClears = 0;
+  private NavigationWatchdog navigationWatchdog = new NavigationWatchdog();
+  private NavigationRetry navigationRetry = new NavigationRetry();
+  private ForeignNavigationWait foreignNavigationWait = new ForeignNavigationWait();
+  private OwnedNavigationRoute taskNavigationRoute = new OwnedNavigationRoute();
+  private FailedTargets failedTargets = new FailedTargets();
   private Location home;
   private Location protectedHome;
-  private int protectHomeRadius=10;
+  private int protectHomeRadius = 10;
   private FarmPlot farmPlot;
-  private boolean farmPlotStateValid=true;
-  private boolean woodProtectionStateValid=true;
-  private boolean taskStateValid=true;
-  private boolean deciding=false;
-  private int waitDecisions=0;
-  private final DecisionRetry decisionRetry=new DecisionRetry(2_000);
-  private final PartialDeliveryPolicy partialDeliveryPolicy=new PartialDeliveryPolicy();
-  private final IncrementalTargetScanner targetScanner=new IncrementalTargetScanner();
-  private final List<Block> scanCandidates=new ArrayList<>();
-  private final List<Block> scanEligible=new ArrayList<>();
-  private List<Block> scanResult=List.of();
-  private boolean productionCandidateAvailable=false;
-  private int scanEligibilityCursor=0;
-  private boolean scanEvaluated=false;
-  private long scanCompletedAtMs=0;
-  private long lastWarningMs=0;
+  private boolean farmPlotStateValid = true;
+  private boolean woodProtectionStateValid = true;
+  private boolean taskStateValid = true;
+  private boolean deciding = false;
+  private int waitDecisions = 0;
+  private DecisionRetry decisionRetry = new DecisionRetry(2_000);
+  private PartialDeliveryPolicy partialDeliveryPolicy = new PartialDeliveryPolicy();
+  private IncrementalTargetScanner targetScanner = new IncrementalTargetScanner();
+  private List<Block> scanCandidates = new ArrayList<>();
+  private List<Block> scanEligible = new ArrayList<>();
+  private List<Block> scanResult = List.of();
+  private boolean productionCandidateAvailable = false;
+  private int scanEligibilityCursor = 0;
+  private boolean scanEvaluated = false;
+  private long scanCompletedAtMs = 0;
+  private long lastWarningMs = 0;
   private String lastPlayerHelpReason;
-  private long treeRetryAfterMs=0;
-  private boolean recoveryBlocked=false;
+  private long treeRetryAfterMs = 0;
+  private boolean recoveryBlocked = false;
   private Location explorationTarget;
-  private int explorationAttempts=0;
-  private static final int MAX_EXPLORATION_ATTEMPTS=4;
-  private static final String FOREIGN_NAVIGATION_HELP_REASON="Başka bir Citizens hareketi devam ettiği için Ahmet görevine devam edemiyor; bu hareketi durdurun veya bitmesini bekleyin.";
+  private int explorationAttempts = 0;
+  private static final int MAX_EXPLORATION_ATTEMPTS = 4;
+  private static final String FOREIGN_NAVIGATION_HELP_REASON = "Başka bir Citizens hareketi devam ettiği için Ahmet görevine devam edemiyor; bu hareketi durdurun veya bitmesini bekleyin.";
   private Location homeStepTarget;
-  private int homeStepAttempt=0;
-  private boolean returningHome=false;
+  private int homeStepAttempt = 0;
+  private boolean returningHome = false;
   private Location scheduleBed;
-  private final ActivationRangeGuard activationRangeGuard=new ActivationRangeGuard();
+  private final ActivationRangeGuard activationRangeGuard = new ActivationRangeGuard();
   private CitizensActivation citizensActivation;
   private boolean activationFailureLogged;
-  private final ScheduleAdapter scheduleAdapter=new ScheduleAdapter(System::currentTimeMillis,
-      this::beginOwnedNavigation,this::endOwnedNavigation);
+  private ScheduleAdapter scheduleAdapter = new ScheduleAdapter(System::currentTimeMillis,
+      this::beginOwnedNavigation, this::endOwnedNavigation);
+
+  private static String capitalize(String text) {
+    if (text == null || text.isBlank()) return text;
+    return Character.toUpperCase(text.charAt(0)) + text.substring(1);
+  }
+
+  private void saveActiveContext() {
+    VillagerSlot slot = villagerSlots.get(activeVillagerId);
+    if (slot == null) return;
+    slot.displayName = activeDisplayName;
+    slot.role = role;
+    slot.roleStateValid = roleStateValid;
+    slot.npc = npc;
+    slot.savedNpcReference = savedNpcReference;
+    slot.task = task;
+    slot.journal = journal;
+    slot.controller = controller;
+    slot.productionGoalAdapter = productionGoalAdapter;
+    slot.scheduleAdapter = scheduleAdapter;
+    slot.chestLocation = chestLocation;
+    slot.treeTarget = treeTarget;
+    slot.navigationGoal = navigationGoal;
+    slot.navigationPurpose = navigationPurpose;
+    slot.routeClears = routeClears;
+    slot.navigationWatchdog = navigationWatchdog;
+    slot.navigationRetry = navigationRetry;
+    slot.foreignNavigationWait = foreignNavigationWait;
+    slot.taskNavigationRoute = taskNavigationRoute;
+    slot.failedTargets = failedTargets;
+    slot.home = home;
+    slot.farmPlot = farmPlot;
+    slot.farmPlotStateValid = farmPlotStateValid;
+    slot.taskStateValid = taskStateValid;
+    slot.deciding = deciding;
+    slot.waitDecisions = waitDecisions;
+    slot.decisionRetry = decisionRetry;
+    slot.partialDeliveryPolicy = partialDeliveryPolicy;
+    slot.targetScanner = targetScanner;
+    slot.scanCandidates = scanCandidates;
+    slot.scanEligible = scanEligible;
+    slot.scanResult = scanResult;
+    slot.productionCandidateAvailable = productionCandidateAvailable;
+    slot.scanEligibilityCursor = scanEligibilityCursor;
+    slot.scanEvaluated = scanEvaluated;
+    slot.scanCompletedAtMs = scanCompletedAtMs;
+    slot.lastWarningMs = lastWarningMs;
+    slot.lastPlayerHelpReason = lastPlayerHelpReason;
+    slot.treeRetryAfterMs = treeRetryAfterMs;
+    slot.recoveryBlocked = recoveryBlocked;
+    slot.explorationTarget = explorationTarget;
+    slot.explorationAttempts = explorationAttempts;
+    slot.homeStepTarget = homeStepTarget;
+    slot.homeStepAttempt = homeStepAttempt;
+    slot.returningHome = returningHome;
+    slot.scheduleBed = scheduleBed;
+  }
+
+  private void loadContext(VillagerSlot slot) {
+    activeVillagerId = slot.id;
+    activeDisplayName = slot.displayName;
+    role = slot.role;
+    roleStateValid = slot.roleStateValid;
+    npc = slot.npc;
+    savedNpcReference = slot.savedNpcReference;
+    task = slot.task;
+    journal = slot.journal;
+    controller = slot.controller;
+    productionGoalAdapter = slot.productionGoalAdapter;
+    scheduleAdapter = slot.scheduleAdapter;
+    chestLocation = slot.chestLocation;
+    treeTarget = slot.treeTarget;
+    navigationGoal = slot.navigationGoal;
+    navigationPurpose = slot.navigationPurpose;
+    routeClears = slot.routeClears;
+    navigationWatchdog = slot.navigationWatchdog;
+    navigationRetry = slot.navigationRetry;
+    foreignNavigationWait = slot.foreignNavigationWait;
+    taskNavigationRoute = slot.taskNavigationRoute;
+    failedTargets = slot.failedTargets;
+    home = slot.home;
+    farmPlot = slot.farmPlot;
+    farmPlotStateValid = slot.farmPlotStateValid;
+    taskStateValid = slot.taskStateValid;
+    deciding = slot.deciding;
+    waitDecisions = slot.waitDecisions;
+    decisionRetry = slot.decisionRetry;
+    partialDeliveryPolicy = slot.partialDeliveryPolicy;
+    targetScanner = slot.targetScanner;
+    scanCandidates = slot.scanCandidates;
+    scanEligible = slot.scanEligible;
+    scanResult = slot.scanResult;
+    productionCandidateAvailable = slot.productionCandidateAvailable;
+    scanEligibilityCursor = slot.scanEligibilityCursor;
+    scanEvaluated = slot.scanEvaluated;
+    scanCompletedAtMs = slot.scanCompletedAtMs;
+    lastWarningMs = slot.lastWarningMs;
+    lastPlayerHelpReason = slot.lastPlayerHelpReason;
+    treeRetryAfterMs = slot.treeRetryAfterMs;
+    recoveryBlocked = slot.recoveryBlocked;
+    explorationTarget = slot.explorationTarget;
+    explorationAttempts = slot.explorationAttempts;
+    homeStepTarget = slot.homeStepTarget;
+    homeStepAttempt = slot.homeStepAttempt;
+    returningHome = slot.returningHome;
+    scheduleBed = slot.scheduleBed;
+  }
+
+  <T> T withVillagerContext(String villagerId, java.util.function.Supplier<T> action) {
+    VillagerSlot target = villagerSlots.get(villagerId);
+    if (target == null) throw new IllegalArgumentException("Unknown villager id: " + villagerId);
+    String previousId = activeVillagerId;
+    if (previousId.equals(villagerId)) {
+      return action.get();
+    }
+    saveActiveContext();
+    loadContext(target);
+    try {
+      return action.get();
+    } finally {
+      saveActiveContext();
+      VillagerSlot prevSlot = villagerSlots.get(previousId);
+      if (prevSlot != null) {
+        loadContext(prevSlot);
+      }
+    }
+  }
+
+  void withVillagerContext(String villagerId, Runnable action) {
+    withVillagerContext(villagerId, () -> {
+      action.run();
+      return null;
+    });
+  }
+
+  private List<ResourceLockRegistry.CoordKey> chestCoordsFor(Location loc) {
+    if (loc == null || loc.getWorld() == null) return List.of();
+    String world = loc.getWorld().getName();
+    int x = loc.getBlockX(), y = loc.getBlockY(), z = loc.getBlockZ();
+    ResourceLockRegistry.CoordKey primary = new ResourceLockRegistry.CoordKey(world, x, y, z);
+    if (loc.getWorld().isChunkLoaded(x >> 4, z >> 4)) {
+      Block block = loc.getBlock();
+      if (block.getState() instanceof Chest chest && chest.getInventory().getHolder() instanceof org.bukkit.block.DoubleChest dc) {
+        if (dc.getLeftSide() instanceof Chest left && dc.getRightSide() instanceof Chest right) {
+          Location lLoc = left.getLocation();
+          Location rLoc = right.getLocation();
+          return List.of(
+              new ResourceLockRegistry.CoordKey(lLoc.getWorld().getName(), lLoc.getBlockX(), lLoc.getBlockY(), lLoc.getBlockZ()),
+              new ResourceLockRegistry.CoordKey(rLoc.getWorld().getName(), rLoc.getBlockX(), rLoc.getBlockY(), rLoc.getBlockZ())
+          );
+        }
+      }
+    }
+    return List.of(primary);
+  }
+
+  private void pinRecoveryLocks() {
+    if (journal == null) return;
+    journal.pendingHarvest().ifPresent(h ->
+        resourceLocks.pinRecoveryBlock(activeVillagerId, h.taskId(), h.world(), h.x(), h.y(), h.z()));
+    for (OperationJournal.Harvest h : journal.harvests()) {
+      resourceLocks.pinRecoveryBlock(activeVillagerId, h.taskId(), h.world(), h.x(), h.y(), h.z());
+    }
+    journal.pendingClear().ifPresent(c ->
+        resourceLocks.pinRecoveryBlock(activeVillagerId, c.taskId(), c.world(), c.x(), c.y(), c.z()));
+    for (OperationJournal.Clear c : journal.clears()) {
+      resourceLocks.pinRecoveryBlock(activeVillagerId, c.taskId(), c.world(), c.x(), c.y(), c.z());
+    }
+    journal.pendingDeposit().ifPresent(d -> {
+      World w = Bukkit.getWorld(d.world());
+      if (w != null) {
+        resourceLocks.tryAcquireChest(activeVillagerId, d.taskId(), chestCoordsFor(new Location(w, d.x(), d.y(), d.z())));
+      }
+    });
+    journal.pendingCraft().ifPresent(c -> {
+      World w = Bukkit.getWorld(c.world());
+      if (w != null) {
+        resourceLocks.tryAcquireChest(activeVillagerId, c.taskId(), chestCoordsFor(new Location(w, c.x(), c.y(), c.z())));
+      }
+    });
+  }
+
+  private Location loadLocFromSection(ConfigurationSection sec, String key) {
+    if (sec == null) return null;
+    String w = sec.getString(key + ".world");
+    if (w == null) return null;
+    World world = Bukkit.getWorld(w);
+    if (world == null) return null;
+    return new Location(world, sec.getDouble(key + ".x"), sec.getDouble(key + ".y"), sec.getDouble(key + ".z"));
+  }
 
   @Override public void onEnable() {
     saveDefaultConfig();brain=new BrainClient(this);
@@ -121,7 +323,28 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     } catch (IOException e) {
       getLogger().warning("Could not write the vanilla item catalog: " + e.getMessage());
     }
+    resourceLocks.clear();
+    try {
+      LocalEconomyLedger ledger = new LocalEconomyLedger(getDataFolder().toPath().resolve("economy-ledger.json"));
+      ledger.load();
+      economyLedger = ledger;
+    } catch (Exception e) {
+      getLogger().severe("Economy ledger is invalid; ledger disabled and file preserved: " + e.getMessage());
+      economyLedger = null;
+    }
+    protectionHook.addHook((block, loc) -> resourceLocks.isBlockLockedByOther(activeVillagerId, block.getWorld().getName(), block.getX(), block.getY(), block.getZ()));
+
+    roleStateValid = true;
+    try {
+      role = VillagerRole.fromConfigValue(getConfig().get("role"));
+    } catch (Exception e) {
+      roleStateValid = false;
+      blockRecovery("Saved villager role is invalid", e);
+    }
+
+    Set<Integer> seenNpcIds = new LinkedHashSet<>();
     int id=getConfig().getInt("npc-id",-1);
+    if (id >= 0) seenNpcIds.add(id);
     savedNpcReference=new SavedNpcReference(id);
     chestLocation=loadLoc("chest"); home=loadLoc("home");
     scheduleBed=loadLoc("schedule.bed");
@@ -147,26 +370,192 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     try{journal.load();if(taskStateValid)recoverJournal();}
     catch(Exception e){blockRecovery("Operation journal could not be recovered",e);}
     if(task.active && npc==null&&!savedNpcReference.pending()){getLogger().warning("Saved task exists but NPC is missing; task paused until spawned.");}
-    if(taskStateValid)persist();
+
+    VillagerSlot primarySlot = new VillagerSlot();
+    primarySlot.id = PRIMARY_VILLAGER_ID;
+    primarySlot.displayName = "Ahmet";
+    primarySlot.role = role;
+    villagerSlots.put(PRIMARY_VILLAGER_ID, primarySlot);
+    saveActiveContext();
+
+    rosterStateValid = true;
+    ConfigurationSection villagersSec = getConfig().getConfigurationSection("villagers");
+    Set<String> secKeys = villagersSec != null ? villagersSec.getKeys(false) : Set.of();
+    Map<String, Integer> allNpcIds = new LinkedHashMap<>();
+    allNpcIds.put(PRIMARY_VILLAGER_ID, id);
+    if (villagersSec != null) {
+      for (String vid : secKeys) {
+        ConfigurationSection vidSec = villagersSec.getConfigurationSection(vid);
+        allNpcIds.put(vid, vidSec != null ? vidSec.getInt("npc-id", -1) : -1);
+      }
+    }
+
+    VillagerRoster.ValidationResult rosterCheck = VillagerRoster.validate(secKeys, allNpcIds);
+    if (!rosterCheck.valid()) {
+      rosterStateValid = false;
+      blockRecovery("Villager roster configuration is invalid: " + rosterCheck.reason(),
+          new IllegalStateException(rosterCheck.reason()));
+    }
+
+    if (villagersSec != null) {
+      Set<Integer> registeredNpcIds = new LinkedHashSet<>();
+      if (id >= 0) registeredNpcIds.add(id);
+
+      for (String vid : secKeys) {
+        if (PRIMARY_VILLAGER_ID.equals(vid)) {
+          rosterStateValid = false;
+          blockRecovery("Secondary villager configuration contains primary id: " + vid,
+              new IllegalStateException("Secondary villager id cannot be primary id"));
+          continue;
+        }
+        if (!VillagerRole.isValidVillagerId(vid)) {
+          rosterStateValid = false;
+          blockRecovery("Invalid secondary villager id in config: " + vid,
+              new IllegalStateException("Invalid villager id: " + vid));
+          continue;
+        }
+        if (villagerSlots.size() >= MAX_VILLAGERS) {
+          rosterStateValid = false;
+          blockRecovery("Villager roster limit exceeded for " + vid,
+              new IllegalStateException("Roster size exceeds " + MAX_VILLAGERS));
+          continue;
+        }
+        ConfigurationSection vidSec = villagersSec.getConfigurationSection(vid);
+        String secDisplay = vidSec != null ? vidSec.getString("displayName", capitalize(vid)) : capitalize(vid);
+        VillagerSlot secSlot = VillagerSlot.createDefault(vid, secDisplay, VillagerRole.ALL_ROUNDER,
+            getDataFolder().toPath().resolve("operations-" + vid + ".json"), protectionHook,
+            this::beginOwnedNavigation, this::endOwnedNavigation);
+        villagerSlots.put(vid, secSlot);
+        withVillagerContext(vid, () -> {
+          int secId = vidSec != null ? vidSec.getInt("npc-id", -1) : -1;
+          boolean duplicateNpc = false;
+          if (secId >= 0) {
+            if (!registeredNpcIds.add(secId)) {
+              duplicateNpc = true;
+              rosterStateValid = false;
+              blockRecovery("Duplicate Citizens NPC ID detected across villagers: " + secId,
+                  new IllegalStateException("Duplicate Citizens NPC ID: " + secId));
+            }
+          }
+          if (duplicateNpc) {
+            savedNpcReference = new SavedNpcReference(-1);
+          } else {
+            savedNpcReference = new SavedNpcReference(secId);
+          }
+          roleStateValid = true;
+          try {
+            role = VillagerRole.fromConfigValue(vidSec != null ? vidSec.get("role") : null);
+          } catch (Exception e) {
+            roleStateValid = false;
+            blockRecovery("Saved villager role is invalid for " + vid, e);
+          }
+          if (vidSec != null) {
+            chestLocation = loadLocFromSection(vidSec, "chest");
+            home = loadLocFromSection(vidSec, "home");
+            scheduleBed = loadLocFromSection(vidSec, "schedule.bed");
+            org.bukkit.configuration.file.YamlConfiguration temp = new org.bukkit.configuration.file.YamlConfiguration();
+            for (String k : vidSec.getKeys(true)) {
+              temp.set(k, vidSec.get(k));
+            }
+            farmPlotStateValid = true;
+            try {
+              farmPlot = FarmPlot.load(temp);
+            } catch (Exception e) {
+              farmPlotStateValid = false;
+              blockRecovery("Saved farm plot configuration is invalid for " + vid, e);
+            }
+            taskStateValid = true;
+            try {
+              task.load(temp);
+            } catch (Exception e) {
+              taskStateValid = false;
+              blockRecovery("Saved task state is invalid for " + vid, e);
+            }
+          }
+          try {
+            journal.load();
+            if (taskStateValid) recoverJournal();
+          } catch (Exception e) {
+            blockRecovery("Operation journal could not be recovered for " + vid, e);
+          }
+          if (task.active && npc == null && !savedNpcReference.pending()) {
+            getLogger().warning("Saved task exists but NPC is missing for " + activeDisplayName + "; task paused until spawned.");
+          }
+        });
+      }
+    }
+
+    if(taskStateValid && rosterStateValid)persist();
     Bukkit.getPluginManager().registerEvents(this,this);
     if(getCommand("ahmet")!=null)getCommand("ahmet").setTabCompleter(this);
     Bukkit.getScheduler().runTaskTimer(this,this::step,1L,1L);
-    if(savedNpcReference.pending())Bukkit.getScheduler().runTaskLater(this,this::restoreSavedNpc,1L);
+    boolean anyPending = false;
+    for (VillagerSlot s : villagerSlots.values()) {
+      if (s.savedNpcReference != null && s.savedNpcReference.pending()) {
+        anyPending = true;
+        break;
+      }
+    }
+    if (anyPending) Bukkit.getScheduler().runTaskLater(this, this::restoreSavedNpc, 1L);
     getLogger().info("Villager Ahmet ready. Run /ahmet spawn as an operator to summon Ahmet.");
   }
   @Override public void onDisable(){
-    try{scheduleAdapter.suspend(npc,"shutdown");if(taskStateValid)persist();flushJournalOnShutdown();}
-    finally{activationRangeGuard.clear();}
+    try {
+      for (String vid : new ArrayList<>(villagerSlots.keySet())) {
+        withVillagerContext(vid, () -> {
+          try {
+            scheduleAdapter.suspend(npc, "shutdown");
+            flushJournalOnShutdown();
+          } catch (Exception e) {
+            getLogger().warning("Error disabling villager " + vid + ": " + e.getMessage());
+          }
+        });
+      }
+      if (taskStateValid && rosterStateValid) persist();
+    } finally {
+      activationRangeGuard.clear();
+    }
   }
   private void persist(){
-    if(!taskStateValid)return;
-    Integer liveNpcId=npc==null?null:npc.getId();
-    getConfig().set("npc-id",savedNpcReference==null?(liveNpcId==null?-1:liveNpcId):savedNpcReference.idForPersistence(liveNpcId));
-    saveLoc("chest",chestLocation);saveLoc("home",home);saveLoc("protection.home",protectedHome);
+    saveActiveContext();
+    if(!rosterStateValid)return;
+    if(!woodProtectionStateValid)return;
+    for(VillagerSlot s:villagerSlots.values()){
+      if(!s.taskStateValid||!s.roleStateValid||!s.farmPlotStateValid)return;
+    }
+    VillagerSlot primary=villagerSlots.get(PRIMARY_VILLAGER_ID);
+    if(primary==null)return;
+    Integer liveNpcId=primary.npc==null?null:primary.npc.getId();
+    getConfig().set("npc-id",primary.savedNpcReference==null?(liveNpcId==null?-1:liveNpcId):primary.savedNpcReference.idForPersistence(liveNpcId));
+    getConfig().set("role",primary.role.name());
+    saveLoc("chest",primary.chestLocation);saveLoc("home",primary.home);saveLoc("schedule.bed",primary.scheduleBed);
+    saveLoc("protection.home",protectedHome);
     getConfig().set("options.protect-home-radius",protectHomeRadius);
     if(woodProtectionStateValid)getConfig().set("protection.playerPlacedWood",playerPlacedWood.serialize());
-    if(farmPlotStateValid)FarmPlot.save(getConfig(),farmPlot);
-    task.save(getConfig());
+    if(primary.farmPlotStateValid)FarmPlot.save(getConfig(),primary.farmPlot);
+    primary.task.save(getConfig());
+
+    getConfig().set("villagers",null);
+    for(VillagerSlot s:villagerSlots.values()){
+      if(PRIMARY_VILLAGER_ID.equals(s.id))continue;
+      String prefix="villagers."+s.id+".";
+      getConfig().set(prefix+"displayName",s.displayName);
+      Integer sLiveId=s.npc==null?null:s.npc.getId();
+      getConfig().set(prefix+"npc-id",s.savedNpcReference==null?(sLiveId==null?-1:sLiveId):s.savedNpcReference.idForPersistence(sLiveId));
+      getConfig().set(prefix+"role",s.role.name());
+      saveLoc(prefix+"chest",s.chestLocation);
+      saveLoc(prefix+"home",s.home);
+      saveLoc(prefix+"schedule.bed",s.scheduleBed);
+      if(s.farmPlotStateValid){
+        org.bukkit.configuration.file.YamlConfiguration temp=new org.bukkit.configuration.file.YamlConfiguration();
+        FarmPlot.save(temp,s.farmPlot);
+        getConfig().set(prefix+"farm",temp.get("farm"));
+      }
+      org.bukkit.configuration.file.YamlConfiguration tempTask=new org.bukkit.configuration.file.YamlConfiguration();
+      s.task.save(tempTask);
+      getConfig().set(prefix+"task",tempTask.get("task"));
+    }
+
     try {
       java.nio.file.Path configFile=getDataFolder().toPath().resolve("config.yml");
       java.nio.file.Files.createDirectories(configFile.getParent());
@@ -181,17 +570,30 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     } catch(java.io.IOException e) { throw TaskStateSaveFailure.failClosed(e,this::lockRecovery); }
   }
   private void restoreSavedNpc(){
-    if(savedNpcReference==null||!savedNpcReference.pending())return;
-    NPC restored=CitizensAPI.getNPCRegistry().getById(savedNpcReference.savedId());
-    savedNpcReference.recordLookup(restored==null?null:restored.getId());
-    if(restored!=null){
-      npc=restored;
-      getLogger().info("Restored saved Citizens NPC id "+npc.getId()+" after registry load.");
-      persist();
-    }else if(savedNpcReference.pending()){
-      Bukkit.getScheduler().runTaskLater(this,this::restoreSavedNpc,1L);
-    }else{
-      getLogger().warning("Saved Citizens NPC id "+savedNpcReference.savedId()+" was not found after registry load; use /ahmet spawn to recover it.");
+    boolean anyPending = false;
+    for (String vid : new ArrayList<>(villagerSlots.keySet())) {
+      final String v = vid;
+      withVillagerContext(v, () -> {
+        if (savedNpcReference == null || !savedNpcReference.pending()) return;
+        NPC restored = CitizensAPI.getNPCRegistry().getById(savedNpcReference.savedId());
+        savedNpcReference.recordLookup(restored == null ? null : restored.getId());
+        if (restored != null) {
+          npc = restored;
+          getLogger().info("Restored saved Citizens NPC id " + npc.getId() + " for " + activeDisplayName + " (" + v + ") after registry load.");
+          persist();
+        } else if (savedNpcReference.pending()) {
+          // still pending lookup budget
+        } else {
+          getLogger().warning("Saved Citizens NPC id " + savedNpcReference.savedId() + " for " + activeDisplayName + " was not found after registry load; use /ahmet spawn to recover it.");
+        }
+      });
+      VillagerSlot s = villagerSlots.get(v);
+      if (s != null && s.savedNpcReference != null && s.savedNpcReference.pending()) {
+        anyPending = true;
+      }
+    }
+    if (anyPending) {
+      Bukkit.getScheduler().runTaskLater(this, this::restoreSavedNpc, 1L);
     }
   }
   private Location loadLoc(String key) {
@@ -210,11 +612,11 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     if(!cmd.getName().equalsIgnoreCase("ahmet"))return false;
     if(args.length==0||args[0].equalsIgnoreCase("help")){sendHelp(sender);return true;}
     String op=args[0].toLowerCase();
-    if(op.equals("status")){sender.sendMessage("§6Ahmet: §f"+task.describe()+" | Durum: "+controller.state()+" | Program: "+scheduleAdapter.status()+" | Yatak: "+(scheduleBed==null?"bağlı değil":coords(scheduleBed))+" | Sandık: "+(chestLocation!=null?"bağlı":"bağlı değil")+" | NPC: "+(npc!=null&&npc.isSpawned()?"aktif":"yok")+" | Korunan ev: "+(protectedHome==null||protectHomeRadius==0?"yok":protectHomeRadius+" blok")+" | Yerleştirilmiş odun işareti: "+playerPlacedWood.size()+" | Tarla: "+(farmPlot==null?"bağlı değil":farmPlot.centerX()+","+farmPlot.centerY()+","+farmPlot.centerZ()+" (r="+farmPlot.radius()+")")+(recoveryBlocked?" | Kurtarma: manuel inceleme gerekli":""));return true;}
+    if(op.equals("status")){sender.sendMessage("§6" + activeDisplayName + ": §f"+task.describe()+" | Durum: "+controller.state()+" | Rol: "+role.labelTr()+" | Program: "+scheduleAdapter.status()+" | Yatak: "+(scheduleBed==null?"bağlı değil":coords(scheduleBed))+" | Sandık: "+(chestLocation!=null?"bağlı":"bağlı değil")+" | NPC: "+(npc!=null&&npc.isSpawned()?"aktif":"yok")+" | Korunan ev: "+(protectedHome==null||protectHomeRadius==0?"yok":protectHomeRadius+" blok")+" | Yerleştirilmiş odun işareti: "+playerPlacedWood.size()+" | Tarla: "+(farmPlot==null?"bağlı değil":farmPlot.centerX()+","+farmPlot.centerY()+","+farmPlot.centerZ()+" (r="+farmPlot.radius()+")")+(recoveryBlocked?" | Kurtarma: manuel inceleme gerekli":""));return true;}
     if(op.equals("cargo")){
-      if(task.cargoItems().isEmpty())sender.sendMessage("§eAhmet'in taşıdığı kaynak yok.");
+      if(task.cargoItems().isEmpty())sender.sendMessage("§e" + activeDisplayName + "'in taşıdığı kaynak yok.");
       else {
-        sender.sendMessage("§6Ahmet'in taşıdığı kaynaklar (§f"+task.cargo+"§6):");
+        sender.sendMessage("§6" + activeDisplayName + "'in taşıdığı kaynaklar (§f"+task.cargo+"§6):");
         task.cargoItems().forEach((material,amount)->sender.sendMessage("§7• "+amount+" × "+material.toLowerCase(java.util.Locale.ROOT)));
       }
       return true;
@@ -229,7 +631,200 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       if(matches.size()>10)sender.sendMessage("§7Daha fazla sonuç var; daha dar arama kullan: /ahmet items <ad>");
       return true;
     }
+    if(op.equals("roster")||op.equals("villagers")){
+      saveActiveContext();
+      sender.sendMessage("§6Kayıtlı köylüler ("+villagerSlots.size()+"/"+MAX_VILLAGERS+"):");
+      for(VillagerSlot s:villagerSlots.values()){
+        String state=(s.npc!=null&&s.npc.isSpawned())?"§aaktif":"§cyok";
+        String taskDesc=s.task.active?"görevde ("+s.task.kind+")":"boşta";
+        sender.sendMessage("§7• §e"+s.displayName+" §7(id: §f"+s.id+"§7, rol: §b"+s.role.labelTr()+"§7, NPC: "+state+"§7, görev: "+taskDesc+"§7)");
+      }
+      return true;
+    }
+    if(op.equals("ledger")){
+      if(economyLedger==null){sender.sendMessage("§cEkonomi defteri henüz başlatılmadı.");return true;}
+      sender.sendMessage(economyLedger.describeSummary());
+      return true;
+    }
     if(!(sender instanceof Player player)){sender.sendMessage("Bu komut oyun içi oyuncu gerektiriyor.");return true;}
+    if(op.equals("role")){
+      if(!player.hasPermission("ahmet.admin")){player.sendMessage("§cYetkin yok.");return true;}
+      if(args.length!=2){player.sendMessage("§eKullanım: /ahmet role <all|worker|farmer|crafter>");return true;}
+      if(task.active||task.cargo>0||recoveryBlocked||(journal!=null&&journal.hasOperations())){
+        player.sendMessage("§c" + activeDisplayName + " şu an meşgul veya kurtarma bekliyor; rol değiştirilemez.");
+        return true;
+      }
+      VillagerRole newRole=VillagerRole.parse(args[1]).orElse(null);
+      if(newRole==null){
+        player.sendMessage("§cGeçersiz rol. Geçerli roller: all, worker, farmer, crafter (veya genel, işçi, çiftçi, usta).");
+        return true;
+      }
+      role=newRole;
+      if(npc!=null&&npc.isSpawned()&&npc.getEntity() instanceof org.bukkit.entity.Villager v){
+        org.bukkit.entity.Villager.Profession prof=switch(role){
+          case WORKER->org.bukkit.entity.Villager.Profession.TOOLSMITH;
+          case FARMER->org.bukkit.entity.Villager.Profession.FARMER;
+          case CRAFTER->org.bukkit.entity.Villager.Profession.CARTOGRAPHER;
+          case ALL_ROUNDER->org.bukkit.entity.Villager.Profession.NONE;
+        };
+        v.setProfession(prof);
+      }
+      persist();
+      player.sendMessage("§a" + activeDisplayName + " rolü güncellendi: " + role.name() + " (" + role.labelTr() + ")");
+      return true;
+    }
+    if(op.equals("npc")){
+      if(args.length<3){
+        player.sendMessage("§eKullanım: /ahmet npc <id> <spawn|summon|role|status|cargo|collect|farm|craft|chest|bed|farmplot|deliver|cancel|home> [argümanlar]");
+        return true;
+      }
+      String targetId=args[1].toLowerCase(java.util.Locale.ROOT);
+      if(!VillagerRole.isValidVillagerId(targetId)){
+        player.sendMessage("§cGeçersiz köylü kimliği: "+targetId+" (küçük harf, rakam, tire/alt çizgi; 2-16 karakter).");
+        return true;
+      }
+      String subOp=args[2].toLowerCase(java.util.Locale.ROOT);
+      if(!villagerSlots.containsKey(targetId)){
+        if(!rosterStateValid){
+          player.sendMessage("§cKöylü listesi kurtarma bekliyor; yeni köylü oluşturulamaz.");
+          return true;
+        }
+        if(!player.hasPermission("ahmet.admin")){
+          player.sendMessage("§cBu köylü henüz kayıtlı değil. Oluşturmak için yönetici yetkisi gerekli.");
+          return true;
+        }
+        if(!subOp.equals("spawn")&&!subOp.equals("summon")&&!subOp.equals("role")){
+          player.sendMessage("§cBu köylü henüz kayıtlı değil. Önce /ahmet npc "+targetId+" spawn|summon|role ile oluştur.");
+          return true;
+        }
+        if(villagerSlots.size()>=MAX_VILLAGERS){
+          player.sendMessage("§cMaksimum köylü sınırına ulaşıldı ("+MAX_VILLAGERS+").");
+          return true;
+        }
+        String defaultDisplay=capitalize(targetId);
+        VillagerSlot newSlot=VillagerSlot.createDefault(targetId,defaultDisplay,VillagerRole.ALL_ROUNDER,
+            getDataFolder().toPath().resolve("operations-"+targetId+".json"),protectionHook,
+            this::beginOwnedNavigation,this::endOwnedNavigation);
+        villagerSlots.put(targetId,newSlot);
+        persist();
+      }
+      String[] subArgs=java.util.Arrays.copyOfRange(args,2,args.length);
+      return withVillagerContext(targetId,()->onCommand(sender,cmd,label,subArgs));
+    }
+    if(op.equals("delegate")){
+      if(args.length!=4){
+        player.sendMessage("§eKullanım: /ahmet delegate <collect|farm|craft> <hedef> <miktar>");
+        return true;
+      }
+      String delegateKindArg=args[1].toLowerCase(java.util.Locale.ROOT);
+      WoodTask.Kind targetKind;
+      TaskRequest.CraftRequest craftReq=null;
+      if(delegateKindArg.equals("collect")){
+        targetKind=WoodTask.Kind.GATHER;
+        TaskRequest req=TaskRequest.parse(args[2],args[3]).orElse(null);
+        if(req==null){
+          player.sendMessage("§cBu kaynak desteklenmiyor veya miktar 1-64 arasında değil.");
+          return true;
+        }
+      }else if(delegateKindArg.equals("farm")||delegateKindArg.equals("harvest")){
+        targetKind=WoodTask.Kind.FARM;
+        TaskRequest.FarmRequest req=TaskRequest.parseFarm(args[2],args[3]).orElse(null);
+        if(req==null){
+          player.sendMessage("§cSadece olgun buğday (wheat), havuç (carrot), patates (potato) veya genel ekin (1-64 adet) hasat edilebilir.");
+          return true;
+        }
+      }else if(delegateKindArg.equals("craft")){
+        targetKind=WoodTask.Kind.CRAFT;
+        craftReq=TaskRequest.parseCraft(args[2],args[3]).orElse(null);
+        if(craftReq==null){
+          player.sendMessage("§cSadece oak_planks veya stick üretilebilir ve miktar 4 ile 64 arasında 4'ün katı olmalı.");
+          return true;
+        }
+      }else{
+        player.sendMessage("§eKullanım: /ahmet delegate <collect|farm|craft> <hedef> <miktar>");
+        return true;
+      }
+
+      saveActiveContext();
+      List<TaskDelegator.Candidate> candidates=new ArrayList<>();
+      for(VillagerSlot slot:villagerSlots.values()){
+        boolean spawned=slot.npc!=null&&slot.npc.isSpawned();
+        boolean sameWorld=spawned&&player.getWorld().equals(slot.npc.getEntity().getWorld());
+        double distanceSq=sameWorld?player.getLocation().distanceSquared(slot.npc.getEntity().getLocation()):Double.MAX_VALUE;
+
+        boolean chestBound=slot.chestLocation!=null&&slot.chestLocation.getWorld()!=null
+            &&spawned&&slot.chestLocation.getWorld().equals(slot.npc.getEntity().getWorld());
+        boolean chestLocked=slot.chestLocation!=null&&resourceLocks.isChestLockedByOther(slot.id,chestCoordsFor(slot.chestLocation));
+
+        TaskAdmission.Result admission;
+        boolean craftPrePlanOk=true;
+
+        if(targetKind==WoodTask.Kind.FARM){
+          boolean plotBound=slot.farmPlot!=null&&spawned&&slot.farmPlot.world().equals(slot.npc.getEntity().getWorld().getName());
+          admission=TaskAdmission.evaluateFarm(
+              slot.role,true,slot.recoveryBlocked,slot.journal!=null&&slot.journal.hasOperations(),
+              slot.task.active,slot.task.cargo,chestBound,plotBound,chestLocked);
+        }else{
+          admission=TaskAdmission.evaluate(
+              targetKind,slot.role,true,slot.recoveryBlocked,slot.journal!=null&&slot.journal.hasOperations(),
+              slot.task.active,slot.task.cargo,chestBound,chestLocked);
+        }
+
+        if(targetKind==WoodTask.Kind.CRAFT&&admission==TaskAdmission.Result.ACCEPT&&craftReq!=null){
+          if(slot.chestLocation==null||slot.chestLocation.getWorld()==null
+              ||!slot.chestLocation.getWorld().isChunkLoaded(slot.chestLocation.getBlockX()>>4,slot.chestLocation.getBlockZ()>>4)
+              ||!(slot.chestLocation.getBlock().getState() instanceof Chest boundChest)){
+            craftPrePlanOk=false;
+          }else{
+            CraftingPlanner.Result prePlan=CraftingPlanner.plan(
+                craftInventorySlots(deliveryInventory(boundChest)),
+                craftReq.recipe(),
+                craftReq.amount());
+            if(!prePlan.succeeded()){
+              craftPrePlanOk=false;
+            }
+          }
+        }
+
+        candidates.add(new TaskDelegator.Candidate(
+            slot.id,slot.displayName,slot.role,spawned,sameWorld,distanceSq,admission,craftPrePlanOk));
+      }
+
+      TaskDelegator.Decision decision=TaskDelegator.select(targetKind,candidates,18.0*18.0);
+      switch(decision.status()){
+        case SELECTED -> {
+          TaskDelegator.Candidate selected=decision.selected();
+          VillagerSlot targetSlot = villagerSlots.get(selected.villagerId());
+          String prevTaskId = targetSlot != null && targetSlot.task != null ? targetSlot.task.taskId : null;
+          boolean prevActive = targetSlot != null && targetSlot.task != null && targetSlot.task.active;
+          withVillagerContext(selected.villagerId(), () -> onCommand(player, cmd, label, new String[]{delegateKindArg, args[2], args[3]}));
+          boolean nowActive = targetSlot != null && targetSlot.task != null && targetSlot.task.active;
+          String nowTaskId = targetSlot != null && targetSlot.task != null ? targetSlot.task.taskId : null;
+          boolean started = nowActive && (!prevActive || !java.util.Objects.equals(prevTaskId, nowTaskId));
+          if (started) {
+            player.sendMessage("§aGörev " + selected.displayName() + " (" + selected.role().labelTr() + ") köylüsüne delege edildi.");
+          }
+          return true;
+        }
+        case NO_SPAWNED_VILLAGER -> {
+          player.sendMessage("§cYakında dünyada olan uygun bir köylü yok.");
+          return true;
+        }
+        case OUT_OF_RANGE -> {
+          player.sendMessage("§cGörev vermek için köylüye yaklaş (18 blok içinde olmalı).");
+          return true;
+        }
+        case NO_ROLE_CAPABLE -> {
+          player.sendMessage("§cBu görev türünü ("+targetKind.name()+") yapabilecek uygun role sahip köylü bulunamadı.");
+          return true;
+        }
+        case BUSY_OR_UNREADY -> {
+          player.sendMessage("§cBu görevi alabilecek köylüler şu an meşgul, sandık/tarla bağlantısı eksik veya malzemeleri yetersiz.");
+          return true;
+        }
+      }
+      return true;
+    }
     if(op.equals("protecthome")){
       if(!player.hasPermission("ahmet.admin")){player.sendMessage("§cYetkin yok.");return true;}
       if(args.length!=2){player.sendMessage("§eKullanım: /ahmet protecthome <0-32>; evinin ortasında çalıştır. 0 korumayı kapatır.");return true;}
@@ -245,20 +840,23 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       ScheduleAdapter.BedBinding binding=scheduleAdapter.bindBed(target,npc,home!=null?home:protectedHome,getConfig().getInt("options.max-distance-from-home",32),scheduleChunkAccess());
       if(!binding.valid()){player.sendMessage("§cYatak bağlanamadı: "+binding.error());return true;}
       scheduleAdapter.bedRebound();scheduleAdapter.suspend(npc,"bed rebound");scheduleBed=binding.foot();saveLoc("schedule.bed",scheduleBed);persist();
-      player.sendMessage("§aAhmet'in yatağı kaydedildi: "+coords(scheduleBed));return true;
+      player.sendMessage("§a" + activeDisplayName + "'in yatağı kaydedildi: "+coords(scheduleBed));return true;
     }
     if(op.equals("collect")){
       if(args.length!=3){player.sendMessage("§eKullanım: /ahmet collect <item|odun> <1-64>");return true;}
       TaskRequest request=TaskRequest.parse(args[1],args[2]).orElse(null);
       if(request==null){player.sendMessage("§cBu kaynak desteklenmiyor veya miktar 1-64 arasında değil. Örnek aramalar: /ahmet items oak_log, /ahmet items raw_iron. Genel odun için 'odun' yaz.");return true;}
-      if(npc==null||!npc.isSpawned()){player.sendMessage("§cÖnce /ahmet spawn ile Ahmet'i oluştur.");return true;}
-      if(!player.getWorld().equals(npc.getEntity().getWorld())||player.getLocation().distanceSquared(npc.getEntity().getLocation())>18*18){player.sendMessage("§cGörev vermek için Ahmet'e yaklaş.");return true;}
+      if(npc==null||!npc.isSpawned()){player.sendMessage("§cÖnce /ahmet spawn ile " + activeDisplayName + "'i oluştur.");return true;}
+      if(!player.getWorld().equals(npc.getEntity().getWorld())||player.getLocation().distanceSquared(npc.getEntity().getLocation())>18*18){player.sendMessage("§cGörev vermek için " + activeDisplayName + "'e yaklaş.");return true;}
       boolean chestBound=chestLocation!=null&&chestLocation.getWorld().equals(npc.getEntity().getWorld());
-      TaskAdmission.Result admission=TaskAdmission.evaluate(true,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound);
+      boolean chestLocked=chestLocation!=null&&resourceLocks.isChestLockedByOther(activeVillagerId,chestCoordsFor(chestLocation));
+      TaskAdmission.Result admission=TaskAdmission.evaluate(WoodTask.Kind.GATHER,role,true,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound,chestLocked);
       switch(admission){
         case RECOVERY_REQUIRED -> {player.sendMessage("§cKurtarma bekliyor; yeni görev güvenli değil.");return true;}
         case BUSY -> {player.sendMessage("§cÖnce mevcut görevi bitir veya /ahmet deliver ile taşıdığı yükü boşalt.");return true;}
         case CHEST_REQUIRED -> {player.sendMessage("§cÖnce aynı dünyadaki teslimat sandığını /ahmet chest ile bağla.");return true;}
+        case CHEST_LOCKED -> {player.sendMessage("§cBu sandık şu an başka bir köylünün görevinde kilitli.");return true;}
+        case ROLE_MISMATCH -> {player.sendMessage("§c" + activeDisplayName + " (" + role.labelTr() + ") bu görev türünü yapamaz.");return true;}
         case ACCEPT -> {}
         default -> {player.sendMessage("§cBu kaynak desteklenmiyor.");return true;}
       }
@@ -272,14 +870,17 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       if(args.length!=3){player.sendMessage("§eKullanım: /ahmet craft <oak_planks|stick> <4-64 (4'ün katı)>");return true;}
       TaskRequest.CraftRequest request=TaskRequest.parseCraft(args[1],args[2]).orElse(null);
       if(request==null){player.sendMessage("§cSadece oak_planks veya stick üretilebilir ve miktar 4 ile 64 arasında 4'ün katı olmalı (ör. 4, 8, 12, 16).");return true;}
-      if(npc==null||!npc.isSpawned()){player.sendMessage("§cÖnce /ahmet spawn ile Ahmet'i oluştur.");return true;}
-      if(!player.getWorld().equals(npc.getEntity().getWorld())||player.getLocation().distanceSquared(npc.getEntity().getLocation())>18*18){player.sendMessage("§cGörev vermek için Ahmet'e yaklaş.");return true;}
+      if(npc==null||!npc.isSpawned()){player.sendMessage("§cÖnce /ahmet spawn ile " + activeDisplayName + "'i oluştur.");return true;}
+      if(!player.getWorld().equals(npc.getEntity().getWorld())||player.getLocation().distanceSquared(npc.getEntity().getLocation())>18*18){player.sendMessage("§cGörev vermek için " + activeDisplayName + "'e yaklaş.");return true;}
       boolean chestBound=chestLocation!=null&&chestLocation.getWorld()!=null&&chestLocation.getWorld().equals(npc.getEntity().getWorld());
-      TaskAdmission.Result admission=TaskAdmission.evaluate(true,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound);
+      boolean chestLocked=chestLocation!=null&&resourceLocks.isChestLockedByOther(activeVillagerId,chestCoordsFor(chestLocation));
+      TaskAdmission.Result admission=TaskAdmission.evaluate(WoodTask.Kind.CRAFT,role,true,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound,chestLocked);
       switch(admission){
         case RECOVERY_REQUIRED -> {player.sendMessage("§cKurtarma bekliyor; yeni görev güvenli değil.");return true;}
         case BUSY -> {player.sendMessage("§cÖnce mevcut görevi bitir veya /ahmet deliver ile taşıdığı yükü boşalt.");return true;}
         case CHEST_REQUIRED -> {player.sendMessage("§cÖnce aynı dünyadaki teslimat sandığını /ahmet chest ile bağla.");return true;}
+        case CHEST_LOCKED -> {player.sendMessage("§cBu sandık şu an başka bir köylünün görevinde kilitli.");return true;}
+        case ROLE_MISMATCH -> {player.sendMessage("§c" + activeDisplayName + " (" + role.labelTr() + ") bu görev türünü yapamaz.");return true;}
         case ACCEPT -> {}
         default -> {player.sendMessage("§cBu üretim desteklenmiyor.");return true;}
       }
@@ -299,6 +900,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       scheduleAdapter.suspend(npc,"craft task admitted");
       productionGoalAdapter.prepareTaskAdmission(true,getConfig().getBoolean("options.production-goals-enabled",false),this::clearPriorNavigationForTaskAdmission);
       task.startCraft(player.getUniqueId(),request.recipe(),request.amount());
+      resourceLocks.tryAcquireChest(activeVillagerId,task.taskId,chestCoordsFor(chestLocation));
       navigationPurpose=AgentGoal.DELIVER_CARGO;treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;
       controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Craft task started via command");controller.clearHelp();persist();event("task_started",request.amount());
       say("Tamam, sandığa gidip "+request.amount()+" "+request.itemName()+" üreteceğim.");
@@ -360,19 +962,22 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         player.sendMessage("§cSadece olgun buğday (wheat), havuç (carrot), patates (potato) veya genel ekin (1-64 adet) hasat edilebilir."); return true;
       }
       if (npc == null || !npc.isSpawned()) {
-        player.sendMessage("§cÖnce /ahmet spawn ile Ahmet'i oluştur."); return true;
+        player.sendMessage("§cÖnce /ahmet spawn ile " + activeDisplayName + "'i oluştur."); return true;
       }
       if (!player.getWorld().equals(npc.getEntity().getWorld()) || player.getLocation().distanceSquared(npc.getEntity().getLocation()) > 18 * 18) {
-        player.sendMessage("§cGörev vermek için Ahmet'e yaklaş."); return true;
+        player.sendMessage("§cGörev vermek için " + activeDisplayName + "'e yaklaş."); return true;
       }
       boolean chestBound = chestLocation != null && chestLocation.getWorld() != null && chestLocation.getWorld().equals(npc.getEntity().getWorld());
+      boolean chestLocked = chestLocation != null && resourceLocks.isChestLockedByOther(activeVillagerId, chestCoordsFor(chestLocation));
       boolean plotBound = farmPlot != null && farmPlot.world().equals(npc.getEntity().getWorld().getName());
-      TaskAdmission.Result admission = TaskAdmission.evaluateFarm(true, recoveryBlocked, journal.hasOperations(), task.active, task.cargo, chestBound, plotBound);
+      TaskAdmission.Result admission = TaskAdmission.evaluateFarm(role, true, recoveryBlocked, journal.hasOperations(), task.active, task.cargo, chestBound, plotBound, chestLocked);
       switch (admission) {
         case RECOVERY_REQUIRED -> { player.sendMessage("§cKurtarma bekliyor; yeni görev güvenli değil."); return true; }
         case BUSY -> { player.sendMessage("§cÖnce mevcut görevi bitir veya /ahmet deliver ile taşıdığı yükü boşalt."); return true; }
         case CHEST_REQUIRED -> { player.sendMessage("§cÖnce aynı dünyadaki teslimat sandığını /ahmet chest ile bağla."); return true; }
+        case CHEST_LOCKED -> { player.sendMessage("§cBu sandık şu an başka bir köylünün görevinde kilitli."); return true; }
         case PLOT_REQUIRED -> { player.sendMessage("§cÖnce aynı dünyada onaylı bir tarla alanını /ahmet farmplot <1-16> ile bağla."); return true; }
+        case ROLE_MISMATCH -> { player.sendMessage("§c" + activeDisplayName + " (" + role.labelTr() + ") bu görev türünü yapamaz."); return true; }
         case ACCEPT -> {}
         default -> { player.sendMessage("§cBu hasat görevi desteklenmiyor."); return true; }
       }
@@ -387,35 +992,44 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     if(op.equals("spawn")){
       if(!player.hasPermission("ahmet.admin")){player.sendMessage("§cYetkin yok.");return true;}
       if(npc==null&&savedNpcReference.pending()){
-        player.sendMessage("§eCitizens eski Ahmet kaydını yüklüyor; birkaç saniye sonra tekrar dene.");return true;
+        player.sendMessage("§eCitizens eski " + activeDisplayName + " kaydını yüklüyor; birkaç saniye sonra tekrar dene.");return true;
       }
-      if(npc==null){npc=CitizensAPI.getNPCRegistry().createNPC(EntityType.VILLAGER,"Ahmet");savedNpcReference.created(npc.getId());}
-      if(npc.isSpawned()){player.sendMessage("§eAhmet zaten dünyada.");return true;}
+      if(npc==null){npc=CitizensAPI.getNPCRegistry().createNPC(EntityType.VILLAGER,activeDisplayName);savedNpcReference.created(npc.getId());}
+      if(npc.isSpawned()){player.sendMessage("§e" + activeDisplayName + " zaten dünyada.");return true;}
       Location spawnAt=task.active&&home!=null?home:player.getLocation();
-      if(!npc.spawn(spawnAt)){player.sendMessage("§cAhmet dünyada oluşturulamadı.");return true;}
+      if(!npc.spawn(spawnAt)){player.sendMessage("§c" + activeDisplayName + " dünyada oluşturulamadı.");return true;}
+      if(npc.getEntity() instanceof org.bukkit.entity.Villager v){
+        org.bukkit.entity.Villager.Profession prof=switch(role){
+          case WORKER->org.bukkit.entity.Villager.Profession.TOOLSMITH;
+          case FARMER->org.bukkit.entity.Villager.Profession.FARMER;
+          case CRAFTER->org.bukkit.entity.Villager.Profession.CARTOGRAPHER;
+          case ALL_ROUNDER->org.bukkit.entity.Villager.Profession.NONE;
+        };
+        v.setProfession(prof);
+      }
       if(!task.active)home=player.getLocation().clone();if(protectedHome==null&&home!=null)protectedHome=home.clone();treeRetryAfterMs=0;persist();say("Selam! İşe hazırım.");return true;
     }
     if(op.equals("summon")){
       if(!player.hasPermission("ahmet.admin")){player.sendMessage("§cYetkin yok.");return true;}
-      if(task.active||recoveryBlocked){player.sendMessage("§cAhmet görevde veya kurtarma bekliyor; şu an yanına çağrılamaz.");return true;}
+      if(task.active||recoveryBlocked){player.sendMessage("§c" + activeDisplayName + " görevde veya kurtarma bekliyor; şu an yanına çağrılamaz.");return true;}
       if(task.cargo>0&&getConfig().getBoolean("options.production-goals-enabled",false)){
-        player.sendMessage("§cAhmet'in iptalden kalan yükü var; önce /ahmet deliver ile teslim et.");return true;
+        player.sendMessage("§c" + activeDisplayName + "'in iptalden kalan yükü var; önce /ahmet deliver ile teslim et.");return true;
       }
       if(npc==null&&savedNpcReference.pending()){
-        player.sendMessage("§eCitizens eski Ahmet kaydını yüklüyor; birkaç saniye sonra tekrar dene.");return true;
+        player.sendMessage("§eCitizens eski " + activeDisplayName + " kaydını yüklüyor; birkaç saniye sonra tekrar dene.");return true;
       }
       Location destination=findSafeSummonLocation(player);
       if(destination==null){player.sendMessage("§cYakınında yüklü ve güvenli bir boş nokta bulamadım.");return true;}
-      if(npc==null){npc=CitizensAPI.getNPCRegistry().createNPC(EntityType.VILLAGER,"Ahmet");savedNpcReference.created(npc.getId());}
+      if(npc==null){npc=CitizensAPI.getNPCRegistry().createNPC(EntityType.VILLAGER,activeDisplayName);savedNpcReference.created(npc.getId());}
       scheduleAdapter.suspend(npc,"operator summon");
       if(npc.isSpawned()){
         clearNavigation();
         npc.teleport(destination,PlayerTeleportEvent.TeleportCause.PLUGIN);
       }else if(!npc.spawn(destination)){
-        player.sendMessage("§cAhmet güvenli noktada oluşturulamadı.");return true;
+        player.sendMessage("§c" + activeDisplayName + " güvenli noktada oluşturulamadı.");return true;
       }
       home=destination.clone();treeRetryAfterMs=0;persist();
-      player.sendMessage("§aAhmet yanındaki güvenli noktaya geldi.");say("Yanına geldim.");return true;
+      player.sendMessage("§a" + activeDisplayName + " yanındaki güvenli noktaya geldi.");say("Yanına geldim.");return true;
     }
     if(op.equals("chest")){
       if(!player.hasPermission("ahmet.admin")){player.sendMessage("§cYetkin yok.");return true;}
@@ -444,16 +1058,16 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     }
     if(op.equals("home")||op.equals("return")){
       if(!canCancelOrReturnHome()){player.sendMessage("§cKurtarma bekliyor; işlem güvenli değil.");return true;}
-      if(npc==null||!npc.isSpawned()){player.sendMessage("§cÖnce /ahmet spawn ile Ahmet'i oluştur.");return true;}
+      if(npc==null||!npc.isSpawned()){player.sendMessage("§cÖnce /ahmet spawn ile " + activeDisplayName + "'i oluştur.");return true;}
       Location effectiveHome=getEffectiveHome();
       if(effectiveHome==null){player.sendMessage("§cKayıtlı ev konumu yok.");return true;}
       if(!TaskAuthorization.mayControl(player.getUniqueId().toString(),task.owner,player.hasPermission("ahmet.admin"),task.active||task.cargo>0)){player.sendMessage("§cYetkin yok.");return true;}
       if(!productionGoalAdapter.admitReturnHome(getConfig().getBoolean("options.production-goals-enabled",false),
           task.active,task.cargo,this::cancel)){
-        player.sendMessage("§cAhmet'in iptalden kalan yükü var; eve yönlendirmeden önce /ahmet deliver kullan.");return true;
+        player.sendMessage("§c" + activeDisplayName + "'in iptalden kalan yükü var; eve yönlendirmeden önce /ahmet deliver kullan.");return true;
       }
       scheduleAdapter.suspend(npc,"operator return-home");returningHome=true;homeStepAttempt=0;clearNavigation();persist();
-      player.sendMessage("§aAhmet eve doğru yönlendirildi.");
+      player.sendMessage("§a" + activeDisplayName + " eve doğru yönlendirildi.");
       say("Eve doğru yürüyorum.");return true;
     }
     if(op.equals("ask")){
@@ -469,19 +1083,46 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     sender.sendMessage("§e/ahmet collect <item|odun> <1-64> §7— doğrudan toplama görevi");
     sender.sendMessage("§e/ahmet craft <oak_planks|stick> <4-64> §7— bağlı sandıktaki malzemeyle üretim");
     sender.sendMessage("§e/ahmet farm <wheat|carrot|potato|ekin> <1-64> §7— onaylı tarladan ekin hasadı");
+    sender.sendMessage("§e/ahmet delegate <collect|farm|craft> <hedef> <miktar> §7— uygun köylüye görev delege et");
+    sender.sendMessage("§e/ahmet roster §7— kayıtlı köylü listesi ve durumları");
+    sender.sendMessage("§e/ahmet ledger §7— köy ekonomi ve kaynak hareketleri defteri");
     sender.sendMessage("§e/ahmet items [ara] §7— 1.21.6 item kataloğu ve toplama desteği");
     sender.sendMessage("§e/ahmet ask <mesaj> §7— Ahmet'le komut/sohbet");
     sender.sendMessage("§e/ahmet deliver §7— iptalden kalan yükü sandığa teslim et");
     sender.sendMessage("§e/ahmet cancel §7— kendi görevini iptal et");
     sender.sendMessage("§e/ahmet home §7— görevi bırakıp eve dön");
-    if(sender.hasPermission("ahmet.admin"))sender.sendMessage("§e/ahmet spawn | summon | chest | bed | farmplot <1-16|0> | protecthome <0-32> §7— yönetici işlemleri");
+    if(sender.hasPermission("ahmet.admin"))sender.sendMessage("§e/ahmet spawn | summon | role <rol> | chest | bed | farmplot <1-16|0> | protecthome <0-32> | npc <id> <komut> §7— yönetici işlemleri");
     sender.sendMessage("§7Ahmet doğal ağaç adaylarını seçer; oyuncu tarafından konan odunları ve korunan ev alanını atlar.");
   }
   @Override public List<String> onTabComplete(CommandSender sender,Command command,String alias,String[] args){
     if(!command.getName().equalsIgnoreCase("ahmet")||args.length==0)return List.of();
-    List<String> commands=new ArrayList<>(List.of("help","status","cargo","collect","craft","farm","items","ask","deliver","cancel","home"));
-    if(sender.hasPermission("ahmet.admin"))commands.addAll(List.of("spawn","summon","chest","bed","farmplot","protecthome"));
+    List<String> commands=new ArrayList<>(List.of("help","status","cargo","collect","craft","farm","delegate","roster","ledger","items","ask","deliver","cancel","home"));
+    if(sender.hasPermission("ahmet.admin"))commands.addAll(List.of("spawn","summon","role","npc","chest","bed","farmplot","protecthome"));
     if(args.length==1)return commands.stream().filter(value->value.startsWith(args[0].toLowerCase(java.util.Locale.ROOT))).toList();
+    if(args.length==2&&args[0].equalsIgnoreCase("role")&&sender.hasPermission("ahmet.admin"))
+      return List.of("all","worker","farmer","crafter","genel","işçi","çiftçi","usta").stream().filter(value->value.startsWith(args[1].toLowerCase(java.util.Locale.ROOT))).toList();
+    if(args.length==2&&args[0].equalsIgnoreCase("npc")&&sender.hasPermission("ahmet.admin"))
+      return new ArrayList<>(villagerSlots.keySet()).stream().filter(value->value.startsWith(args[1].toLowerCase(java.util.Locale.ROOT))).toList();
+    if(args.length==3&&args[0].equalsIgnoreCase("npc")&&sender.hasPermission("ahmet.admin"))
+      return List.of("spawn","summon","role","status","cargo","collect","farm","craft","chest","bed","farmplot","deliver","cancel","home").stream().filter(value->value.startsWith(args[2].toLowerCase(java.util.Locale.ROOT))).toList();
+    if(args.length==4&&args[0].equalsIgnoreCase("npc")&&args[2].equalsIgnoreCase("role")&&sender.hasPermission("ahmet.admin"))
+      return List.of("all","worker","farmer","crafter","genel","işçi","çiftçi","usta").stream().filter(value->value.startsWith(args[3].toLowerCase(java.util.Locale.ROOT))).toList();
+    if(args.length==2&&args[0].equalsIgnoreCase("delegate"))
+      return List.of("collect","farm","craft").stream().filter(value->value.startsWith(args[1].toLowerCase(java.util.Locale.ROOT))).toList();
+    if(args.length==3&&args[0].equalsIgnoreCase("delegate")&&args[1].equalsIgnoreCase("farm"))
+      return List.of("wheat","carrot","potato","ekin","buğday","havuç","patates").stream().filter(value->value.startsWith(args[2].toLowerCase(java.util.Locale.ROOT))).toList();
+    if(args.length==4&&args[0].equalsIgnoreCase("delegate")&&args[1].equalsIgnoreCase("farm"))
+      return List.of("8","16","32","64").stream().filter(value->value.startsWith(args[3])).toList();
+    if(args.length==3&&args[0].equalsIgnoreCase("delegate")&&args[1].equalsIgnoreCase("collect")){
+      List<String> resources=new ArrayList<>(List.of("odun","oak_log","spruce_log","birch_log","jungle_log","acacia_log","dark_oak_log","mangrove_log","cherry_log","pale_oak_log","crimson_stem","warped_stem","bamboo","dirt","sand","red_sand","cobblestone","coal","raw_iron","raw_gold"));
+      return resources.stream().filter(value->value.startsWith(args[2].toLowerCase(java.util.Locale.ROOT))).toList();
+    }
+    if(args.length==4&&args[0].equalsIgnoreCase("delegate")&&args[1].equalsIgnoreCase("collect"))
+      return List.of("8","16","32","64").stream().filter(value->value.startsWith(args[3])).toList();
+    if(args.length==3&&args[0].equalsIgnoreCase("delegate")&&args[1].equalsIgnoreCase("craft"))
+      return List.of("oak_planks","stick").stream().filter(value->value.startsWith(args[2].toLowerCase(java.util.Locale.ROOT))).toList();
+    if(args.length==4&&args[0].equalsIgnoreCase("delegate")&&args[1].equalsIgnoreCase("craft"))
+      return List.of("4","8","12","16","32","64").stream().filter(value->value.startsWith(args[3])).toList();
     if(args.length==2&&args[0].equalsIgnoreCase("protecthome")&&sender.hasPermission("ahmet.admin"))return List.of("0","8","10","12","16").stream().filter(value->value.startsWith(args[1])).toList();
     if(args.length==2&&args[0].equalsIgnoreCase("farmplot")&&sender.hasPermission("ahmet.admin"))return List.of("0","4","8","12","16").stream().filter(value->value.startsWith(args[1])).toList();
     if(args.length==2&&args[0].equalsIgnoreCase("farm"))return List.of("wheat","carrot","potato","ekin","buğday","havuç","patates").stream().filter(value->value.startsWith(args[1].toLowerCase(java.util.Locale.ROOT))).toList();
@@ -511,11 +1152,17 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     String plainMessage=PlainTextComponentSerializer.plainText().serialize(event.message());
     AddressedChat.parse(plainMessage).ifPresent(message ->
       // Chat events may run asynchronously; all entity/world access stays on the server thread.
-      Bukkit.getScheduler().runTask(this,()->interact(player,message)));
+      Bukkit.getScheduler().runTask(this,()->withVillagerContext(PRIMARY_VILLAGER_ID, ()->interact(player,message))));
   }
   @EventHandler public void onInteract(PlayerInteractEntityEvent event){
-    if(presentation.isAhmet(npc,event.getRightClicked())){
-      event.setCancelled(true);presentation.replyToActor(npc,event.getPlayer(),"Selam! Bana sohbetten 'Ahmet, ...' yazabilirsin.");
+    Entity clicked = event.getRightClicked();
+    for (Map.Entry<String, VillagerSlot> entry : villagerSlots.entrySet()) {
+      VillagerSlot slot = entry.getValue();
+      if (slot.npc != null && slot.npc.isSpawned() && presentation.isAhmet(slot.npc, clicked)) {
+        event.setCancelled(true);
+        withVillagerContext(entry.getKey(), () -> interact(event.getPlayer(), "Merhaba Ahmet, durumun nedir?"));
+        return;
+      }
     }
   }
   @EventHandler public void lockPendingDepositClick(InventoryClickEvent event){
@@ -528,24 +1175,27 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     if(pendingDepositInventory(event.getSource())||pendingDepositInventory(event.getDestination()))event.setCancelled(true);
   }
   private boolean pendingDepositInventory(Inventory inventory){
-    if(inventory==null||journal==null)return false;
-    if(journal.pendingDeposit().isPresent()){
-      OperationJournal.Deposit pending=journal.pendingDeposit().get();
-      World world=Bukkit.getWorld(pending.world());
-      if(world!=null){
-        Block block=world.getBlockAt(pending.x(),pending.y(),pending.z());
-        if(block.getState() instanceof Chest chest){
-          if(inventory==deliveryInventory(chest)||inventory.equals(deliveryInventory(chest)))return true;
+    if(inventory==null)return false;
+    for (VillagerSlot slot : villagerSlots.values()) {
+      if (slot.journal == null) continue;
+      if(slot.journal.pendingDeposit().isPresent()){
+        OperationJournal.Deposit pending=slot.journal.pendingDeposit().get();
+        World world=Bukkit.getWorld(pending.world());
+        if(world!=null){
+          Block block=world.getBlockAt(pending.x(),pending.y(),pending.z());
+          if(block.getState() instanceof Chest chest){
+            if(inventory==deliveryInventory(chest)||inventory.equals(deliveryInventory(chest)))return true;
+          }
         }
       }
-    }
-    if(journal.pendingCraft().isPresent()){
-      OperationJournal.Craft pending=journal.pendingCraft().get();
-      World world=Bukkit.getWorld(pending.world());
-      if(world!=null){
-        Block block=world.getBlockAt(pending.x(),pending.y(),pending.z());
-        if(block.getState() instanceof Chest chest){
-          if(inventory==deliveryInventory(chest)||inventory.equals(deliveryInventory(chest)))return true;
+      if(slot.journal.pendingCraft().isPresent()){
+        OperationJournal.Craft pending=slot.journal.pendingCraft().get();
+        World world=Bukkit.getWorld(pending.world());
+        if(world!=null){
+          Block block=world.getBlockAt(pending.x(),pending.y(),pending.z());
+          if(block.getState() instanceof Chest chest){
+            if(inventory==deliveryInventory(chest)||inventory.equals(deliveryInventory(chest)))return true;
+          }
         }
       }
     }
@@ -560,9 +1210,9 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
 
 
   private void interact(Player player,String message){
-    if(recoveryBlocked){player.sendMessage("§cAhmet'in görev verisi kurtarma bekliyor; önce yönetici incelemeli.");return;}
-    if(npc==null || !npc.isSpawned()){player.sendMessage("§cÖnce /ahmet spawn ile Ahmet'i oluştur.");return;}
-    if(!player.getWorld().equals(npc.getEntity().getWorld()) || player.getLocation().distanceSquared(npc.getEntity().getLocation())>18*18){player.sendMessage("§cAhmet'le konuşmak için ona yaklaş.");return;}
+    if(recoveryBlocked){player.sendMessage("§c" + activeDisplayName + "'in görev verisi kurtarma bekliyor; önce yönetici incelemeli.");return;}
+    if(npc==null || !npc.isSpawned()){player.sendMessage("§cÖnce /ahmet spawn ile " + activeDisplayName + "'i oluştur.");return;}
+    if(!player.getWorld().equals(npc.getEntity().getWorld()) || player.getLocation().distanceSquared(npc.getEntity().getLocation())>18*18){player.sendMessage("§c" + activeDisplayName + "'le konuşmak için ona yaklaş.");return;}
     JsonObject req=new JsonObject();req.addProperty("actorUuid",player.getUniqueId().toString());req.addProperty("actorName",player.getName());req.addProperty("text",message);
     final long interactionGeneration=controller.jobGeneration();
     GroundedPerception.Snapshot perception=BukkitPerception.capture(npc,player,chestLocation,
@@ -570,9 +1220,10 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         getConfig().getBoolean("perception.include-bound-chest",false),
         getConfig().getBoolean("perception.include-players",false),interactionGeneration);
     JsonObject context=new JsonObject();context.addProperty("generation",interactionGeneration);context.add("perception",com.google.gson.JsonParser.parseString(perception.toJson()));context.addProperty("busy",task.active || task.cargo>0);context.addProperty("taskActive",task.active);context.addProperty("cargo",task.cargo);context.addProperty("chestBound",chestLocation!=null);context.addProperty("plotBound",farmPlot!=null&&npc.getEntity().getWorld()!=null&&farmPlot.world().equals(npc.getEntity().getWorld().getName()));req.add("context",context);
-    brain.post("/api/chat",req).whenComplete((reply,error)->Bukkit.getScheduler().runTask(this,()->{
+    final String callbackVillagerId = activeVillagerId;
+    brain.post("/api/chat",req).whenComplete((reply,error)->Bukkit.getScheduler().runTask(this,()->withVillagerContext(callbackVillagerId, () -> {
       if(controller.jobGeneration()!=interactionGeneration)return;
-      if(error!=null){player.sendMessage("§cAhmet'in beyni şu an yanıt vermiyor: "+error.getMessage());return;}
+      if(error!=null){player.sendMessage("§c" + activeDisplayName + "'in beyni şu an yanıt vermiyor: "+error.getMessage());return;}
       if(!player.isOnline())return;
       String answer=reply.has("reply")?reply.get("reply").getAsString():"Hmm?";
       if(reply.has("taskSource")){
@@ -606,7 +1257,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
           TaskRequest.CraftRequest craftReq=TaskRequest.parseCraft(recipeKey,amountText).orElse(null);
           boolean validIntent=craftReq!=null;
           boolean chestBound=chestLocation!=null&&chestLocation.getWorld()!=null&&chestLocation.getWorld().equals(npc.getEntity().getWorld());
-          TaskAdmission.Result admission=TaskAdmission.evaluate(validIntent,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound);
+          boolean chestLocked=chestLocation!=null&&resourceLocks.isChestLockedByOther(activeVillagerId,chestCoordsFor(chestLocation));
+          TaskAdmission.Result admission=TaskAdmission.evaluate(WoodTask.Kind.CRAFT,role,validIntent,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound,chestLocked);
           switch(admission){
             case ACCEPT -> {
               if(!chestLocation.getWorld().isChunkLoaded(chestLocation.getBlockX()>>4,chestLocation.getBlockZ()>>4)||!(chestLocation.getBlock().getState() instanceof Chest boundChest)){
@@ -623,11 +1275,14 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
                   scheduleAdapter.suspend(npc,"craft task admitted");
                   productionGoalAdapter.prepareTaskAdmission(true,getConfig().getBoolean("options.production-goals-enabled",false),this::clearPriorNavigationForTaskAdmission);
                   task.startCraft(player.getUniqueId(),craftReq.recipe(),craftReq.amount());
+                  resourceLocks.tryAcquireChest(activeVillagerId,task.taskId,chestCoordsFor(chestLocation));
                   navigationPurpose=AgentGoal.DELIVER_CARGO;treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;
                   controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Craft task started via chat");controller.clearHelp();persist();event("task_started",craftReq.amount());
                 }
               }
             }
+            case ROLE_MISMATCH -> answer="Benim rolüm " + role.labelTr() + "; bu görevi yapamam.";
+            case CHEST_LOCKED -> answer="İşaretli sandık şu an başka bir köylünün görevinde kilitli.";
             case UNSUPPORTED -> answer="Şimdilik sadece bağlı sandıktaki malzemelerle 4–64 arası (4'ün katı) oak_planks veya stick üretebilirim.";
             case RECOVERY_REQUIRED -> {getLogger().warning("Chat task request rejected because operation recovery/checkpoint is pending.");answer="Görev günlüğü kurtarma veya dünya kaydı bekliyor; güvenli duruma gelince tekrar dene.";}
             case BUSY -> answer="Önce mevcut görevi bitir veya taşıdığım kaynakları /ahmet deliver ile teslim et.";
@@ -639,8 +1294,9 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
           TaskRequest.FarmRequest farmReq=TaskRequest.parseFarm(cropKey,amountText).orElse(null);
           boolean validIntent=farmReq!=null;
           boolean chestBound=chestLocation!=null&&chestLocation.getWorld()!=null&&chestLocation.getWorld().equals(npc.getEntity().getWorld());
+          boolean chestLocked=chestLocation!=null&&resourceLocks.isChestLockedByOther(activeVillagerId,chestCoordsFor(chestLocation));
           boolean plotBound=farmPlot!=null&&npc.getEntity().getWorld()!=null&&farmPlot.world().equals(npc.getEntity().getWorld().getName());
-          TaskAdmission.Result admission=TaskAdmission.evaluateFarm(validIntent,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound,plotBound);
+          TaskAdmission.Result admission=TaskAdmission.evaluateFarm(role,validIntent,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound,plotBound,chestLocked);
           switch(admission){
             case ACCEPT -> {
               scheduleAdapter.suspend(npc,"farm task admitted");
@@ -649,6 +1305,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
               navigationPurpose=AgentGoal.HARVEST_RESOURCE;treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;
               controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Farm task started via chat");controller.clearHelp();persist();event("task_started",farmReq.amount());
             }
+            case ROLE_MISMATCH -> answer="Benim rolüm " + role.labelTr() + "; bu görevi yapamam.";
+            case CHEST_LOCKED -> answer="İşaretli sandık şu an başka bir köylünün görevinde kilitli.";
             case UNSUPPORTED -> answer="Şimdilik sadece onaylı tarladaki olgun buğday (wheat), havuç (carrot) ve patates (potato) ekinlerini (1–64 adet) hasat edebilirim.";
             case RECOVERY_REQUIRED -> {getLogger().warning("Chat task request rejected because operation recovery/checkpoint is pending.");answer="Görev günlüğü kurtarma veya dünya kaydı bekliyor; güvenli duruma gelince tekrar dene.";}
             case BUSY -> answer="Önce mevcut görevi bitir veya taşıdığım kaynakları /ahmet deliver ile teslim et.";
@@ -666,13 +1324,16 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
           }
           boolean validIntent=preference!=null&&amount>=1&&amount<=64&&WoodMaterials.isPreference(preference);
           boolean chestBound=chestLocation!=null&&chestLocation.getWorld().equals(npc.getEntity().getWorld());
-          TaskAdmission.Result admission=TaskAdmission.evaluate(validIntent,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound);
+          boolean chestLocked=chestLocation!=null&&resourceLocks.isChestLockedByOther(activeVillagerId,chestCoordsFor(chestLocation));
+          TaskAdmission.Result admission=TaskAdmission.evaluate(WoodTask.Kind.GATHER,role,validIntent,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound,chestLocked);
           switch(admission){
             case ACCEPT -> {
               scheduleAdapter.suspend(npc,"task admitted");
               productionGoalAdapter.prepareTaskAdmission(true,getConfig().getBoolean("options.production-goals-enabled",false),this::clearPriorNavigationForTaskAdmission);
               task.start(player.getUniqueId(),amount,preference);navigationPurpose=AgentGoal.HARVEST_RESOURCE;treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Task started via chat");controller.clearHelp();persist();event("task_started",amount);
             }
+            case ROLE_MISMATCH -> answer="Benim rolüm " + role.labelTr() + "; bu görevi yapamam.";
+            case CHEST_LOCKED -> answer="İşaretli sandık şu an başka bir köylünün görevinde kilitli.";
             case UNSUPPORTED -> answer="Bu item kataloğumda tanımlı, ancak güvenli toplama yeteneğim henüz yok. Şimdilik yaygın odun, toprak, kum, taş, kömür, demir ve altın kaynaklarını isteyebilirsin.";
             case RECOVERY_REQUIRED -> {getLogger().warning("Chat task request rejected because operation recovery/checkpoint is pending.");answer="Görev günlüğü kurtarma veya dünya kaydı bekliyor; güvenli duruma gelince tekrar dene.";}
             case BUSY -> answer="Önce mevcut görevi bitir veya taşıdığım kaynakları /ahmet deliver ile teslim et.";
@@ -681,7 +1342,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         }
       }
       presentation.replyToActor(npc,player,answer);
-    }));
+    })));
   }
   private void clearPriorNavigationForTaskAdmission(){clearNavigation();returningHome=false;homeStepAttempt=0;}
   private boolean canCancelOrReturnHome(){
@@ -704,6 +1365,9 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     clearNavigation();
     explorationAttempts=0;
     returningHome=task.cargo==0;
+    if(!recoveryBlocked && (journal==null || !journal.hasPendingOperation())){
+      resourceLocks.releaseAllForVillager(activeVillagerId);
+    }
     persist();
     return true;
   }
@@ -756,7 +1420,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private ProductionGoalAdapter.Facts captureProductionGoalFacts(Location current,boolean routeBlocked,
       boolean clearOfferedByLiveJev,boolean routeRetryAvailable,boolean foreignNavigationWaitExpired){
     boolean pending=journal==null||journal.hasPendingOperation();
-    boolean gatherActive = TaskAdmission.canExecuteHarvestOrDeliverStep(task);
+    boolean gatherActive = TaskAdmission.canExecuteHarvestOrDeliverStep(task, role);
     boolean scanPending=gatherActive&&!task.readyToDeliver()&&(!targetScanner.complete()||!scanEvaluated);
     boolean scanExhausted=gatherActive&&!task.readyToDeliver()&&targetScanner.complete()&&scanEvaluated&&!productionCandidateAvailable;
     boolean navigationInProgress=navigationGoal!=null&&taskNavigationRoute.matches(npc);
@@ -796,7 +1460,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
 
   private AgentGoal currentNavigationGoal(Location current){
-    if(task.active && TaskAdmission.canExecuteHarvestOrDeliverStep(task)){
+    if(task.active && TaskAdmission.canExecuteHarvestOrDeliverStep(task, role)){
       if(task.readyToDeliver())return AgentGoal.DELIVER_CARGO;
       if(outsideHomeBoundary(current,getEffectiveHome()))return AgentGoal.RETURN_HOME;
       if(navigationPurpose==AgentGoal.EXPLORE_RESOURCES||navigationPurpose==AgentGoal.RETURN_HOME)return navigationPurpose;
@@ -810,8 +1474,12 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
 
   private void step(){
     if(!Bukkit.isPrimaryThread())return;
-    taskNavigationRoute.runStep(npc,this::stepOwnedNavigation,this::reconcileActivationRange,
-        ()->scheduleAdapter.suspend(npc,"step failure"),activationRangeGuard::clear);
+    for(String vid : new ArrayList<>(villagerSlots.keySet())){
+      withVillagerContext(vid, () -> {
+        taskNavigationRoute.runStep(npc,this::stepOwnedNavigation,this::reconcileActivationRange,
+            ()->scheduleAdapter.suspend(npc,"step failure"),activationRangeGuard::clear);
+      });
+    }
   }
 
   private void stepOwnedNavigation(){
@@ -833,11 +1501,11 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     }
     final Location current=npc.getEntity().getLocation();
     final long now=System.currentTimeMillis();
-    if(task.active && TaskAdmission.canExecuteCraftStep(task)){
+    if(task.active && TaskAdmission.canExecuteCraftStep(task, role)){
       stepCraftTask(current, now);
       return;
     }
-    if(task.active && !TaskAdmission.canExecuteHarvestOrDeliverStep(task)){
+    if(task.active && !TaskAdmission.canExecuteHarvestOrDeliverStep(task, role)){
       foreignNavigationWait.resetWaitForSafetyBlock();
       return;
     }
@@ -1031,7 +1699,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       return;
     }
 
-    if (!TaskAdmission.canExecuteHarvestOrDeliverStep(task)) {
+    if (!TaskAdmission.canExecuteHarvestOrDeliverStep(task, role)) {
       return;
     }
 
@@ -1175,7 +1843,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     observation.addProperty("generation",generation);observation.add("perception",com.google.gson.JsonParser.parseString(perception.toJson()));
     req.add("observation",observation);req.add("actions",options);
     deciding=true;endOwnedNavigation();
-    brain.post("/api/decide",req).whenComplete((response,error)->Bukkit.getScheduler().runTask(this,()->{
+    final String callbackVillagerId = activeVillagerId;
+    brain.post("/api/decide",req).whenComplete((response,error)->Bukkit.getScheduler().runTask(this,()->withVillagerContext(callbackVillagerId, () -> {
       deciding=false;if(!task.active || npc==null || !npc.isSpawned() || controller.jobGeneration()!=generation)return;
       // JEV may select only an offered target ID. Java retains each real block location.
       String selected=error==null&&response.has("id")?response.get("id").getAsString():"wait";
@@ -1187,6 +1856,9 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       String candidateId=validatedAction!=null?validatedAction.id():"unoffered";
       Location selectedTarget=validatedAction!=null?offeredTargets.get(validatedAction.id()):null;
       if(selectedTarget!=null&&!isEligibleTarget(selectedTarget.getBlock(),task.materialPreference))selectedTarget=null;
+      if(selectedTarget!=null&&!resourceLocks.tryAcquireTargetBlock(activeVillagerId,task.taskId,selectedTarget.getWorld().getName(),selectedTarget.getBlockX(),selectedTarget.getBlockY(),selectedTarget.getBlockZ())){
+        selectedTarget=null;
+      }
       if(selectedTarget!=null){
         decisionRetry.clear();treeTarget=selectedTarget;routeClears=0;treeRetryAfterMs=0;waitDecisions=0;
         controller.transitionTo(AgentState.NAVIGATING,"Target selected: "+candidateId);
@@ -1195,11 +1867,21 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         decisionRetry.schedule(System.currentTimeMillis());
         getLogger().info("Gather target selection source: "+source+", model: "+model+", candidate: "+candidateId);
         if(++waitDecisions>=3&&!offeredTargets.isEmpty()){
-          waitDecisions=0;treeTarget=offeredTargets.values().iterator().next();routeClears=0;
-          controller.transitionTo(AgentState.NAVIGATING,"Fallback target selected after wait exhaustion");
+          Location fallback=null;
+          for(Location cand:offeredTargets.values()){
+            if(cand!=null&&isEligibleTarget(cand.getBlock(),task.materialPreference)
+                &&resourceLocks.tryAcquireTargetBlock(activeVillagerId,task.taskId,cand.getWorld().getName(),cand.getBlockX(),cand.getBlockY(),cand.getBlockZ())){
+              fallback=cand;
+              break;
+            }
+          }
+          if(fallback!=null){
+            waitDecisions=0;treeTarget=fallback;routeClears=0;
+            controller.transitionTo(AgentState.NAVIGATING,"Fallback target selected after wait exhaustion");
+          }
         }
       }
-    }));
+    })));
   }
 
   private void advanceSchedule(){
@@ -1229,7 +1911,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
 
   private boolean evaluateObstructionClearing(Location current,Location goal){
-    if(!TaskAdmission.canExecuteGatherStep(task))return false;
+    if(!TaskAdmission.canExecuteGatherStep(task, role))return false;
     if(deciding)return false;
     List<ObstructionPolicy.CandidateObstruction> candidates=ObstructionPolicy.findCandidates(current,goal,getProtectedHomeArea(),playerPlacedWood);
     if(candidates.isEmpty()){
@@ -1288,7 +1970,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     req.add("observation",observation);req.add("actions",options);
 
     deciding=true;endOwnedNavigation();
-    brain.post("/api/decide",req).whenComplete((response,error)->Bukkit.getScheduler().runTask(this,()->{
+    final String callbackVillagerId = activeVillagerId;
+    brain.post("/api/decide",req).whenComplete((response,error)->Bukkit.getScheduler().runTask(this,()->withVillagerContext(callbackVillagerId, () -> {
       deciding=false;
       if(!Bukkit.isPrimaryThread())return;
       if(!task.active||npc==null||!npc.isSpawned()||controller.jobGeneration()!=generation)return;
@@ -1355,7 +2038,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
 
       if(!authorizeProductionGoal(AgentGoal.HARVEST_RESOURCE,npc.getEntity().getLocation(),System.currentTimeMillis(),true,false,true))return;
       navigationRetry.schedule(System.currentTimeMillis());
-    }));
+    })));
     return true;
   }
   private boolean clearObstruction(Block block){
@@ -1373,7 +2056,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private JsonObject candidate(String id,String description){JsonObject result=new JsonObject();result.addProperty("id",id);result.addProperty("description",description);return result;}
 
   private void stepCraftTask(Location current, long now) {
-    if (!TaskAdmission.canExecuteCraftStep(task)) return;
+    if (!TaskAdmission.canExecuteCraftStep(task, role)) return;
     if (task.readyToFinish()) {
       finishTaskIfReady();
       return;
@@ -1453,24 +2136,32 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     Location here=npc.getEntity().getLocation();
     switch(action){
       case "harvest" -> {
-        if(!TaskAdmission.canExecuteHarvestOrDeliverStep(task))return;
+        if(!TaskAdmission.canExecuteHarvestOrDeliverStep(task, role))return;
         if(treeTarget==null || here.distanceSquared(treeTarget.clone().add(.5,.5,.5))>ActionPreconditions.MAX_REACH_SQ){treeTarget=null;return;}
         Block block=treeTarget.getBlock();
         ExecutionResult pre=controller.preconditions().validateGather(here,block,task.materialPreference,task.cargo);
         if(!pre.isSuccess()||!isEligibleTarget(block,task.materialPreference)){treeTarget=null;invalidateTargetScan();return;}
+        if(!resourceLocks.tryAcquireTargetBlock(activeVillagerId,task.taskId,block.getWorld().getName(),block.getX(),block.getY(),block.getZ())){
+          treeTarget=null;invalidateTargetScan();return;
+        }
         controller.transitionTo(AgentState.EXECUTING,"Harvesting "+block.getType().name());
         harvest(block);
       }
       case "deposit" -> {
-        if(!TaskAdmission.canExecuteHarvestOrDeliverStep(task))return;
+        if(!TaskAdmission.canExecuteHarvestOrDeliverStep(task, role))return;
         Block block=chestLocation.getBlock();
         ExecutionResult pre=controller.preconditions().validateDeposit(here,block,task.cargo);
         if(!pre.isSuccess()||!(block.getState() instanceof Chest chest)){warn("İşaretli sandık artık orada değil.");return;}
+        List<ResourceLockRegistry.CoordKey> chestCoords=chestCoordsFor(chestLocation);
+        if(!resourceLocks.tryAcquireChest(activeVillagerId,task.taskId,chestCoords)){
+          warn("Sandık şu anda başka bir köylü tarafından kullanılıyor; bekliyorum.");
+          return;
+        }
         controller.transitionTo(AgentState.EXECUTING,"Depositing cargo");
         deposit(chest);
       }
       case "craft" -> {
-        if (!TaskAdmission.canExecuteCraftStep(task)) return;
+        if (!TaskAdmission.canExecuteCraftStep(task, role)) return;
         if (chestLocation == null || chestLocation.getWorld() == null) {
           abortCraftTask("İşaretli sandık artık bağlı değil; üretim görevini iptal ettim.");
           return;
@@ -1482,6 +2173,11 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
           abortCraftTask("İşaretli sandık artık orada değil veya yüklü değil; üretim görevini iptal ettim.");
           return;
         }
+        List<ResourceLockRegistry.CoordKey> chestCoords=chestCoordsFor(chestLocation);
+        if(!resourceLocks.tryAcquireChest(activeVillagerId,task.taskId,chestCoords)){
+          warn("Sandık şu anda başka bir köylü tarafından kullanılıyor; bekliyorum.");
+          return;
+        }
         controller.transitionTo(AgentState.EXECUTING, "Crafting " + task.craftRecipe().key());
         craft(chest);
       }
@@ -1489,7 +2185,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     }
   }
   private void harvest(Block block){
-    if(!TaskAdmission.canExecuteHarvestOrDeliverStep(task))return;
+    if(!TaskAdmission.canExecuteHarvestOrDeliverStep(task, role))return;
     String outputMaterial=expectedOutput(block,task.materialPreference);
     if(outputMaterial==null){treeTarget=null;return;}
     OperationJournal.Harvest operation;
@@ -1517,6 +2213,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       task.harvestOne(outputMaterial);
       persist();
       journal.completeHarvest();
+      resourceLocks.releaseBlock(activeVillagerId,block.getWorld().getName(),block.getX(),block.getY(),block.getZ());
       presentation.committedWorkCue(npc,true);
       treeTarget=null;
       navigationGoal=null;
@@ -1531,7 +2228,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     }
   }
   private void deposit(Chest chest){
-    if(!TaskAdmission.canExecuteHarvestOrDeliverStep(task))return;
+    if(!TaskAdmission.canExecuteHarvestOrDeliverStep(task, role))return;
     if(task.cargo<=0)return;
     String material=task.nextCargoMaterial();if(material==null)return;
     int amount=task.cargoItems().getOrDefault(material,0);if(amount<=0)return;
@@ -1540,6 +2237,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       List<CargoDepositPlanner.Slot> before=inventorySlots(inventory);
       CargoDepositPlanner.Plan plan=CargoDepositPlanner.plan(before,material,amount);
       if(plan.moved()==0){
+        resourceLocks.releaseChestsForVillager(activeVillagerId);
         getLogger().warning("Delivery chest has no capacity across "+inventory.getSize()+" slots at "+coords(chestLocation)+"; cargo="+task.cargo);
         warn("Sandığın tamamında yer yok ("+inventory.getSize()+" yuva); "+task.cargo+" kaynak hâlâ yanımda.");return;
       }
@@ -1553,6 +2251,16 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       persist();
       saveJournalWorlds(chest.getWorld());
       journal.clearAfterWorldSave();
+      resourceLocks.releaseChestsForVillager(activeVillagerId);
+      if(economyLedger!=null && plan.moved()>0){
+        try{
+          String txKey="deposit:"+task.taskId+":"+task.deposited+":"+material;
+          economyLedger.recordDeposit(txKey,activeVillagerId,role!=null?role:VillagerRole.WORKER,
+              task.taskId,task.isFarm()?WoodTask.Kind.FARM:WoodTask.Kind.GATHER,material,plan.moved());
+        }catch(Exception e){
+          getLogger().warning("Could not record deposit in economy ledger: "+e.getMessage());
+        }
+      }
       if(plan.moved()>0)presentation.committedWorkCue(npc,true);
       if(plan.moved()<amount){warn("Sandık dolu; "+task.cargo+" kaynak hâlâ yanımda.");return;}
       if(task.cargo>0)return;
@@ -1563,7 +2271,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
 
   private void abortCraftTask(String reason) {
-    if (!TaskAdmission.canExecuteCraftStep(task)) return;
+    if (!TaskAdmission.canExecuteCraftStep(task, role)) return;
+    resourceLocks.releaseChestsForVillager(activeVillagerId);
     if (!canCancelOrReturnHome()) return;
     if (cancel()) {
       say(reason);
@@ -1571,13 +2280,14 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
 
   private void craft(Chest chest) {
-    if (!TaskAdmission.canExecuteCraftStep(task)) return;
+    if (!TaskAdmission.canExecuteCraftStep(task, role)) return;
     CraftRecipe recipe = task.craftRecipe();
     if (recipe == null || chestLocation == null) return;
     if (!chest.getWorld().equals(chestLocation.getWorld())
         || chest.getX() != chestLocation.getBlockX()
         || chest.getY() != chestLocation.getBlockY()
         || chest.getZ() != chestLocation.getBlockZ()) {
+      resourceLocks.releaseChestsForVillager(activeVillagerId);
       abortCraftTask("İşaretli sandık konumu değişmiş; hiçbir eşyaya dokunmadan üretim görevini iptal ettim.");
       return;
     }
@@ -1586,14 +2296,17 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       List<CraftingPlanner.Slot> before = craftInventorySlots(inventory);
       CraftingPlanner.Result result = CraftingPlanner.plan(before, recipe, task.requested);
       if (result.failure() == CraftingPlanner.Failure.INSUFFICIENT_INPUTS) {
+        resourceLocks.releaseChestsForVillager(activeVillagerId);
         abortCraftTask("Sandıkta yeterli malzeme kalmamış; hiçbir eşyaya dokunmadan üretim görevini iptal ettim.");
         return;
       }
       if (result.failure() == CraftingPlanner.Failure.OUTPUT_CAPACITY) {
+        resourceLocks.releaseChestsForVillager(activeVillagerId);
         abortCraftTask("Sandıkta üretilecek ürünler için yer kalmamış; hiçbir eşyaya dokunmadan üretim görevini iptal ettim.");
         return;
       }
       if (!result.succeeded()) {
+        resourceLocks.releaseChestsForVillager(activeVillagerId);
         abortCraftTask("Üretim planı doğrulanamadı; hiçbir eşyaya dokunmadan üretim görevini iptal ettim.");
         return;
       }
@@ -1613,6 +2326,21 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       persist();
       saveJournalWorlds(chest.getWorld());
       journal.clearAfterWorldSave();
+      resourceLocks.releaseChestsForVillager(activeVillagerId);
+      if(economyLedger!=null && plan.outputCount()>0){
+        try{
+          String inMat = plan.changes().stream()
+              .filter(c -> c.beforeMaterial() != null && recipe.ingredients().contains(c.beforeMaterial()))
+              .map(CraftingPlanner.Change::beforeMaterial)
+              .findFirst()
+              .orElse(recipe.ingredients().iterator().next());
+          String txKey="craft:"+task.taskId+":"+recipe.key();
+          economyLedger.recordCraft(txKey,activeVillagerId,role!=null?role:VillagerRole.CRAFTER,
+              task.taskId,inMat,plan.inputCount(),recipe.output(),plan.outputCount());
+        }catch(Exception e){
+          getLogger().warning("Could not record craft in economy ledger: "+e.getMessage());
+        }
+      }
       presentation.committedWorkCue(npc, true);
       finishTaskIfReady();
     } catch (Exception e) {
@@ -1751,6 +2479,16 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         persist();
         saveJournalWorlds(world);
         journal.clearAfterWorldSave();
+        resourceLocks.releaseChestsForVillager(activeVillagerId);
+        if(economyLedger!=null && operation.moved()>0){
+          try{
+            String txKey="deposit:"+operation.taskId()+":"+operation.afterDeposited()+":"+operation.effectiveMaterial();
+            economyLedger.recordDeposit(txKey,activeVillagerId,role!=null?role:VillagerRole.WORKER,
+                operation.taskId(),task.isFarm()?WoodTask.Kind.FARM:WoodTask.Kind.GATHER,operation.effectiveMaterial(),operation.moved());
+          }catch(Exception e){
+            getLogger().warning("Could not record recovered deposit in economy ledger: "+e.getMessage());
+          }
+        }
       }
       var pendingCraft=journal.pendingCraft();
       if(pendingCraft.isPresent()){
@@ -1779,9 +2517,26 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
               }
               @Override public void retireJournal() throws IOException {
                 journal.clearAfterWorldSave();
+                resourceLocks.releaseChestsForVillager(activeVillagerId);
               }
             }
         );
+        if(disposition!=OperationRecovery.CraftDisposition.CONFLICT
+            && economyLedger!=null && operation.recipe()!=null && operation.afterDeposited()>0){
+          try{
+            String inMat = operation.changes().stream()
+                .filter(c -> c.beforeMaterial() != null && operation.recipe().ingredients().contains(c.beforeMaterial()))
+                .map(CraftingPlanner.Change::beforeMaterial)
+                .findFirst()
+                .orElse(operation.recipe().ingredients().iterator().next());
+            String txKey="craft:"+operation.taskId()+":"+operation.recipeKey();
+            economyLedger.recordCraft(txKey,activeVillagerId,role!=null?role:VillagerRole.CRAFTER,
+                operation.taskId(),inMat,operation.inputCount(),
+                operation.recipe().output(),operation.afterDeposited());
+          }catch(Exception e){
+            getLogger().warning("Could not record recovered craft in economy ledger: "+e.getMessage());
+          }
+        }
         if(disposition==OperationRecovery.CraftDisposition.CONFLICT){
           blockRecovery("Craft journal conflicts with saved task or chest state",null);
           return;
@@ -1803,6 +2558,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     CraftRecipe recipe=task.craftRecipe();
     task.finish();controller.nextGeneration();controller.transitionTo(AgentState.IDLE,"Task completed");controller.clearHelp();persist();event("task_delivered",delivered);
     returningHome=true;homeStepAttempt=0;clearNavigation();
+    resourceLocks.releaseAllForVillager(activeVillagerId);
     if(craft)say("Bitti! "+delivered+" "+(recipe!=null?recipe.key().substring("minecraft:".length()):"ürün")+" ürettim ve sandığa bıraktım.");
     else if(partial)say("Şimdilik "+delivered+"/"+requested+" kaynak topladım ve sandığa bıraktım. Ulaşılabilir kaynağı bulamayınca durdum; yolu açınca kalanını tekrar isteyebilirsin.");
     else say("Bitti! "+delivered+" itemi sandığa bıraktım.");
@@ -1847,6 +2603,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private void lockRecovery(){
     if(!Bukkit.isPrimaryThread())throw new IllegalStateException("Recovery must be locked on the server main thread");
     recoveryBlocked=true;
+    pinRecoveryLocks();
     taskNavigationRoute.stopAndRelease(npc,activationRangeGuard::clear);
   }
   private Location getEffectiveHome(){
@@ -2022,6 +2779,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     return ResourceCatalog.matchesBlockName(block.getType().name(),preference);
   }
   private boolean isEligibleTarget(Block block,String preference){
+    if(resourceLocks.isBlockLockedByOther(activeVillagerId,block.getWorld().getName(),block.getX(),block.getY(),block.getZ()))return false;
     if(!block.getWorld().isChunkLoaded(block.getX()>>4,block.getZ()>>4))return false;
     if(!matchesTarget(block,preference))return false;
     if(FarmCatalog.isPreference(preference)){

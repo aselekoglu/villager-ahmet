@@ -153,4 +153,91 @@ final class TaskAdmissionTest {
     assertFalse(TaskAdmission.canExecuteGatherStep(craft));
     assertFalse(TaskAdmission.canExecuteHarvestOrDeliverStep(craft));
   }
+
+  @Test
+  void evaluateRoleAndLockPrecedence() {
+    // 1. Invalid intent
+    assertEquals(TaskAdmission.Result.UNSUPPORTED,
+        TaskAdmission.evaluate(WoodTask.Kind.GATHER, VillagerRole.WORKER, false, false, false, false, 0, true, false));
+
+    // 2. Role mismatch (FARMER cannot GATHER)
+    assertEquals(TaskAdmission.Result.ROLE_MISMATCH,
+        TaskAdmission.evaluate(WoodTask.Kind.GATHER, VillagerRole.FARMER, true, true, true, true, 5, false, true));
+
+    // 3. Recovery blocked
+    assertEquals(TaskAdmission.Result.RECOVERY_REQUIRED,
+        TaskAdmission.evaluate(WoodTask.Kind.GATHER, VillagerRole.WORKER, true, true, false, false, 0, true, false));
+
+    // 4. Busy
+    assertEquals(TaskAdmission.Result.BUSY,
+        TaskAdmission.evaluate(WoodTask.Kind.GATHER, VillagerRole.WORKER, true, false, false, true, 0, true, false));
+
+    // 5. Chest required
+    assertEquals(TaskAdmission.Result.CHEST_REQUIRED,
+        TaskAdmission.evaluate(WoodTask.Kind.GATHER, VillagerRole.WORKER, true, false, false, false, 0, false, false));
+
+    // 6. Chest locked
+    assertEquals(TaskAdmission.Result.CHEST_LOCKED,
+        TaskAdmission.evaluate(WoodTask.Kind.GATHER, VillagerRole.WORKER, true, false, false, false, 0, true, true));
+
+    // 7. Accept
+    assertEquals(TaskAdmission.Result.ACCEPT,
+        TaskAdmission.evaluate(WoodTask.Kind.GATHER, VillagerRole.WORKER, true, false, false, false, 0, true, false));
+    assertEquals(TaskAdmission.Result.ACCEPT,
+        TaskAdmission.evaluate(WoodTask.Kind.CRAFT, VillagerRole.ALL_ROUNDER, true, false, false, false, 0, true, false));
+  }
+
+  @Test
+  void evaluateFarmRoleAndLockPrecedence() {
+    // Role mismatch (WORKER cannot FARM)
+    assertEquals(TaskAdmission.Result.ROLE_MISMATCH,
+        TaskAdmission.evaluateFarm(VillagerRole.WORKER, true, true, true, true, 5, false, false, true));
+
+    // Chest locked checked before plot
+    assertEquals(TaskAdmission.Result.CHEST_LOCKED,
+        TaskAdmission.evaluateFarm(VillagerRole.FARMER, true, false, false, false, 0, true, false, true));
+
+    // Plot required checked after chest not locked
+    assertEquals(TaskAdmission.Result.PLOT_REQUIRED,
+        TaskAdmission.evaluateFarm(VillagerRole.FARMER, true, false, false, false, 0, true, false, false));
+
+    // Accept when all met
+    assertEquals(TaskAdmission.Result.ACCEPT,
+        TaskAdmission.evaluateFarm(VillagerRole.FARMER, true, false, false, false, 0, true, true, false));
+  }
+
+  @Test
+  void roleAwareStepExecutionChecks() {
+    WoodTask gather = new WoodTask();
+    gather.start(java.util.UUID.randomUUID(), 4);
+
+    // null role defaults to allowing the matching task kind
+    assertTrue(TaskAdmission.canExecuteGatherStep(gather, null));
+    // WORKER & ALL_ROUNDER can gather
+    assertTrue(TaskAdmission.canExecuteGatherStep(gather, VillagerRole.WORKER));
+    assertTrue(TaskAdmission.canExecuteGatherStep(gather, VillagerRole.ALL_ROUNDER));
+    // FARMER & CRAFTER cannot gather
+    assertFalse(TaskAdmission.canExecuteGatherStep(gather, VillagerRole.FARMER));
+    assertFalse(TaskAdmission.canExecuteGatherStep(gather, VillagerRole.CRAFTER));
+
+    WoodTask farm = new WoodTask();
+    farm.startFarm(java.util.UUID.randomUUID(), 4);
+    assertTrue(TaskAdmission.canExecuteFarmStep(farm, VillagerRole.FARMER));
+    assertTrue(TaskAdmission.canExecuteFarmStep(farm, VillagerRole.ALL_ROUNDER));
+    assertFalse(TaskAdmission.canExecuteFarmStep(farm, VillagerRole.WORKER));
+    assertFalse(TaskAdmission.canExecuteFarmStep(farm, VillagerRole.CRAFTER));
+
+    WoodTask craft = new WoodTask();
+    craft.startCraft(java.util.UUID.randomUUID(), CraftRecipe.OAK_PLANKS, 4);
+    assertTrue(TaskAdmission.canExecuteCraftStep(craft, VillagerRole.CRAFTER));
+    assertTrue(TaskAdmission.canExecuteCraftStep(craft, VillagerRole.ALL_ROUNDER));
+    assertFalse(TaskAdmission.canExecuteCraftStep(craft, VillagerRole.WORKER));
+    assertFalse(TaskAdmission.canExecuteCraftStep(craft, VillagerRole.FARMER));
+
+    // Harvest or deliver step
+    assertTrue(TaskAdmission.canExecuteHarvestOrDeliverStep(gather, VillagerRole.WORKER));
+    assertFalse(TaskAdmission.canExecuteHarvestOrDeliverStep(gather, VillagerRole.FARMER));
+    assertTrue(TaskAdmission.canExecuteHarvestOrDeliverStep(farm, VillagerRole.FARMER));
+    assertFalse(TaskAdmission.canExecuteHarvestOrDeliverStep(farm, VillagerRole.WORKER));
+  }
 }
