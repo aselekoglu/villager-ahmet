@@ -465,4 +465,11 @@ The four-entry M5 ZIP package (`dist/villager-ahmet-plugins-paper-1.21.6.zip`) w
 - **Pinned Citizens SHA-256**: `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158` (`Citizens-2.0.41-b4138.jar`)
 - **Turkish Package README SHA-256**: `da5c616dfb18c4f14df3a1868843daeca2eb9f239f3cdf0d089b497fe588aac9` (`README-TR.txt`)
 
+### Source publication, live package installation and startup/save read-back
+- Source commits `d187abd29ad593cfdef4b3721f90f6111bb46e2c` and `6bbad145abbce242cc7564cd50904249fce706e3` were pushed through the normal Git CLI and matched `origin/main`.
+- Before atomic JAR installation on `server-live`, a stopped-server backup was verified: **165 files / 29,900,655 bytes**, archive SHA-256 `12240fb1a126f0a367bdf8dee8b59556b7b0ba7866832b0067497d8ca58a16bc` (mode `0600`).
+- Exact core JAR `68cf01cb17f7f843c4c10b2b980af85c471d0fca6246e1dbb18eb9844a9a1c0f` was extracted from the verified four-entry ZIP and installed atomically into `server-live/plugins/VillagerAhmet.jar`.
+- Paper 1.21.6 build 48 started in **9.849 seconds** (`Done (9.849s)!`) with **0 ERROR** lines and restored saved Citizens NPC id 1. Node health at `http://127.0.0.1:3197/health` returned `ok=true`, `decisionMode=jev`, `chatMode=llm`, and `configuredJevModel=jev-preview` (configured mode only; no live provider call was issued).
+- Console `list` reported `There are 0 of a max of 6 players online`. `/ahmet status` reported `Ahmet: boşta (taşınan kaynak: 0) | Durum: IDLE | Program: sleep (walking; no bed bound) | Yatak: bağlı değil | Sandık: bağlı | NPC: yok | Korunan ev: 10 blok | Yerleştirilmiş odun işareti: 15` (`recoveryBlocked=false`). `save-all flush` acknowledged `Saved the game` across all three dimensions (`world`, `DIM-1`, `DIM1`). The live server was left running after read-back.
+
 Human in-game crafting gameplay, live provider calls on the M5 path, production-store inspection, and forced-crash durability remain unverified.
