@@ -413,6 +413,28 @@ The calibrated presentation fixture used the exact core above, fixture JAR SHA-2
 
 The corrected four-entry M4 ZIP was rebuilt and independently verified, including entry list, CRCs, inner JAR hashes and outer ZIP hash. ZIP SHA-256 **`6846225df2d99b40142f1ca377a014a964d40cf5fe4b3093745f21c5871691a0`**; core SHA-256 `3784fe50fe47dc385b62c34044371dacb33d57185077e749a9598e2314f6aa1c`; pinned Citizens SHA-256 `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158`; Turkish package README SHA-256 `6aaa7aad02f3b79e8c7f83fb629ca7b4f3360f5fb9e0f09800c2cf32d0b84feb`. The local `dist/` directory is intentionally Git-ignored; no GitHub release asset is claimed.
 
-M4 source, disposable server-side runtime acceptance and corrected local package verification are complete. Publication of the current docs and deployment/read-back of the M4 package remain separate pending gates. When last checked, live server ports were absent; the prior shutdown cause/time is unknown, so no graceful shutdown or M4 installation is claimed. The live installed core remains the M3 SHA-256 `5e8395902b24f374b1176e98cc14957bccde63d07ba9795da940d9ef1500f8a3` unless a later deployment read-back establishes otherwise.
+M4 source, disposable server-side runtime acceptance, corrected local package verification, source/docs publication and live startup/save read-back are complete. Publication commit `620b97efa4448aee5e6682fc3d2adb9f99b7b9e4` was pushed through the normal Git CLI and matched the remote SHA. A post-deployment documentation-only follow-up records the read-back without self-referencing its future commit hash.
 
-Human client acceptance (visible face/arm animation, understandable audio and two-human multiplayer), live TypeSafe/OpenAI behavior through the current path, production-store inspection and forced-crash durability remain unverified. Earlier M3 evidence above is historical evidence for its named artifacts and does not substitute for this M4 or pending deployment evidence.
+Human client acceptance (visible face/arm animation, understandable audio and two-human multiplayer), live TypeSafe/OpenAI behavior through the current path, production-store inspection and forced-crash durability remain unverified. Earlier M3 evidence above is historical evidence for its named artifacts and does not substitute for the M4 runtime or deployment evidence below.
+
+
+## M4 same-core regression probes and live package read-back — 2026-10-21
+
+### Additional disposable regressions on the exact M4 core
+
+The following fresh probes all used the exact M4 core SHA-256 `3784fe50fe47dc385b62c34044371dacb33d57185077e749a9598e2314f6aa1c`; these results are not inherited from the earlier M3 core. They used mock decision/chat behavior and establish only their stated disposable-server paths.
+
+- **Common-resource r02:** passed all 7 resource groups, 11 source variants and 11 delivered items, with zero normal Citizens teleports.
+- **Schedule r03:** fresh-server and same-world second-process probes passed, restored saved identities, and recorded zero normal teleports. Fresh setup had four fixture setup teleports; restart had zero. The saved arena was restored without rebuilding it.
+- **Production-goal r04:** passed with 96.028 blocks walked over 507 moving ticks, maximum sampled step 0.198 blocks/tick and zero normal teleports; six mock decisions, one mock chat, zero providers. In the foreign-route scenario, the first help attempt at tick 100 was rejected by the shared cooldown; acknowledgement arrived at tick 267, and after explicit fixture release the same job resumed through harvest and delivery in 65 ticks.
+
+Node remains at the prior October 20 result of 43 tests plus mock smoke; it was not freshly rerun for this M4 increment.
+
+### Source publication, package installation and startup/save read-back
+
+- Corrected four-entry ZIP SHA-256: `6846225df2d99b40142f1ca377a014a964d40cf5fe4b3093745f21c5871691a0`; exact installed core SHA-256: `3784fe50fe47dc385b62c34044371dacb33d57185077e749a9598e2314f6aa1c`. Pinned Citizens and package README hashes are recorded above.
+- Source/docs commit `620b97efa4448aee5e6682fc3d2adb9f99b7b9e4` was pushed normally and exact remote SHA was read back. Paper started in **11.243 seconds** with **zero ERROR** lines. The normal Node application dotenv loader was used; credentials were never read, copied or logged by this read-back. Node health returned `ok=true`, configured `jev-preview`, decision mode `jev`, and chat mode `llm`. This reports configured mode only; no provider request or fresh resolved-model metadata was obtained.
+- Console showed **0 players**. `/ahmet status` showed IDLE, cargo 0, chest bound, bed unbound, and NPC unspawned. Any status text about prior walking is not movement evidence. `save-all flush` acknowledged `Saved the game`. No collect, summon, home/bed change, model request, or world experiment was issued. The server was left running after read-back. It had already been stopped before deployment; the previous stop cause/time is unknown and no graceful prior stop is claimed.
+- Before atomic JAR installation, a stopped-server backup was verified: **145 files / 29,244,412 bytes**, archive SHA-256 `231413f4d9858a7afee875db410778d3a7b398b76b169e21cb779ce41bc827db`. The plugin/world snapshot was unchanged before installation. No manual world edit or key/brain-store access occurred.
+
+Startup, configured health, idle state and save completion do not establish live gameplay, NPC movement, provider operation, human presentation quality, or crash durability. Human/client, provider, production-store and forced-crash acceptance remain open; M5–M10 remain open. No GitHub release asset is claimed.

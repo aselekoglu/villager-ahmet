@@ -11,8 +11,8 @@
 - [x] Rebuild and verify the final four-entry M3 ZIP locally (SHA-256 `5781ea3489fef9f5828f0c21cc980a414ed9f8c8602a1057b9ce3adb0788c207`; `dist/` is intentionally gitignored, no GitHub asset is claimed).
 - [x] M3 release milestone: publish reviewed source (`6b015f1714be8a0a986516132436a28e1341408f`, remote SHA matched), deploy the exact verified package/core, and read back Node/Paper health, idle status and save completion. Prior shutdown cause/time is unknown; no graceful stop is claimed.
 - [x] M4 presentation source, focused Java suite, disposable runtime acceptance, and corrected four-entry local package verification; evidence in `docs/VALIDATION_RESULTS.md` (ZIP SHA-256 `6846225df2d99b40142f1ca377a014a964d40cf5fe4b3093745f21c5871691a0`).
-- [ ] Publish the current six public documentation changes and verify remote source SHA.
-- [ ] Deploy the exact M4 package and read back the installed core, Paper/Node health, idle status and saved dimensions; previous shutdown cause/time is unknown.
+- [x] Publish M4 source/docs commit `620b97efa4448aee5e6682fc3d2adb9f99b7b9e4` and verify the exact remote SHA.
+- [x] Deploy the exact M4 package and read back installed core, Paper/Node health, idle status and save completion; prior server stop cause/time remains unknown, so no graceful prior stop is claimed.
 - [ ] M5 Allowlisted transactional crafting.
 - [ ] M6 Approved-plot mature-crop farming.
 - [ ] M7 Stable multiple villagers, roles, delegation and local resource economy.
