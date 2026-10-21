@@ -507,4 +507,11 @@ The four-entry M6 ZIP package (`dist/villager-ahmet-plugins-paper-1.21.6.zip`) w
 - **Pinned Citizens SHA-256**: `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158` (`Citizens-2.0.41-b4138.jar`)
 - **Turkish Package README SHA-256**: `7c9912818c7c9b502fd01ce736192865fceeeb21bfd423a7f35c96060237487b` (`README-TR.txt`)
 
+### Source publication, live package installation and startup/save read-back
+- Source commit `627fc8312e1f1c3947a42dc3e8e070a4b10f1f7a` was pushed through the normal Git CLI and matched `origin/main`.
+- Before atomic JAR installation on `server-live`, a stopped-server backup was verified: `/private/tmp/ahmet-m6-live-backup-20261021/stopped-server-state.tar.gz`, **229 entries / 29,289,937 bytes**, archive SHA-256 `ea5b554fac7e46cf2aa12181f602d38994403ac7ba34d3eef4da015a8955d91c` (mode `0600`).
+- Exact core JAR `5107b86190a3b6cd34f178478f022433e11f2abcca9818298e594198753d1921` was extracted from the verified four-entry ZIP `d519450ca042559f5f8aed972ebdf2639db7ac185ae6f3f285027ec093b0f370` and installed atomically into `server-live/plugins/VillagerAhmet.jar`.
+- Paper 1.21.6 build 48 started in **7.100 seconds** (`Done (7.100s)! For help, type "help"`) with **0 ERROR** lines. Node health at `http://127.0.0.1:3197/health` returned `ok=true`, `service="villager-ahmet-brain"`, `decisionMode="jev"`, `chatMode="llm"`, and `configuredJevModel="jev-preview"` (configured mode only; no live provider call was issued).
+- Console `list` reported `There are 0 of a max of 6 players online: `. `/ahmet status` reported `Ahmet: boşta (taşınan kaynak: 0) | Durum: IDLE | Program: work (walking) | Yatak: bağlı değil | Sandık: bağlı | NPC: yok | Korunan ev: 10 blok | Yerleştirilmiş odun işareti: 15 | Tarla: bağlı değil`. `save-all flush` acknowledged `Saved the game (world, DIM-1, DIM1)` across all three dimensions. The live server was left running after read-back.
+
 Human in-game farming gameplay, live provider calls on the M6 path, production-store inspection, and forced-crash durability remain unverified.
