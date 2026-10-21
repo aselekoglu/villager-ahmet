@@ -157,3 +157,15 @@
 - [ ] Human claims gameplay and protection acceptance (requires actual human player).
 - [ ] Live TypeSafe/OpenAI provider calls on the M8 path (runtime verified via loopback mock HTTP bridge).
 - [ ] Real forced-crash (`kill -9`) durability across multiple concurrent villager journals.
+
+## M9 private observability dashboard, honest usage/cost audit, and bounded telemetry — 2026-10-22
+
+- [x] Node Brain test suite passes **61/61** tests (0 failures/errors/skips) in `brain/` (`cd brain && node --test test/*.test.mjs`), including 12 dedicated dashboard tests in `brain/test/dashboard.test.mjs`.
+- [x] Mock HTTP smoke suite passes (`bash scripts/smoke.sh`).
+- [x] Authenticated private endpoints (`GET /dashboard` and `GET /api/dashboard/summary`) strictly enforce 401 Unauthorized when unauthenticated, and accept both `Authorization: Bearer <BRIDGE_TOKEN>` and `?token=<BRIDGE_TOKEN>`.
+- [x] Security and credential redaction: query parameter tokens are stripped before metric recording, `BRIDGE_TOKEN` and API keys are never rendered in HTML or returned in JSON, and constant-time token comparison (`crypto.timingSafeEqual`) is enforced.
+- [x] Strict Content Security Policy (`default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'`) on `/dashboard` with zero external scripts, stylesheets, or web fonts (100% air-gapped/offline compatible).
+- [x] Provider accounting transparency: monetary cost and token consumption are reported strictly as `"UNKNOWN"` unless upstream returns billing details; cost is never estimated or simulated.
+- [x] Bounded in-memory retention: circular FIFO buffers cap `recentCalls` to 100 entries and `eventAuditLog` to 100 entries, maintaining $O(1)$ constant memory bounds.
+- [x] Read-only guarantee: dashboard provides real-time observability without command dispatch or state mutation endpoints.
+- [ ] Human in-browser dashboard inspection and live operator review.

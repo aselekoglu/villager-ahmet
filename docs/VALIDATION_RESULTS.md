@@ -598,3 +598,21 @@ The four-entry M8 ZIP package (`dist/villager-ahmet-plugins-paper-1.21.6.zip`) w
 - Console `list` reported `There are 0 of a max of 6 players online: `. `/ahmet status` reported `Ahmet: boşta (taşınan kaynak: 0) | Durum: IDLE | Rol: genel | Program: work (walking) | Yatak: bağlı değil | Sandık: bağlı | NPC: yok | Korunan ev: 10 blok | Yerleştirilmiş odun işareti: 15 | Tarla: bağlı değil`. `/ahmet roster` reported `Kayıtlı köylüler (1/4): • Ahmet (id: ahmet, rol: genel, NPC: yok, görev: boşta)`. `/ahmet claims` reported `Kayıtlı korumalı alan yok.`. `save-all flush` acknowledged `Saved the game (world, DIM-1, DIM1)` across all three dimensions. The live server was left running after read-back.
 
 Human claims gameplay, live provider calls on the M8 path, and forced-crash durability remain unverified.
+
+## M9 private observability dashboard, honest usage/cost audit, and bounded telemetry — 2026-10-22
+
+### Source and unit verification
+- Node Brain test suite: **61 tests, 0 failures, 0 errors, 0 skipped** (`cd brain && node --test test/*.test.mjs`), including 12 new tests in `brain/test/dashboard.test.mjs`.
+- Local mock HTTP smoke tests passed (`bash scripts/smoke.sh`).
+- Implementation components:
+  1. `brain/src/metrics.mjs`: `MetricsTracker` class managing circular FIFO buffer bounds capped at 100 entries for `recentCalls` and 100 entries for `eventAuditLog`.
+  2. `brain/src/dashboard.mjs`: Offline-safe, dark-theme HTML dashboard with zero external CDN dependencies, strict CSP headers, auto-refresh toggle, and XSS-safe input escaping.
+  3. `brain/src/server.mjs`: Authenticated endpoints (`GET /dashboard`, `GET /api/dashboard/summary`), constant-time token comparison (`crypto.timingSafeEqual`), query string token redaction, and bounded telemetry hooks on `/health`, `/api/chat`, `/api/decide`, and `/api/event`.
+- Provider accounting integrity:
+  - Monetary cost is strictly reported as `"UNKNOWN"` with explicit disclosure: *"Upstream model providers (TypeSafe JEV / OpenAI) do not return billing or monetary cost in responses. Never estimated or fabricated."*
+  - Token counts are reported as `"UNKNOWN"` unless provided by upstream responses.
+- Independent code review returned **APPROVE** with zero critical and zero important findings; timing-safe token comparison suggestion was adopted.
+- Live HTTP verification probe on ephemeral port 3199 verified:
+  - 401 Unauthorized for requests without valid token.
+  - 200 OK for `/dashboard?token=...` serving self-contained HTML with strict CSP (`default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'`).
+  - 200 OK for `/api/dashboard/summary` with `Bearer` authentication, returning valid metrics schema and honest accounting without token leakage.
