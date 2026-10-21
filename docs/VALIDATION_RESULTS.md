@@ -616,3 +616,14 @@ Human claims gameplay, live provider calls on the M8 path, and forced-crash dura
   - 401 Unauthorized for requests without valid token.
   - 200 OK for `/dashboard?token=...` serving self-contained HTML with strict CSP (`default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'`).
   - 200 OK for `/api/dashboard/summary` with `Bearer` authentication, returning valid metrics schema and honest accounting without token leakage.
+
+### Source publication, live package installation and startup/save read-back
+- Source commits `6814db7` and `3399bde` were published to `origin/main` via standard Git push.
+- Before restarting the live service, a verified stopped-server backup was created: `/private/tmp/ahmet-m9-live-backup-20261022/stopped-server-state.tar.gz`, **798 entries / 288,030,155 bytes**, archive SHA-256 `3ce698369c589529c8429d8cd6c475ebbd90f00fac89079570fe616ba4ca2cce` (mode `0600`).
+- Paper 1.21.6 build 48 started in **9.397 seconds** (`Done (9.397s)! For help, type "help"`) with **0 ERROR** lines.
+- Node brain started on `127.0.0.1:3197`:
+  - `GET /health` returned `ok=true`, `service="villager-ahmet-brain"`, `decisionMode="jev"`, `chatMode="llm"`, and `configuredJevModel="jev-preview"`.
+  - Unauthenticated `GET /dashboard` and `GET /api/dashboard/summary` returned `401 Unauthorized`.
+- Console `list` reported `There are 0 of a max of 6 players online: `. `/ahmet status` reported `Ahmet: boşta (taşınan kaynak: 0) | Durum: IDLE | Rol: genel | Program: sleep (walking; no bed bound) | Yatak: bağlı değil | Sandık: bağlı | NPC: yok | Korunan ev: 10 blok | Yerleştirilmiş odun işareti: 15 | Tarla: bağlı değil`. `/ahmet roster` reported `Kayıtlı köylüler (1/4): • Ahmet (id: ahmet, rol: genel, NPC: yok, görev: boşta)`. `/ahmet claims` reported `Kayıtlı korumalı alan yok.`. `save-all flush` acknowledged `Saved the game (world, DIM-1, DIM1)` across all three dimensions. The live server was left running after read-back.
+
+Human in-browser dashboard inspection and real-world multi-client network validation remain unverified.
