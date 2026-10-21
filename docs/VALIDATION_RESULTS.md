@@ -515,3 +515,38 @@ The four-entry M6 ZIP package (`dist/villager-ahmet-plugins-paper-1.21.6.zip`) w
 - Console `list` reported `There are 0 of a max of 6 players online: `. `/ahmet status` reported `Ahmet: boşta (taşınan kaynak: 0) | Durum: IDLE | Program: work (walking) | Yatak: bağlı değil | Sandık: bağlı | NPC: yok | Korunan ev: 10 blok | Yerleştirilmiş odun işareti: 15 | Tarla: bağlı değil`. `save-all flush` acknowledged `Saved the game (world, DIM-1, DIM1)` across all three dimensions. The live server was left running after read-back.
 
 Human in-game farming gameplay, live provider calls on the M6 path, production-store inspection, and forced-crash durability remain unverified.
+
+## M7 multi-villager roster, specialist roles, resource locks, task delegation, and local economy ledger — 2026-10-21
+
+### Source and unit verification
+- Java offline Maven package: **385 tests, 0 failures, 0 errors, 0 skipped** (`mvn -B -ntp -o test` in `paper-plugin/`).
+- Node Brain test suite: **49 tests, 0 failures** (`node --test test/*.test.mjs` in `brain/`).
+- Core JAR SHA-256: `25f0fba9ad6ec049243124fafdfa6783ccb4450860372a9893935437d929fbe2` (`villager-ahmet-0.1.0-SNAPSHOT.jar`).
+
+### Disposable Paper 1.21.6 / Citizens 2.0.41 runtime evidence (`r01`)
+- Executed in `/private/tmp/ahmet-multivillager-runtime-20261021-r01` with Paper 1.21.6 build 48 (`1.21.6-48-4d854e6`) + Citizens `2.0.41-SNAPSHOT (build 4138)` + Java 21. Exit code 0, all 3 dimensions (`world`, `DIM-1`, `DIM1`) saved cleanly, 0 ERROR lines.
+- Probe JAR SHA-256: `d3b4b5dea7662f348217bce5ba034d667afd6d626a079d5631a208c325b76e25` (`MultiVillagerProbe.jar`).
+- Pinned Citizens JAR SHA-256: `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158` (in runtime r01).
+- Probe outcome: `[MultiVillagerProbe] AHMET_MULTIVILLAGER_RUNTIME_PROBE_PASS stages=6 normalTeleports=0`.
+- Detailed stages:
+  1. **Stage 1 (`stage1_role_refusals`)**: `[MultiVillagerProbe] AHMET_MULTIVILLAGER_STAGE_PASS stage=stage1_role_refusals teleports=0`
+     - Evaluated `/ahmet role worker` on Ahmet and `/ahmet npc mehmet role farmer` on Mehmet. Tested cross-role task requests: `/ahmet farm wheat 1` and `/ahmet craft oak_planks 4` on WORKER Ahmet were deterministically rejected with `ROLE_MISMATCH` refusal messages without activating tasks; `/ahmet npc mehmet collect oak_log 1` and `/ahmet npc mehmet craft oak_planks 4` on FARMER Mehmet were deterministically rejected with `ROLE_MISMATCH` refusal messages without activating tasks. `normalTeleports=0`.
+  2. **Stage 2 (`stage2_task_delegation`)**: `[MultiVillagerProbe] AHMET_MULTIVILLAGER_STAGE_PASS stage=stage2_task_delegation teleports=0`
+     - Operator `/ahmet delegate collect oak_log 1` evaluated candidates and delegated task to specialist WORKER Ahmet (`Görev Ahmet (işçi) köylüsüne delege edildi.`); Ahmet walked to tree, harvested 1 oak log, walked to double chest, and deposited 1 oak log. Operator `/ahmet delegate farm wheat 1` evaluated candidates and delegated task to specialist FARMER Mehmet (`Görev Mehmet (çiftçi) köylüsüne delege edildi.`); Mehmet walked to farmplot, harvested mature wheat, replanted wheat at age 0, walked to double chest, and deposited wheat into the double chest. Both tasks completed with `normalTeleports=0`.
+  3. **Stage 3 (`stage3_concurrent_execution_and_block_locks`)**: `[MultiVillagerProbe] AHMET_MULTIVILLAGER_STAGE_PASS stage=stage3_concurrent_execution_and_block_locks teleports=0`
+     - Ahmet executed oak log collection while Mehmet concurrently executed carrot farming (`bool(taskAhmet, "active") && bool(taskMehmet, "active")`). Verified `ResourceLockRegistry` conflict prevention: arbitrary target block lock acquired by Ahmet rejected Mehmet's attempt (`tryAcquireTargetBlock` returned false, `isBlockLockedByOther` returned true); lock released by Ahmet allowed Mehmet acquisition. Both concurrent tasks completed, depositing oak log and carrot into the bound double chest, replanting carrot at age 0, with `normalTeleports=0`.
+  4. **Stage 4 (`stage4_chest_craft_lock_double_spend`)**: `[MultiVillagerProbe] AHMET_MULTIVILLAGER_STAGE_PASS stage=stage4_chest_craft_lock_double_spend teleports=0`
+     - Both villagers assigned CRAFTER role. Mehmet started `/ahmet npc mehmet craft oak_planks 4` locking the bound double chest. Ahmet simultaneously attempted `/ahmet craft oak_planks 4` and was immediately rejected with `CHEST_LOCKED` (`§cBu sandık şu an başka bir köylünün görevinde kilitli.`), preventing double-spend of inputs. Mehmet finished craft task, placing 4 `OAK_PLANKS` into chest and releasing the chest lock, with `normalTeleports=0`.
+  5. **Stage 5 (`stage5_cross_npc_journal_recovery`)**: `[MultiVillagerProbe] AHMET_MULTIVILLAGER_STAGE_PASS stage=stage5_cross_npc_journal_recovery teleports=0`
+     - Verified journal isolation: seeded pending crop harvest in `operations-mehmet.json` (crop age 0 -> `APPLY`). Triggered `recoverJournal` on Mehmet's isolated context; Mehmet successfully applied and completed the pending harvest (`collected=1, cargo=1, recoveryBlocked=false`). Ahmet's journal remained completely clean with no pending operations, zero cargo, and `recoveryBlocked=false`, confirming cross-NPC journal isolation with `normalTeleports=0`.
+  6. **Stage 6 (`stage6_local_economy_ledger_readback`)**: `[MultiVillagerProbe] AHMET_MULTIVILLAGER_STAGE_PASS stage=stage6_local_economy_ledger_readback teleports=0`
+     - Verified `LocalEconomyLedger` tracking: Ahmet recorded gathered items and credits; Mehmet recorded farmed items, crafted items, and credits. Net balances matched produced minus consumed totals across all items. Operator command `/ahmet ledger` output summary verified, concluding with `[MultiVillagerProbe] AHMET_MULTIVILLAGER_RUNTIME_PROBE_PASS stages=6 normalTeleports=0`.
+
+### Package verification
+The four-entry M7 ZIP package (`dist/villager-ahmet-plugins-paper-1.21.6.zip`) was built locally and verified:
+- **Outer ZIP SHA-256**: `475c80dbd23b435c1976ce7c0bf6835fc1671fea6f09f2aac84425407e3ddaff`
+- **Core JAR SHA-256**: `25f0fba9ad6ec049243124fafdfa6783ccb4450860372a9893935437d929fbe2` (`villager-ahmet-0.1.0-SNAPSHOT.jar`)
+- **Pinned Citizens SHA-256**: `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158` (`Citizens-2.0.41-b4138.jar`)
+- **Turkish Package README SHA-256**: `a0d261946bb98cf488fbbab0949f88db0f621c42aeda6e669c3133b25f38959a` (`README-TR.txt`)
+
+Human in-game multi-villager gameplay, live provider calls on the M7 path, production-store inspection, and forced-crash durability across concurrent journals remain unverified.

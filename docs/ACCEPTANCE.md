@@ -127,3 +127,19 @@
 - [ ] Human in-game farming gameplay (requires actual human player).
 - [ ] Live TypeSafe/OpenAI provider calls on the M6 path (runtime verified via loopback mock HTTP bridge).
 - [ ] Real forced-crash (`kill -9`) durability during active crop harvesting transaction (Stage 5 used injected startup states).
+
+## M7 multi-villager roster, specialist roles, resource locks, task delegation, and local economy ledger — 2026-10-21
+
+- [x] Source review and offline test suite verification for multi-villager roster, specialist roles, resource locks, task delegation, and local economy ledger: Java offline Maven suite **385/385** (0 failures/errors/skips) and Node Brain suite **49/49** (0 failures). Exact M7 core JAR SHA-256: `25f0fba9ad6ec049243124fafdfa6783ccb4450860372a9893935437d929fbe2`.
+- [x] Disposable Paper 1.21.6 build 48 (`1.21.6-48-4d854e6`) + Citizens 2.0.41 build 4138 (`Citizens-2.0.41-b4138.jar`) + Java 21 runtime verification (`/private/tmp/ahmet-multivillager-runtime-20261021-r01`): exit 0, all 3 dimensions saved cleanly, 0 ERROR lines, `[MultiVillagerProbe] AHMET_MULTIVILLAGER_RUNTIME_PROBE_PASS stages=6 normalTeleports=0`. Probe JAR SHA-256: `d3b4b5dea7662f348217bce5ba034d667afd6d626a079d5631a208c325b76e25`.
+  - Stage 1 (`stage1_role_refusals`): verified `/ahmet role worker` and `/ahmet npc mehmet role farmer`, role assignment validation, and deterministic rejection of illegal cross-role tasks (`farm`/`craft` on WORKER Ahmet, `collect`/`craft` on FARMER Mehmet) with `ROLE_MISMATCH` refusal messages without activating tasks (`teleports=0`).
+  - Stage 2 (`stage2_task_delegation`): verified `/ahmet delegate collect oak_log 1` (delegated to Ahmet) and `/ahmet delegate farm wheat 1` (delegated to Mehmet) dynamically selecting qualified specialists, walking, harvesting, replanting, and chest depositing with 0 teleports.
+  - Stage 3 (`stage3_concurrent_execution_and_block_locks`): verified concurrent oak log collection (Ahmet) and carrot farming (Mehmet), `ResourceLockRegistry` conflict prevention on target block locks, completing concurrently with 0 teleports.
+  - Stage 4 (`stage4_chest_craft_lock_double_spend`): crafter roles assigned; Mehmet crafts planks locking double chest, simultaneous craft attempt on Ahmet rejected with `CHEST_LOCKED` (`§cBu sandık şu an başka bir köylünün görevinde kilitli.`), preventing double-spend; Mehmet finishes craft and releases lock (`teleports=0`).
+  - Stage 5 (`stage5_cross_npc_journal_recovery`): seeded pending harvest in `operations-mehmet.json` (crop age 0 -> `APPLY`), recovered Mehmet (`collected=1, cargo=1, recoveryBlocked=false`) while Ahmet remains completely clean, unaffected, and unblocked (`recoveryBlocked=false, collected=0, cargo=0`) with 0 teleports.
+  - Stage 6 (`stage6_local_economy_ledger_readback`): verified `LocalEconomyLedger` metrics per villager (Ahmet gathered items/credits, Mehmet farmed & crafted items/credits), net balances match produced minus consumed totals, and verified `/ahmet ledger` summary read-back (`teleports=0`).
+- [x] Built and verified four-entry M7 ZIP package (`dist/villager-ahmet-plugins-paper-1.21.6.zip`): ZIP SHA-256 `475c80dbd23b435c1976ce7c0bf6835fc1671fea6f09f2aac84425407e3ddaff`; core JAR SHA-256 `25f0fba9ad6ec049243124fafdfa6783ccb4450860372a9893935437d929fbe2`; pinned Citizens SHA-256 `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158`; Turkish README SHA-256 `a0d261946bb98cf488fbbab0949f88db0f621c42aeda6e669c3133b25f38959a`.
+- [ ] Live deployment and publication to `origin/main` (staged, not yet pushed).
+- [ ] Human multi-villager gameplay and economy ledger acceptance (requires actual human player).
+- [ ] Live TypeSafe/OpenAI provider calls on the M7 multi-villager path (runtime verified via loopback mock HTTP bridge).
+- [ ] Real forced-crash (`kill -9`) durability across multiple concurrent villager journals.
