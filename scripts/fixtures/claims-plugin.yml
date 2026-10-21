@@ -1,0 +1,6 @@
+name: ProtectionClaimsProbe
+version: 1.0.0
+main: dev.ahmetprobe.RuntimeProtectionClaimsProbe
+api-version: '1.21'
+depend: [Citizens, VillagerAhmet]
+description: Disposable M8-C claims and protection runtime probe; never install on live servers.

@@ -43,11 +43,18 @@ import dev.ahmet.agent.AgentState;
 import dev.ahmet.agent.ExecutionResult;
 import dev.ahmet.agent.OfferedAction;
 import dev.ahmet.agent.ProductionGoalPolicy;
+import dev.ahmet.protection.ClaimAction;
+import dev.ahmet.protection.ClaimBoundary;
 import dev.ahmet.protection.CompositeProtectionHook;
+import dev.ahmet.protection.ChunkTicketManager;
+import dev.ahmet.protection.ExternalProtectionAdapter;
+import dev.ahmet.protection.LandClaim;
+import dev.ahmet.protection.LandClaimRegistry;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -67,6 +74,10 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private boolean rosterStateValid = true;
   private final ResourceLockRegistry resourceLocks = new ResourceLockRegistry();
   private LocalEconomyLedger economyLedger;
+  private LandClaimRegistry landClaims;
+  private boolean landClaimsStateValid = true;
+  private final ExternalProtectionAdapter externalProtection = new ExternalProtectionAdapter();
+  private final ChunkTicketManager chunkTicketManager = new ChunkTicketManager();
   private final Map<String, VillagerSlot> villagerSlots = new LinkedHashMap<>();
 
   private NPC npc;
@@ -332,7 +343,31 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       getLogger().severe("Economy ledger is invalid; ledger disabled and file preserved: " + e.getMessage());
       economyLedger = null;
     }
+    landClaims = new LandClaimRegistry(getDataFolder().toPath().resolve("claims.json"));
+    landClaimsStateValid = true;
+    try {
+      landClaims.load();
+    } catch (Exception e) {
+      landClaimsStateValid = false;
+      blockRecovery("Saved claims registry is invalid and must be inspected", e);
+    }
     protectionHook.addHook((block, loc) -> resourceLocks.isBlockLockedByOther(activeVillagerId, block.getWorld().getName(), block.getX(), block.getY(), block.getZ()));
+    protectionHook.addHook((block, loc) -> {
+      if (landClaims == null) return false;
+      ClaimAction action = ClaimAction.ALL;
+      if (FarmCatalog.isCropBlock(block.getType().name())) {
+        action = ClaimAction.HARVEST_CROPS;
+      } else if (WoodMaterials.isCollectableWood(block.getType())) {
+        action = ClaimAction.GATHER_WOOD;
+      } else if (ObstructionPolicy.isLeaf(block.getType())) {
+        action = ClaimAction.CLEAR_OBSTRUCTION;
+      }
+      return landClaims.isProtected(activeVillagerId, block, action);
+    });
+    protectionHook.addHook((block, loc) -> {
+      String taskOwner = (task != null && task.active) ? task.owner : null;
+      return externalProtection.isProtected(block, loc, taskOwner);
+    });
 
     roleStateValid = true;
     try {
@@ -513,6 +548,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       }
       if (taskStateValid && rosterStateValid) persist();
     } finally {
+      chunkTicketManager.releaseAll(this);
       activationRangeGuard.clear();
     }
   }
@@ -520,6 +556,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     saveActiveContext();
     if(!rosterStateValid)return;
     if(!woodProtectionStateValid)return;
+    if(!landClaimsStateValid)return;
     for(VillagerSlot s:villagerSlots.values()){
       if(!s.taskStateValid||!s.roleStateValid||!s.farmPlotStateValid)return;
     }
@@ -645,6 +682,13 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       if(economyLedger==null){sender.sendMessage("§cEkonomi defteri henüz başlatılmadı.");return true;}
       sender.sendMessage(economyLedger.describeSummary());
       return true;
+    }
+    if(op.equals("claim")||op.equals("claims")){
+      if(!sender.hasPermission("ahmet.admin")){
+        sender.sendMessage("§cYetkin yok.");
+        return true;
+      }
+      return handleClaimCommand(sender,args);
     }
     if(!(sender instanceof Player player)){sender.sendMessage("Bu komut oyun içi oyuncu gerektiriyor.");return true;}
     if(op.equals("role")){
@@ -1091,14 +1135,25 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     sender.sendMessage("§e/ahmet deliver §7— iptalden kalan yükü sandığa teslim et");
     sender.sendMessage("§e/ahmet cancel §7— kendi görevini iptal et");
     sender.sendMessage("§e/ahmet home §7— görevi bırakıp eve dön");
-    if(sender.hasPermission("ahmet.admin"))sender.sendMessage("§e/ahmet spawn | summon | role <rol> | chest | bed | farmplot <1-16|0> | protecthome <0-32> | npc <id> <komut> §7— yönetici işlemleri");
+    if(sender.hasPermission("ahmet.admin")){
+      sender.sendMessage("§e/ahmet spawn | summon | role <rol> | chest | bed | farmplot <1-16|0> | protecthome <0-32> | npc <id> <komut> §7— yönetici işlemleri");
+      sender.sendMessage("§e/ahmet claim <add|remove|list|info> §7— yönetici korumalı alan sınırları");
+    }
     sender.sendMessage("§7Ahmet doğal ağaç adaylarını seçer; oyuncu tarafından konan odunları ve korunan ev alanını atlar.");
   }
   @Override public List<String> onTabComplete(CommandSender sender,Command command,String alias,String[] args){
     if(!command.getName().equalsIgnoreCase("ahmet")||args.length==0)return List.of();
     List<String> commands=new ArrayList<>(List.of("help","status","cargo","collect","craft","farm","delegate","roster","ledger","items","ask","deliver","cancel","home"));
-    if(sender.hasPermission("ahmet.admin"))commands.addAll(List.of("spawn","summon","role","npc","chest","bed","farmplot","protecthome"));
+    if(sender.hasPermission("ahmet.admin"))commands.addAll(List.of("spawn","summon","role","npc","chest","bed","farmplot","protecthome","claim","claims"));
     if(args.length==1)return commands.stream().filter(value->value.startsWith(args[0].toLowerCase(java.util.Locale.ROOT))).toList();
+    if(args.length==2&&(args[0].equalsIgnoreCase("claim")||args[0].equalsIgnoreCase("claims"))&&sender.hasPermission("ahmet.admin"))
+      return List.of("add","remove","list","info").stream().filter(value->value.startsWith(args[1].toLowerCase(java.util.Locale.ROOT))).toList();
+    if(args.length==3&&(args[0].equalsIgnoreCase("claim")||args[0].equalsIgnoreCase("claims"))&&sender.hasPermission("ahmet.admin")
+        &&(args[1].equalsIgnoreCase("remove")||args[1].equalsIgnoreCase("info")||args[1].equalsIgnoreCase("delete"))) {
+      if (landClaims != null) {
+        return landClaims.allClaims().stream().map(LandClaim::id).filter(id->id.startsWith(args[2].toLowerCase(java.util.Locale.ROOT))).toList();
+      }
+    }
     if(args.length==2&&args[0].equalsIgnoreCase("role")&&sender.hasPermission("ahmet.admin"))
       return List.of("all","worker","farmer","crafter","genel","işçi","çiftçi","usta").stream().filter(value->value.startsWith(args[1].toLowerCase(java.util.Locale.ROOT))).toList();
     if(args.length==2&&args[0].equalsIgnoreCase("npc")&&sender.hasPermission("ahmet.admin"))
@@ -1365,6 +1420,9 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     clearNavigation();
     explorationAttempts=0;
     returningHome=task.cargo==0;
+    if (npc != null && npc.isSpawned() && npc.getEntity() != null) {
+      chunkTicketManager.releaseTickets(npc.getEntity().getWorld(), activeVillagerId, this);
+    }
     if(!recoveryBlocked && (journal==null || !journal.hasPendingOperation())){
       resourceLocks.releaseAllForVillager(activeVillagerId);
     }
@@ -2264,6 +2322,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       if(plan.moved()>0)presentation.committedWorkCue(npc,true);
       if(plan.moved()<amount){warn("Sandık dolu; "+task.cargo+" kaynak hâlâ yanımda.");return;}
       if(task.cargo>0)return;
+      chunkTicketManager.releaseTickets(chest.getWorld(), activeVillagerId, this);
       finishTaskIfReady();
     }catch(Exception e){
       blockRecovery("Deposit transaction is pending; the job is paused",e);
@@ -2342,6 +2401,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         }
       }
       presentation.committedWorkCue(npc, true);
+      chunkTicketManager.releaseTickets(chest.getWorld(), activeVillagerId, this);
       finishTaskIfReady();
     } catch (Exception e) {
       blockRecovery("Craft transaction is pending; the job is paused", e);
@@ -2558,6 +2618,11 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     CraftRecipe recipe=task.craftRecipe();
     task.finish();controller.nextGeneration();controller.transitionTo(AgentState.IDLE,"Task completed");controller.clearHelp();persist();event("task_delivered",delivered);
     returningHome=true;homeStepAttempt=0;clearNavigation();
+    if (chestLocation != null && chestLocation.getWorld() != null) {
+      chunkTicketManager.releaseTickets(chestLocation.getWorld(), activeVillagerId, this);
+    } else if (npc != null && npc.isSpawned() && npc.getEntity() != null) {
+      chunkTicketManager.releaseTickets(npc.getEntity().getWorld(), activeVillagerId, this);
+    }
     resourceLocks.releaseAllForVillager(activeVillagerId);
     if(craft)say("Bitti! "+delivered+" "+(recipe!=null?recipe.key().substring("minecraft:".length()):"ürün")+" ürettim ve sandığa bıraktım.");
     else if(partial)say("Şimdilik "+delivered+"/"+requested+" kaynak topladım ve sandığa bıraktım. Ulaşılabilir kaynağı bulamayınca durdum; yolu açınca kalanını tekrar isteyebilirsin.");
@@ -2854,4 +2919,148 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     if(System.currentTimeMillis()-lastWarningMs>8000){lastWarningMs=System.currentTimeMillis();say(message);}
   }
   private static String coords(Location loc){return loc.getBlockX()+","+loc.getBlockY()+","+loc.getBlockZ();}
+
+  private boolean handleClaimCommand(CommandSender sender, String[] args) {
+    if (args.length == 1 || args[1].equalsIgnoreCase("list")) {
+      if (landClaims == null || landClaims.allClaims().isEmpty()) {
+        sender.sendMessage("§eKayıtlı korumalı alan yok.");
+        return true;
+      }
+      var all = landClaims.allClaims();
+      sender.sendMessage("§6Kayıtlı korumalı alanlar (§f" + all.size() + "§6):");
+      for (LandClaim claim : all) {
+        sender.sendMessage("§7• §f" + claim.id() + " §8[" + claim.boundary().world() + ": "
+            + claim.boundary().minX() + "," + claim.boundary().minY() + "," + claim.boundary().minZ()
+            + " -> " + claim.boundary().maxX() + "," + claim.boundary().maxY() + "," + claim.boundary().maxZ()
+            + "] §7(köylüler: " + String.join(",", claim.allowedVillagers()) + ", işlemler: "
+            + (claim.allowedActions().contains(ClaimAction.ALL) ? "ALL" : claim.allowedActions().toString()) + ")");
+      }
+      return true;
+    }
+
+    String subOp = args[1].toLowerCase(java.util.Locale.ROOT);
+    if (subOp.equals("info")) {
+      if (args.length < 3) {
+        sender.sendMessage("§eKullanım: /ahmet claim info <id>");
+        return true;
+      }
+      String id = args[2];
+      LandClaim claim = landClaims != null ? landClaims.getClaim(id) : null;
+      if (claim == null) {
+        sender.sendMessage("§cKorumalı alan bulunamadı: " + id);
+        return true;
+      }
+      sender.sendMessage("§6Korumalı Alan: §f" + claim.id() + (claim.enabled() ? " §a(aktif)" : " §c(devre dışı)"));
+      sender.sendMessage("§7Sahip: §f" + claim.owner());
+      sender.sendMessage("§7Sınır: §f" + claim.boundary().world() + " §8["
+          + claim.boundary().minX() + "," + claim.boundary().minY() + "," + claim.boundary().minZ()
+          + " -> " + claim.boundary().maxX() + "," + claim.boundary().maxY() + "," + claim.boundary().maxZ()
+          + "] §7(hacim: " + claim.boundary().volume() + ")");
+      sender.sendMessage("§7İzinli köylüler: §f" + String.join(", ", claim.allowedVillagers()));
+      sender.sendMessage("§7İzinli işlemler: §f" + (claim.allowedActions().contains(ClaimAction.ALL) ? "ALL" : claim.allowedActions().toString()));
+      return true;
+    }
+
+    if (subOp.equals("remove") || subOp.equals("delete")) {
+      if (args.length < 3) {
+        sender.sendMessage("§eKullanım: /ahmet claim remove <id>");
+        return true;
+      }
+      String id = args[2];
+      boolean removed = landClaims != null && landClaims.removeClaim(id);
+      if (removed) {
+        sender.sendMessage("§aKorumalı alan silindi: " + id);
+      } else {
+        sender.sendMessage("§cKorumalı alan bulunamadı: " + id);
+      }
+      return true;
+    }
+
+    if (subOp.equals("add")) {
+      if (args.length < 9) {
+        sender.sendMessage("§eKullanım: /ahmet claim add <id> <x1> <y1> <z1> <x2> <y2> <z2> [allowed_villagers] [actions] [world]");
+        return true;
+      }
+      String id = args[2];
+      int x1, y1, z1, x2, y2, z2;
+      try {
+        x1 = Integer.parseInt(args[3]);
+        y1 = Integer.parseInt(args[4]);
+        z1 = Integer.parseInt(args[5]);
+        x2 = Integer.parseInt(args[6]);
+        y2 = Integer.parseInt(args[7]);
+        z2 = Integer.parseInt(args[8]);
+      } catch (NumberFormatException e) {
+        sender.sendMessage("§cKoordinatlar tam sayı olmalıdır.");
+        return true;
+      }
+
+      Set<String> allowedVillagers = Set.of("*");
+      if (args.length >= 10 && !args[9].isBlank() && !args[9].equals("-")) {
+        allowedVillagers = Set.of(args[9].split(","));
+      }
+
+      Set<ClaimAction> allowedActions = Set.of(ClaimAction.ALL);
+      if (args.length >= 11 && !args[10].isBlank() && !args[10].equals("-")) {
+        Set<ClaimAction> parsedActions = new HashSet<>();
+        for (String actStr : args[10].split(",")) {
+          try {
+            parsedActions.add(ClaimAction.valueOf(actStr.trim().toUpperCase(java.util.Locale.ROOT)));
+          } catch (IllegalArgumentException e) {
+            sender.sendMessage("§cGeçersiz işlem: " + actStr + ". Geçerli işlemler: GATHER_WOOD, HARVEST_CROPS, CLEAR_OBSTRUCTION, OPEN_CHEST, ALL");
+            return true;
+          }
+        }
+        allowedActions = parsedActions;
+      }
+
+      String worldName = null;
+      if (args.length >= 12) {
+        worldName = args[11];
+      } else if (sender instanceof Player p) {
+        worldName = p.getWorld().getName();
+      } else {
+        try {
+          if (!Bukkit.getWorlds().isEmpty()) {
+            worldName = Bukkit.getWorlds().get(0).getName();
+          }
+        } catch (Throwable ignored) {}
+      }
+      if (worldName == null || worldName.isBlank()) {
+        worldName = "world";
+      }
+
+      ClaimBoundary boundary;
+      try {
+        boundary = new ClaimBoundary(worldName, x1, y1, z1, x2, y2, z2);
+      } catch (IllegalArgumentException e) {
+        sender.sendMessage("§cGeçersiz sınır: " + e.getMessage());
+        return true;
+      }
+
+      String owner = sender instanceof Player p ? p.getUniqueId().toString() : "operator";
+      LandClaim claim;
+      try {
+        claim = new LandClaim(id, boundary, owner, allowedVillagers, allowedActions, true);
+      } catch (IllegalArgumentException e) {
+        sender.sendMessage("§cGeçersiz korumalı alan: " + e.getMessage());
+        return true;
+      }
+
+      if (landClaims != null) {
+        landClaims.addClaim(claim);
+      }
+      sender.sendMessage("§aKorumalı alan eklendi: " + id);
+      return true;
+    }
+
+    sender.sendMessage("§eKullanım: /ahmet claim <add|remove|list|info> ...");
+    return true;
+  }
+
+  LandClaimRegistry landClaims() { return landClaims; }
+  void setLandClaims(LandClaimRegistry registry) { this.landClaims = registry; }
+  ChunkTicketManager chunkTicketManager() { return chunkTicketManager; }
+  ExternalProtectionAdapter externalProtection() { return externalProtection; }
+  CompositeProtectionHook protectionHook() { return protectionHook; }
 }

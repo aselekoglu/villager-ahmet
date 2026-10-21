@@ -5,7 +5,7 @@ import java.util.Set;
 import org.bukkit.Material;
 import org.bukkit.Tag;
 
-final class WoodMaterials {
+public final class WoodMaterials {
   private static final Map<String, String> PREFIX = Map.ofEntries(
       Map.entry("oak", "OAK_"), Map.entry("spruce", "SPRUCE_"), Map.entry("birch", "BIRCH_"),
       Map.entry("jungle", "JUNGLE_"), Map.entry("acacia", "ACACIA_"),
@@ -48,8 +48,15 @@ final class WoodMaterials {
         && LOG_SUFFIXES.stream().anyMatch(suffix -> base.endsWith("_" + suffix)));
   }
 
-  static boolean isCollectableWood(Material material) {
-    return material != null && (Tag.LOGS.isTagged(material) || material == Material.BAMBOO);
+  public static boolean isCollectableWood(Material material) {
+    if (material == null) return false;
+    if (material == Material.BAMBOO) return true;
+    if (isWoodName(material.name())) return true;
+    try {
+      return Tag.LOGS != null && Tag.LOGS.isTagged(material);
+    } catch (Throwable t) {
+      return false;
+    }
   }
 
   static boolean matchesPreference(Material material, String preference) {

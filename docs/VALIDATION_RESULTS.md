@@ -557,3 +557,37 @@ The four-entry M7 ZIP package (`dist/villager-ahmet-plugins-paper-1.21.6.zip`) w
 - Console `list` reported `There are 0 of a max of 6 players online: `. `/ahmet status` reported `Ahmet: boşta (taşınan kaynak: 0) | Durum: IDLE | Rol: genel | Program: wander (walking; wander radius exceeded) | Yatak: bağlı değil | Sandık: bağlı | NPC: yok | Korunan ev: 10 blok | Yerleştirilmiş odun işareti: 15 | Tarla: bağlı değil`. `/ahmet roster` reported `Kayıtlı köylüler (1/4): • Ahmet (id: ahmet, rol: genel, NPC: yok, görev: boşta)`. `save-all flush` acknowledged `Saved the game (world, DIM-1, DIM1)` across all three dimensions. The live server was left running after read-back.
 
 Human in-game multi-villager gameplay, live provider calls on the M7 path, production-store inspection, and forced-crash durability across concurrent journals remain unverified.
+
+## M8 fine-grained claims, permissions, protection compatibility, and bounded chunk tickets — 2026-10-22
+
+### Source and unit verification
+- Java offline Maven package: **416 tests, 0 failures, 0 errors, 0 skipped** (`mvn -B -ntp -o test` in `paper-plugin/`).
+- Core JAR SHA-256: `45920ecab875dbc81a672b9f05082c1d1c4461c5ca2b69085661a7806ccdfc3e` (`villager-ahmet-0.1.0-SNAPSHOT.jar`).
+
+### Disposable Paper 1.21.6 / Citizens 2.0.41 runtime evidence (`r01`)
+- Executed in `/private/tmp/ahmet-claims-runtime-20261022-r01` with Paper 1.21.6 build 48 (`1.21.6-48-4d854e6`) + Citizens `2.0.41-SNAPSHOT (build 4138)` + Java 21. Exit code 0, all 3 dimensions (`world`, `DIM-1`, `DIM1`) saved cleanly, 0 ERROR lines.
+- Probe JAR SHA-256: `81bc96441419033925769520293b43cbc4fd266c150bd8b801bccdcc1beb1a99` (`ProtectionClaimsProbe.jar`).
+- Pinned Citizens JAR SHA-256: `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158`.
+- Probe outcome: `[ProtectionClaimsProbe] PROBE COMPLETED SUCCESSFULLY WITH 0 TELEPORTS.` (Report: `/private/tmp/ahmet-claims-verification.json`: status `PASS`, normalTeleports `0`, claimsValid `true`, chunkTicketsClean `true`).
+- Detailed stages:
+  1. **Stage 1 (`stage1_claim_registration_and_persistence`)**:
+     - Operator executed `/ahmet claim add village_farm -10 60 -10 10 70 10 ahmet HARVEST_CROPS world`. Verified claim registration in `LandClaimRegistry`, persistent write-ahead storage in `claims.json`, and read-back via `/ahmet claim list` and `/ahmet claim info village_farm`.
+  2. **Stage 2 (`stage2_foreign_claim_refusal`)**:
+     - Evaluated boundary enforcement inside `village_farm`: primary villager Ahmet permitted for `HARVEST_CROPS`; foreign secondary villager Mehmet rejected (`isProtected = true`); wood gathering rejected even for Ahmet because the claim strictly limits permitted actions to `HARVEST_CROPS`. Unclaimed wilderness blocks permitted as usual.
+  3. **Stage 3 (`stage3_claim_action_granularity`)**:
+     - Operator added wildcard claim `/ahmet claim add common_forest 20 60 20 30 70 30 * ALL world`. Both Ahmet and Mehmet permitted for wood gathering and leaf clearing under wildcard authorization.
+  4. **Stage 4 (`stage4_external_protection_reflection_and_fail_closed`)**:
+     - Evaluated `ExternalProtectionAdapter`: absent third-party protection plugins fallback gracefully to wilderness (`false`); foreign-owned claim without build trust rejected (`true`); simulated external provider exception strictly fails closed (`true`, protected).
+  5. **Stage 5 (`stage5_chunk_ticket_lifecycle_and_bounded_budget`)**:
+     - Evaluated `ChunkTicketManager`: verified strict per-villager chunk ticket budget (`MAX_TICKETS_PER_VILLAGER = 9`). First 9 chunk tickets granted; 10th ticket deterministically refused (`budget exceeded`). Duplicate requests idempotently handled. `releaseTickets` cleanly freed all held tickets, returning active count to 0 without ticket leaks.
+  6. **Stage 6 (`stage6_teleport_check_and_shutdown`)**:
+     - Operator executed `/ahmet claim remove village_farm`. Verified clean deletion from memory and `claims.json`. Verified `normalTeleports = 0` throughout all operations. Gracefully saved worlds and stopped server.
+
+### Package verification
+The four-entry M8 ZIP package (`dist/villager-ahmet-plugins-paper-1.21.6.zip`) was built locally and verified:
+- **Outer ZIP SHA-256**: `deaadcf71c1aaa6a769200371d5e0c5d7ea195832ed90968719d66e27b084004`
+- **Core JAR SHA-256**: `45920ecab875dbc81a672b9f05082c1d1c4461c5ca2b69085661a7806ccdfc3e` (`villager-ahmet-0.1.0-SNAPSHOT.jar`)
+- **Pinned Citizens SHA-256**: `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158` (`Citizens-2.0.41-b4138.jar`)
+- **Turkish Package README SHA-256**: `6db3df6ee6197116fc53f868ef63661beff3bbd16dbbf8fc725459345ff51a5d` (`README-TR.txt`)
+
+Human claims gameplay, live provider calls on the M8 path, and forced-crash durability remain unverified.

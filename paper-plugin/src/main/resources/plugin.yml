@@ -4,6 +4,7 @@ main: dev.ahmet.AhmetPlugin
 api-version: '1.21'
 load: POSTWORLD
 depend: [Citizens]
+softdepend: [GriefPrevention, WorldGuard]
 description: AI villager with bounded world actions and a separate JEV/LLM brain.
 commands:
   ahmet:
