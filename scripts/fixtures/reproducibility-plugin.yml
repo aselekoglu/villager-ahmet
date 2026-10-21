@@ -1,0 +1,6 @@
+name: AcceptanceReproducibilityProbe
+version: 0.1.0
+main: dev.ahmetprobe.RuntimeAcceptanceReproducibilityProbe
+api-version: '1.21'
+depend: [Citizens, VillagerAhmet]
+description: Disposable M10 acceptance and reproducibility runtime probe; never install on live servers.

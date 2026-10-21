@@ -627,3 +627,44 @@ Human claims gameplay, live provider calls on the M8 path, and forced-crash dura
 - Console `list` reported `There are 0 of a max of 6 players online: `. `/ahmet status` reported `Ahmet: boşta (taşınan kaynak: 0) | Durum: IDLE | Rol: genel | Program: sleep (walking; no bed bound) | Yatak: bağlı değil | Sandık: bağlı | NPC: yok | Korunan ev: 10 blok | Yerleştirilmiş odun işareti: 15 | Tarla: bağlı değil`. `/ahmet roster` reported `Kayıtlı köylüler (1/4): • Ahmet (id: ahmet, rol: genel, NPC: yok, görev: boşta)`. `/ahmet claims` reported `Kayıtlı korumalı alan yok.`. `save-all flush` acknowledged `Saved the game (world, DIM-1, DIM1)` across all three dimensions. The live server was left running after read-back.
 
 Human in-browser dashboard inspection and real-world multi-client network validation remain unverified.
+
+## M10 acceptance and reproducibility — final release verification — 2026-10-22
+
+### Isolated fresh installation & package verification
+- Clean isolated installation verified by extracting `dist/villager-ahmet-plugins-paper-1.21.6.zip` into `/private/tmp/ahmet-m10-fresh-install-test`. All 4 entries unpacked with zero missing dependencies.
+- Final four-entry distribution archive (`dist/villager-ahmet-plugins-paper-1.21.6.zip`):
+  - **Outer ZIP SHA-256**: `3e1e33737e35c7fe74c3d8e82f3d74d73a62fdacadece8cae1292d9dab2b344f`
+  - **Core Plugin JAR SHA-256**: `45920ecab875dbc81a672b9f05082c1d1c4461c5ca2b69085661a7806ccdfc3e` (`VillagerAhmet.jar`)
+  - **Pinned Citizens JAR SHA-256**: `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158` (`Citizens-2.0.41-b4138.jar`)
+  - **Turkish Package README SHA-256**: `6db3df6ee6197116fc53f868ef63661beff3bbd16dbbf8fc725459345ff51a5d` (`README-TR.txt`)
+  - Cryptographic manifest: `dist/SHA256SUMS.txt`.
+
+### Disposable Paper 1.21.6 / Citizens 2.0.41 runtime evidence (`r01`)
+- Executed in `/private/tmp/ahmet-m10-runtime-20261022-r01` with Paper 1.21.6 build 48 (`1.21.6-48-4d854e6`) + Citizens `2.0.41-SNAPSHOT (build 4138)` + Java 21. Exit code 0, all 3 dimensions (`world`, `DIM-1`, `DIM1`) saved cleanly, 0 unhandled errors.
+- Probe JAR SHA-256: `fbbde4dcd7af063d3cc02149e5524391405a9aa827a2bb1437d3c607bdb88074` (`AcceptanceReproducibilityProbe.jar`).
+- Outcome: `[AcceptanceProbe] M10_ACCEPTANCE_REPRODUCIBILITY_PROBE_PASS stages=6 normalTeleports=0` (Report: `ahmet-m10-acceptance-verification.json`).
+- Detailed stages:
+  1. **Stage 1 (`stage1_fresh_install_and_subsystems_verification`)**:
+     - Subsystems verified: `VillagerAhmet` enabled, `LandClaimRegistry` initialized, `ExternalProtectionAdapter` initialized, `ChunkTicketManager` initialized, `LocalEconomyLedger` initialized, `VillagerRoster` initialized (`rosterStateValid=true`).
+     - Real Citizens `EntityType.VILLAGER` instances spawned for Ahmet and Mehmet with chests, farmplots, and home points bound. Teleport monitoring activated with `normalTeleports = 0`.
+  2. **Stage 2 (`stage2_gather_forced_crash_journal_recovery`)**:
+     - Simulated abrupt crash (`kill -9`) after log block was removed from world but before completion. Seeded `pendingHarvest` in write-ahead journal.
+     - `recoverJournal` cleanly reconciled: `recoveryBlocked=false`, transaction cleared, `collected=1, cargo=1`, zero item duplication, and `normalTeleports=0`.
+  3. **Stage 3 (`stage3_craft_forced_crash_recovery_and_tamper_conflict`)**:
+     - Part 3A (`APPLY_REMAINING`): Seeded `pendingCraft` with 2 logs consumed and 8 planks uncompleted. `recoverJournal` deposited 8 oak planks into chest, cleared transaction, zero double-crediting (`normalTeleports=0`).
+     - Part 3B (`CONFLICT`): Seeded craft transaction and tampered with chest slot (inserted cobblestone). `recoverJournal` detected tamper, locked `recoveryBlocked=true`, preserved pending craft, and prevented chest corruption.
+  4. **Stage 4 (`stage4_chest_interference_during_transit`)**:
+     - Ahmet had 5 oak logs in cargo and prepared to deposit. Double chest was completely filled (54 stacks of cobblestone).
+     - Deposit planner detected full capacity: zero items deleted, zero items dropped on ground, cargo preserved (`cargo=5`).
+     - 1 chest slot freed: Ahmet deposited 5 logs cleanly into freed slot (`cargo=0`, `deposited=5`), with 53 cobblestone stacks intact (`normalTeleports=0`).
+  5. **Stage 5 (`stage5_multi_villager_concurrent_economy_durability`)**:
+     - `ResourceLockRegistry` verified concurrent target block locking and double-spend chest locking between Ahmet and Mehmet.
+     - `LocalEconomyLedger` recorded concurrent deposits and crafts. Net balances strictly conserved ($N = P - C$ = $58 - 8 = 50$). Operator `/ahmet ledger` command read-back verified.
+  6. **Stage 6 (`stage6_final_teleport_audit_and_clean_shutdown`)**:
+     - Final audit confirmed `normalTeleports == 0` across the entire lifecycle.
+     - World saved and server shut down cleanly.
+
+### Independent code review
+- Reviewer subagent returned **APPROVE** with zero critical and zero important findings.
+
+Human two-client multiplayer gameplay, live provider calls on current release path, and real-world WAN exposure remain unverified (private LAN only).
