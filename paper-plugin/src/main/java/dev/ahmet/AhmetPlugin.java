@@ -1454,7 +1454,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     switch(action){
       case "harvest" -> {
         if(!TaskAdmission.canExecuteHarvestOrDeliverStep(task))return;
-        if(treeTarget==null || here.distanceSquared(treeTarget)>3.5*3.5){treeTarget=null;return;}
+        if(treeTarget==null || here.distanceSquared(treeTarget.clone().add(.5,.5,.5))>ActionPreconditions.MAX_REACH_SQ){treeTarget=null;return;}
         Block block=treeTarget.getBlock();
         ExecutionResult pre=controller.preconditions().validateGather(here,block,task.materialPreference,task.cargo);
         if(!pre.isSuccess()||!isEligibleTarget(block,task.materialPreference)){treeTarget=null;invalidateTargetScan();return;}

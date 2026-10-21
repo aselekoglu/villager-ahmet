@@ -111,3 +111,18 @@
 - [ ] Human in-game crafting gameplay (requires actual human player).
 - [ ] Live TypeSafe/OpenAI provider calls on the M5 path (runtime verified via loopback mock HTTP bridge).
 - [ ] Real forced-crash (`kill -9`) durability during active crafting transaction (Stage 4 used injected startup states).
+
+## M6 operator-approved farm plots & mature crop harvesting — 2026-10-21
+
+- [x] Source review and offline test suite verification for operator-approved farm plots and mature crop harvesting: Java offline Maven suite **345/345** (0 failures/errors/skips) and Node Brain suite **49/49** (0 failures). Exact M6 core JAR SHA-256: `5107b86190a3b6cd34f178478f022433e11f2abcca9818298e594198753d1921`.
+- [x] Disposable Paper 1.21.6 build 48 (`1.21.6-48-4d854e6`) + Citizens 2.0.41 build 4138 (`Citizens-2.0.41-b4138.jar`) + Java 21 runtime verification (`/private/tmp/ahmet-farming-runtime-20261021-r02`): exit 0, all 3 dimensions saved cleanly, 0 ERROR lines, `AHMET_FARMING_RUNTIME_PROBE_PASS stages=6 normalTeleports=0`. Probe JAR SHA-256: `9bddcd0a02bb5f6bc4886743df4d8dc493ee21b2af9c30a3ef982a6e1cdcb50f`.
+  - Stage 1 (`plot_and_wheat_harvest_replant`): approved circular farmplot (`/ahmet farmplot 3`), walked 6.28 blocks (`maxStep=0.20`, `teleports=0`), harvested 2 mature wheat blocks and replanted in place at age 0, preserved immature wheat, preserved out-of-plot wheat as protected player-owned crop, and skipped beetroot.
+  - Stage 2 (`carrot_and_potato_mixed_harvest`): mixed patch harvested 1 carrot and 1 potato with zero normal teleports (`teleports=0`), 0 poisonous potato dropped, replanted both at age 0, and preserved farmland underneath.
+  - Stage 3 (`chat_and_partial_delivery_quota`): Turkish chat `/ahmet ask 3 buğday topla` admitted `harvest_crop` (`minecraft:wheat`, 3) via loopback mock HTTP bridge; harvested 1 available mature wheat, delivered 1 wheat into the bound chest, and emitted `task_started` and `task_delivered` events (`teleports=0`).
+  - Stage 4 (`refusals_cancel_and_full_chest_deliver`): refusals for unbound plot, unsupported crop (beetroot), and out-of-search-radius crop; held cargo when bound chest was full without dropping; preserved items on operator cancel while carrying cargo, and completed delivery when chest space was cleared.
+  - Stage 5 (`crop_journal_recovery_and_conflict`): verified crash-recovery reconciliation on restart for `pendingCropHarvest`: `notApplied` when block was unharvested, `apply` when harvest occurred without cargo credit, and `conflictBlocked` on unexpected block state (injected journal states in disposable server, not a forced-crash test).
+  - Stage 6 (`gather_craft_farm_regression_chain`): end-to-end regression chain across gather, craft, and farm: gathered 1 oak log, crafted 4 oak planks, and harvested 1 potato with `normalTeleports=0`.
+- [x] Built and verified four-entry M6 ZIP package (`dist/villager-ahmet-plugins-paper-1.21.6.zip`): ZIP SHA-256 `d519450ca042559f5f8aed972ebdf2639db7ac185ae6f3f285027ec093b0f370`; core JAR SHA-256 `5107b86190a3b6cd34f178478f022433e11f2abcca9818298e594198753d1921`; pinned Citizens SHA-256 `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158`; Turkish README SHA-256 `7c9912818c7c9b502fd01ce736192865fceeeb21bfd423a7f35c96060237487b`.
+- [ ] Human in-game farming gameplay (requires actual human player).
+- [ ] Live TypeSafe/OpenAI provider calls on the M6 path (runtime verified via loopback mock HTTP bridge).
+- [ ] Real forced-crash (`kill -9`) durability during active crop harvesting transaction (Stage 5 used injected startup states).

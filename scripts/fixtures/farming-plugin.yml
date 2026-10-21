@@ -1,0 +1,7 @@
+name: FarmingProbe
+version: 1.0.0
+main: dev.ahmetprobe.RuntimeFarmingProbe
+api-version: '1.21'
+load: POSTWORLD
+depend: [VillagerAhmet, Citizens]
+description: Opt-in disposable M6 farming probe; never install on a user or live server.

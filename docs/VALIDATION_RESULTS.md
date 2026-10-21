@@ -473,3 +473,38 @@ The four-entry M5 ZIP package (`dist/villager-ahmet-plugins-paper-1.21.6.zip`) w
 - Console `list` reported `There are 0 of a max of 6 players online`. `/ahmet status` reported `Ahmet: boşta (taşınan kaynak: 0) | Durum: IDLE | Program: sleep (walking; no bed bound) | Yatak: bağlı değil | Sandık: bağlı | NPC: yok | Korunan ev: 10 blok | Yerleştirilmiş odun işareti: 15` (`recoveryBlocked=false`). `save-all flush` acknowledged `Saved the game` across all three dimensions (`world`, `DIM-1`, `DIM1`). The live server was left running after read-back.
 
 Human in-game crafting gameplay, live provider calls on the M5 path, production-store inspection, and forced-crash durability remain unverified.
+
+## M6 operator-approved farm plots and mature crop harvesting runtime and package gate — 2026-10-21
+
+### Source and unit verification
+- Java offline Maven package: **345 tests, 0 failures, 0 errors, 0 skipped** (`mvn -B -ntp -o test` in `paper-plugin/`).
+- Node Brain test suite: **49 tests, 0 failures** (`node --test test/*.test.mjs` in `brain/`).
+- Core JAR SHA-256: `5107b86190a3b6cd34f178478f022433e11f2abcca9818298e594198753d1921`.
+
+### Disposable Paper 1.21.6 / Citizens 2.0.41 runtime evidence (`r02`)
+- Executed in `/private/tmp/ahmet-farming-runtime-20261021-r02` with Paper 1.21.6 build 48 (`1.21.6-48-4d854e6`) + Citizens `2.0.41-SNAPSHOT (build 4138)` + Java 21. Exit code 0, all 3 dimensions (`world`, `DIM-1`, `DIM1`) saved cleanly, 0 ERROR lines.
+- Probe JAR SHA-256: `9bddcd0a02bb5f6bc4886743df4d8dc493ee21b2af9c30a3ef982a6e1cdcb50f` (`FarmingProbe.jar`).
+- Pinned Citizens JAR SHA-256: `5f98ca5541dc55fc7b55e438a2adbc0bd0117c7a0c154a909ba5a67e46f435a2` (in runtime r02).
+- Probe outcome: `AHMET_FARMING_RUNTIME_PROBE_PASS stages=6 normalTeleports=0`.
+- Detailed stages:
+  1. **Stage 1 (`plot_and_wheat_harvest_replant`)**: `AHMET_FARMING_STAGE_PASS stage=plot_and_wheat_harvest_replant walked=6.28 maxStep=0.20 teleports=0 wheat=2 replanted=2 immaturePreserved=true outOfPlotPreserved=true beetrootSkipped=true`
+     - Operator `/ahmet farmplot 3` approved circular plot around farmland patch. `/ahmet farm wheat 2` walked 6.28 blocks (`maxStep=0.20`, `teleports=0`), harvested 2 mature wheat blocks, replanted both in place (`replanted=2`), preserved immature wheat (`immaturePreserved=true`), preserved out-of-plot wheat as protected player-owned crop (`outOfPlotPreserved=true`), and skipped beetroot (`beetrootSkipped=true`).
+  2. **Stage 2 (`carrot_and_potato_mixed_harvest`)**: `AHMET_FARMING_STAGE_PASS stage=carrot_and_potato_mixed_harvest teleports=0 carrot=1 potato=1 poisonousPotato=0 replantedCarrot=true replantedPotato=true`
+     - Mixed crop patch harvested 1 carrot and 1 potato with zero normal teleports (`teleports=0`). Poisonous potato was strictly excluded (`poisonousPotato=0`), and both crops were replanted at age 0 with farmland underneath intact (`replantedCarrot=true replantedPotato=true`).
+  3. **Stage 3 (`chat_and_partial_delivery_quota`)**: `AHMET_FARMING_STAGE_PASS stage=chat_and_partial_delivery_quota teleports=0 requested=3 harvested=1 deposited=1 immaturePreserved=true taskStartedEvent=true taskDeliveredEvent=true`
+     - Turkish chat command `/ahmet ask 3 buğday topla` admitted `harvest_crop` (`minecraft:wheat`, amount 3) via loopback mock HTTP bridge. Harvested available 1 mature wheat, preserved immature wheat, and delivered 1 wheat into the bound chest, emitting `task_started` and `task_delivered` events with `teleports=0`.
+  4. **Stage 4 (`refusals_cancel_and_full_chest_deliver`)**: `AHMET_FARMING_STAGE_PASS stage=refusals_cancel_and_full_chest_deliver unboundPlotRefused=true unsupportedCropRefused=true outOfRangeRefused=true fullChestHold=true cancelWithCargo=true deliverSuccess=true`
+     - Verified refusals when farm plot is unbound (`unboundPlotRefused=true`), when crop is unsupported like beetroot (`unsupportedCropRefused=true`), and when crop is outside configured search radius (`outOfRangeRefused=true`). When bound chest was full, Ahmet held cargo without discarding (`fullChestHold=true`). Operator cancel while carrying cargo preserved items (`cancelWithCargo=true`), and subsequent delivery completed when chest space was cleared (`deliverSuccess=true`).
+  5. **Stage 5 (`crop_journal_recovery_and_conflict`)**: `AHMET_FARMING_STAGE_PASS stage=crop_journal_recovery_and_conflict notApplied=true apply=true conflictBlocked=true`
+     - Verified crash-recovery reconciliation on restart for `pendingCropHarvest`: `notApplied=true` when block remained unharvested, `apply=true` when harvest had been applied without credit, and `conflictBlocked=true` when crop block had unexpected state.
+  6. **Stage 6 (`gather_craft_farm_regression_chain`)**: `AHMET_FARMING_STAGE_PASS stage=gather_craft_farm_regression_chain gatheredOakLog=1 craftedOakPlanks=4 harvestedPotato=1 teleports=0`
+     - End-to-end multi-milestone regression chain: gathered 1 oak log (`gatheredOakLog=1`), crafted 4 oak planks (`craftedOakPlanks=4`), and harvested 1 potato (`harvestedPotato=1`) with `normalTeleports=0`.
+
+### Package verification
+The four-entry M6 ZIP package (`dist/villager-ahmet-plugins-paper-1.21.6.zip`) was built locally and verified:
+- **Outer ZIP SHA-256**: `d519450ca042559f5f8aed972ebdf2639db7ac185ae6f3f285027ec093b0f370`
+- **Core JAR SHA-256**: `5107b86190a3b6cd34f178478f022433e11f2abcca9818298e594198753d1921` (`villager-ahmet-0.1.0-SNAPSHOT.jar`)
+- **Pinned Citizens SHA-256**: `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158` (`Citizens-2.0.41-b4138.jar`)
+- **Turkish Package README SHA-256**: `7c9912818c7c9b502fd01ce736192865fceeeb21bfd423a7f35c96060237487b` (`README-TR.txt`)
+
+Human in-game farming gameplay, live provider calls on the M6 path, production-store inspection, and forced-crash durability remain unverified.
