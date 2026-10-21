@@ -126,6 +126,30 @@ If the bound bed is in another world, or its world is unloaded, the schedule fai
 
 Goal-policy unit and disposable runtime results are recorded in `docs/VALIDATION_RESULTS.md`. The final four-entry package has been rebuilt locally and verified with ZIP SHA-256 `5781ea3489fef9f5828f0c21cc980a414ed9f8c8602a1057b9ce3adb0788c207`; the local `dist/` directory is gitignored. Source publication and deployment/read-back are complete. Diagnostic field interventions are fixture-only and do not count as normal runtime, provider, human, or crash acceptance; human gameplay, current-path provider behavior and forced-crash acceptance remain open.
 
+## Allowlisted transactional crafting (M5)
+
+Crafting in Villager Ahmet is implemented as an allowlisted, transactional, chest-centric operation executed on the Paper main thread. It supports exactly two vanilla recipes:
+- `minecraft:oak_planks`: consumes 1 plain oak log, wood, or stripped oak variant (`OAK_LOG`, `OAK_WOOD`, `STRIPPED_OAK_LOG`, `STRIPPED_OAK_WOOD`) and yields 4 `OAK_PLANKS`.
+- `minecraft:stick`: consumes 2 plain planks from the 12-species allowlist (`OAK_PLANKS`, `SPRUCE_PLANKS`, `BIRCH_PLANKS`, `JUNGLE_PLANKS`, `ACACIA_PLANKS`, `DARK_OAK_PLANKS`, `MANGROVE_PLANKS`, `CHERRY_PLANKS`, `BAMBOO_PLANKS`, `CRIMSON_PLANKS`, `WARPED_PLANKS`, `PALE_OAK_PLANKS`) and yields 4 `STICK`.
+
+Crafting quantities are bounded to `4..64` in exact multiples of 4; non-multiples fail closed without rounding. Input items with custom display names, lore, enchantments, or non-default metadata are strictly ignored by `CraftingPlanner` to preserve player heirlooms.
+
+### Shared task lifecycle and admission gates
+Crafting shares the authoritative `WoodTask` structure (`Kind.GATHER` vs. `Kind.CRAFT`). Tasks enter either via operator/player command `/ahmet craft <oak_planks|stick> <4-64>` or through the Node brain's `/api/chat` endpoint as `{ "type": "craft_item", "recipe": "...", "amount": N }`. Admission requires an idle actor, a bound chest in the same world, and a pre-flight plan check (`CraftingPlanner.plan`) verifying sufficient inputs and output capacity across the full 54-slot double-chest view (`Chest.getInventory()`).
+
+Once admitted, Ahmet uses Citizens pathfinding to walk to the bound chest without teleporting (`totalDistanceWalked >= 3.0`, `maxStep <= 0.22`, `teleports == 0`). Upon arrival, preconditions and inventory contents are re-validated: if inputs or slots were removed during transit, the task aborts cleanly (`abortCraftTask`), emitting `task_cancelled` without modifying any items or creating fake deliveries.
+
+### Journal v4 and crash recovery
+Before any chest inventory mutation occurs, the operation writes a write-ahead journal record (`OperationJournal.Craft`) into `operations.json` (journal format v4). The entry captures before/after inventory snapshots, requested counts, slot changes, and owner metadata. Inventory changes are applied atomically, task completion counters are updated, and the journal entry is retired only after a clean world save.
+
+On startup, `OperationRecovery.reconcilePendingCraft` inspects the saved chest state and task counters:
+- `APPLY_REMAINING`: the chest remains at the pre-operation state; mutations are executed, task is credited, and the journal is retired.
+- `COMPLETE_ALREADY_APPLIED`: the chest already contains the crafted output; the task is marked completed without double-crediting items.
+- `FINALIZE_ALREADY_COMPLETED`: both chest and task reflect completion; the journal is retired immediately.
+- `CONFLICT`: chest contents or task parameters do not match before or after states; the plugin halts into `recoveryBlocked = true` and preserves `pendingCraft` for operator inspection.
+
+When a `pendingOperation` or `recoveryBlocked` is active, `canCancelOrReturnHome()` prevents `/ahmet cancel` or idle home-return until recovery is reconciled.
+
 ## Gameplay assumptions
 
 - Version pin: Minecraft Java 1.21.6 / Paper 1.21.6 / Java 21 / Citizens 2.0.41 build 4138 (1.21_R5 adapter).

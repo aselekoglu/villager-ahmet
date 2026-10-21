@@ -438,3 +438,31 @@ Node remains at the prior October 20 result of 43 tests plus mock smoke; it was 
 - Before atomic JAR installation, a stopped-server backup was verified: **145 files / 29,244,412 bytes**, archive SHA-256 `231413f4d9858a7afee875db410778d3a7b398b76b169e21cb779ce41bc827db`. The plugin/world snapshot was unchanged before installation. No manual world edit or key/brain-store access occurred.
 
 Startup, configured health, idle state and save completion do not establish live gameplay, NPC movement, provider operation, human presentation quality, or crash durability. Human/client, provider, production-store and forced-crash acceptance remain open; M5–M10 remain open. No GitHub release asset is claimed.
+
+## M5 allowlisted transactional crafting runtime and package gate — 2026-10-21
+
+### Source and unit verification
+- Java offline Maven package: **317 tests, 0 failures, 0 errors, 0 skipped** (`mvn -B -ntp -o test` in `paper-plugin/`).
+- Node Brain test suite: **46 tests, 0 failures** (`node --test test/*.test.mjs` in `brain/`).
+- Core JAR SHA-256: `68cf01cb17f7f843c4c10b2b980af85c471d0fca6246e1dbb18eb9844a9a1c0f`.
+
+### Disposable Paper 1.21.6 / Citizens 2.0.41 runtime evidence (`r13`)
+- Executed in `/private/tmp/ahmet-crafting-runtime-20261021-r13` with Paper 1.21.6 build 48 (`1.21.6-48-4d854e6`) + Citizens `2.0.41-SNAPSHOT (build 4138)` + Java 21. Exit code 0, all 3 dimensions (`world`, `DIM-1`, `DIM1`) saved cleanly, 0 ERROR lines.
+- Probe JAR SHA-256: `a1258bbfb357f094aed825fc881f25f078abf0fbd4bb35c62bcdf7697671ec21` (`/private/tmp/ahmet-crafting-probe-r13.jar`).
+- Probe outcome: `AHMET_CRAFTING_RUNTIME_PROBE_PASS stages=6 normalTeleports=0`.
+- Detailed stages:
+  1. **Stage 1 (`oak_planks_walk_craft`)**: `/ahmet craft oak_planks 8` walked 5.01 blocks (`maxStep=0.20`, `teleports=0`) to the 54-slot double chest, consumed `OAK_LOG x1` (slot 0) + `STRIPPED_OAK_LOG x1` (slot 30, leaving `x1`), placed `OAK_PLANKS x8` in slot 0, and preserved `DIAMOND x5` in slot 40.
+  2. **Stage 2 (`stick_walk_craft_custom_preserved`)**: `/ahmet craft stick 8` walked 5.01 blocks (`maxStep=0.20`, `teleports=0`), preserved custom `"Heirloom Plank"` (`OAK_PLANKS x1` in slot 2), consumed plain `OAK_PLANKS x2` (slot 5) + `BIRCH_PLANKS x2` (slot 35, leaving `x1`), and placed `STICK x8`.
+  3. **Stage 2B (`chat_craft_item_and_events`)**: `/ahmet ask 8 meşe tahtası üret` via loopback mock HTTP bridge admitted `craft_item` (`minecraft:oak_planks`, amount 8), walked 5.01 blocks (`maxStep=0.20`, `teleports=0`), converted `OAK_LOG x2` into `OAK_PLANKS x8`, and emitted `task_started` and `task_delivered`.
+  4. **Stage 3 (`refusals_and_arrival_shortage`)**: command refusals for non-batch count (`6`), insufficient inputs (`16` with 1 log), full-chest output capacity, concurrent busy craft command, and non-owner cancel; operator `/ahmet cancel` while walking left chest untouched; arrival-time shortage (chest mutated from 2 logs to 1 while walking) aborted cleanly with `task_cancelled` and `fakeDeliveredEvent=false`.
+  5. **Stage 4 (`journal_recovery_and_conflict`)**: verified injected startup reconciliation for `APPLY_REMAINING` (`oak_planks` x8 applied once), `COMPLETE_ALREADY_APPLIED` (`stick` x8 reconciled without double-crediting), and `CONFLICT` (tampered slot locked `recoveryBlocked=true` and retained `pendingCraft`). Note explicitly that Stage 4 uses injected journal/task states in a disposable server and is not a forced-crash (`kill -9`) test.
+  6. **Stage 5 (`gather_oak_log_then_craft_chain`)**: end-to-end regression on the exact M5 core: `/ahmet collect oak_log 1` harvested a leaf-marked `OAK_LOG` and deposited `OAK_LOG x1` into the bound double chest, followed by `/ahmet craft oak_planks 4` (`OAK_PLANKS x4`) and `/ahmet craft stick 4` (`OAK_PLANKS x2` + `STICK x4` remaining), with `normalTeleports=0`.
+
+### Package verification
+The four-entry M5 ZIP package (`dist/villager-ahmet-plugins-paper-1.21.6.zip`) was built locally and verified:
+- **Outer ZIP SHA-256**: `fa656459ec6bb47305dbeecd885141d97a17b998007bb8151b3cade978d25a79`
+- **Core JAR SHA-256**: `68cf01cb17f7f843c4c10b2b980af85c471d0fca6246e1dbb18eb9844a9a1c0f` (`villager-ahmet-0.1.0-SNAPSHOT.jar`)
+- **Pinned Citizens SHA-256**: `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158` (`Citizens-2.0.41-b4138.jar`)
+- **Turkish Package README SHA-256**: `da5c616dfb18c4f14df3a1868843daeca2eb9f239f3cdf0d089b497fe588aac9` (`README-TR.txt`)
+
+Human in-game crafting gameplay, live provider calls on the M5 path, production-store inspection, and forced-crash durability remain unverified.

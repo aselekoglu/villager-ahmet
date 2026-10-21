@@ -1,0 +1,7 @@
+name: CraftingProbe
+version: 1.0.0
+main: dev.ahmetprobe.RuntimeCraftingProbe
+api-version: '1.21'
+load: POSTWORLD
+depend: [VillagerAhmet, Citizens]
+description: Opt-in disposable M5 crafting probe; never install on a user or live server.

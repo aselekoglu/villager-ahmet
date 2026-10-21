@@ -13,7 +13,7 @@
 - [x] M4 presentation source, focused Java suite, disposable runtime acceptance, and corrected four-entry local package verification; evidence in `docs/VALIDATION_RESULTS.md` (ZIP SHA-256 `6846225df2d99b40142f1ca377a014a964d40cf5fe4b3093745f21c5871691a0`).
 - [x] Publish M4 source/docs commit `620b97efa4448aee5e6682fc3d2adb9f99b7b9e4` and verify the exact remote SHA.
 - [x] Deploy the exact M4 package and read back installed core, Paper/Node health, idle status and save completion; prior server stop cause/time remains unknown, so no graceful prior stop is claimed.
-- [ ] M5 Allowlisted transactional crafting.
+- [x] M5 Allowlisted transactional crafting: allowlisted recipes (`oak_planks`, `stick`), exact multiples of 4 (4..64, no rounding), 54-slot double-chest planner, custom item preservation, Citizens walking without teleports, arrival re-planning, and journal v4 write-ahead crash recovery. Java 317/317, Node 46/46, disposable Paper/Citizens 1.21.6 6-stage runtime pass (`r13`, `normalTeleports=0`), four-entry package ZIP SHA-256 `fa656459ec6bb47305dbeecd885141d97a17b998007bb8151b3cade978d25a79` (core `68cf01cb17f7f843c4c10b2b980af85c471d0fca6246e1dbb18eb9844a9a1c0f`).
 - [ ] M6 Approved-plot mature-crop farming.
 - [ ] M7 Stable multiple villagers, roles, delegation and local resource economy.
 - [ ] M8 Fine-grained claims, permissions, protection compatibility and bounded tickets.
