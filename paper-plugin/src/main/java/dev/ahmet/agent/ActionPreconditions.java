@@ -138,6 +138,27 @@ public final class ActionPreconditions {
     return ExecutionResult.success("Deposit preconditions satisfied");
   }
 
+  public ExecutionResult validateCraft(Location actor, Block chestBlock) {
+    if (actor == null || chestBlock == null) {
+      return ExecutionResult.preconditionFailed("Actor or chest block is null");
+    }
+    if (actor.getWorld() == null || chestBlock.getWorld() == null
+        || !actor.getWorld().getName().equals(chestBlock.getWorld().getName())) {
+      return ExecutionResult.preconditionFailed("Chest is in a different or invalid world");
+    }
+    if (!chestBlock.getWorld().isChunkLoaded(chestBlock.getX() >> 4, chestBlock.getZ() >> 4)) {
+      return ExecutionResult.preconditionFailed("Chest chunk is not loaded");
+    }
+    if (!(chestBlock.getState() instanceof Chest)) {
+      return ExecutionResult.preconditionFailed("Bound block is no longer a chest");
+    }
+    double distSq = distanceSquared(actor, chestBlock.getX() + 0.5, chestBlock.getY() + 0.5, chestBlock.getZ() + 0.5);
+    if (distSq > MAX_REACH_SQ) {
+      return ExecutionResult.preconditionFailed("Chest is out of reach");
+    }
+    return ExecutionResult.success("Craft preconditions satisfied");
+  }
+
   public ExecutionResult validateHelpRequest(long lastHelpMs, long nowMs) {
     if (!budget.canRequestHelp(lastHelpMs, nowMs)) {
       long remainingSeconds = (budget.helpCooldownMs() - (nowMs - lastHelpMs)) / 1000;

@@ -5,6 +5,7 @@ import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
 import org.bukkit.block.Block;
+import org.bukkit.block.Chest;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Proxy;
@@ -40,6 +41,30 @@ public class ActionPreconditionsTest {
           case "isSolid" -> material.isSolid();
           case "isLiquid" -> false;
           case "isPassable" -> !material.isSolid();
+          default -> null;
+        }
+    );
+  }
+
+  private Block mockChestBlock(World world, int x, int y, int z) {
+    Chest chestState = (Chest) Proxy.newProxyInstance(
+        Chest.class.getClassLoader(),
+        new Class<?>[]{Chest.class},
+        (proxy, method, args) -> switch (method.getName()) {
+          case "getWorld" -> world;
+          default -> null;
+        }
+    );
+    return (Block) Proxy.newProxyInstance(
+        Block.class.getClassLoader(),
+        new Class<?>[]{Block.class},
+        (proxy, method, args) -> switch (method.getName()) {
+          case "getWorld" -> world;
+          case "getType" -> Material.CHEST;
+          case "getX" -> x;
+          case "getY" -> y;
+          case "getZ" -> z;
+          case "getState" -> chestState;
           default -> null;
         }
     );
@@ -164,5 +189,54 @@ public class ActionPreconditionsTest {
     ExecutionResult onCooldown = pre.validateHelpRequest(10_000L, 20_000L);
     assertFalse(onCooldown.isSuccess());
     assertTrue(onCooldown.message().contains("cooldown active"));
+  }
+
+  @Test
+  void testCraftPreconditionsValidation() {
+    World world = mockWorld("world", true);
+    Location actor = new Location(world, 10.0, 64.0, 10.0);
+    Block closeChest = mockChestBlock(world, 11, 64, 10);
+    Block farChest = mockChestBlock(world, 20, 64, 10);
+
+    ActionPreconditions pre = new ActionPreconditions((b, l) -> false, ActionBudget.DEFAULT);
+
+    // Null actor or null chest
+    assertFalse(pre.validateCraft(null, closeChest).isSuccess());
+    assertFalse(pre.validateCraft(actor, null).isSuccess());
+
+    // Different worlds
+    World otherWorld = mockWorld("other_world", true);
+    Block otherWorldChest = mockChestBlock(otherWorld, 11, 64, 10);
+    ExecutionResult diffWorldRes = pre.validateCraft(actor, otherWorldChest);
+    assertFalse(diffWorldRes.isSuccess());
+    assertTrue(diffWorldRes.message().contains("different or invalid world"));
+
+    // Null world on actor
+    Location noWorldActor = new Location(null, 10.0, 64.0, 10.0);
+    assertFalse(pre.validateCraft(noWorldActor, closeChest).isSuccess());
+
+    // Unloaded chunk
+    World unloadedWorld = mockWorld("world", false);
+    Block unloadedChest = mockChestBlock(unloadedWorld, 11, 64, 10);
+    Location unloadedActor = new Location(unloadedWorld, 10.0, 64.0, 10.0);
+    ExecutionResult unloadedRes = pre.validateCraft(unloadedActor, unloadedChest);
+    assertFalse(unloadedRes.isSuccess());
+    assertTrue(unloadedRes.message().contains("chunk is not loaded"));
+
+    // Bound block is not a chest (e.g. OAK_LOG block)
+    Block nonChest = mockBlock(world, Material.OAK_LOG, 11, 64, 10);
+    ExecutionResult nonChestRes = pre.validateCraft(actor, nonChest);
+    assertFalse(nonChestRes.isSuccess());
+    assertTrue(nonChestRes.message().contains("no longer a chest"));
+
+    // Chest out of reach
+    ExecutionResult farRes = pre.validateCraft(actor, farChest);
+    assertFalse(farRes.isSuccess());
+    assertTrue(farRes.message().contains("out of reach"));
+
+    // Success case
+    ExecutionResult okRes = pre.validateCraft(actor, closeChest);
+    assertTrue(okRes.isSuccess());
+    assertTrue(okRes.message().contains("Craft preconditions satisfied"));
   }
 }

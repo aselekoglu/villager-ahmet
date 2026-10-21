@@ -21,6 +21,17 @@ const RESOURCES = [
   ['minecraft:sand', ['kum', 'sand']],
   ['minecraft:dirt', ['toprak', 'dirt', 'grass block', 'çimenli blok', 'cimenli blok']],
 ];
+const CRAFT_RECIPES = [
+  ['minecraft:oak_planks', ['meşe tahtası', 'mese tahtasi', 'meşe tahta', 'mese tahta', 'oak planks', 'oak plank', 'oak_planks']],
+  ['minecraft:stick', ['çubuk', 'cubuk', 'stick', 'sticks', 'minecraft:stick']],
+];
+
+export function isCraftCommand(text) {
+  const s = String(text ?? '').toLocaleLowerCase('tr-TR');
+  const craftAction = /(üret|uret|yap|işle|isle|çevir|cevir|dönüştür|donustur|craft|make)/i.test(s);
+  const matchedRecipe = CRAFT_RECIPES.some(([, names]) => names.some(name => s.includes(name)));
+  return Boolean(craftAction && matchedRecipe);
+}
 
 export function isWoodCommand(text) {
   const s = String(text ?? '').toLocaleLowerCase('tr-TR');
@@ -31,6 +42,15 @@ export function isWoodCommand(text) {
 
 export function parseTask(text) {
   const s = String(text ?? '').toLocaleLowerCase('tr-TR');
+  if (isCraftCommand(s)) {
+    const craftRecipe = CRAFT_RECIPES.find(([, names]) => names.some(name => s.includes(name)));
+    const quantity = s.match(/\b(\d{1,3})\b/);
+    const amount = quantity ? Number(quantity[1]) : 4;
+    if (amount < 4 || amount > 64 || amount % 4 !== 0) {
+      return {error: "Üretim miktarı 4 ile 64 arasında ve 4'ün katı olmalı (ör. 4, 8, 12, 16)."};
+    }
+    return {type: 'craft_item', recipe: craftRecipe[0], amount};
+  }
   const action = /(topla|getir|kes|biriktir|bul|ara|gather|collect|bring|get|chop|harvest|find|search)/i.test(s);
   if (!action) return null;
   const quantity = s.match(/\b(\d{1,3})\b/);
@@ -56,11 +76,22 @@ export function validateWoodTask(task) {
     : null;
 }
 
+export function validateCraftTask(task) {
+  const recipes = new Set(['minecraft:oak_planks', 'minecraft:stick']);
+  return task && typeof task === 'object' && task.type === 'craft_item'
+    && recipes.has(task.recipe) && Number.isInteger(task.amount)
+    && task.amount >= 4 && task.amount <= 64 && task.amount % 4 === 0
+    ? {type: 'craft_item', recipe: task.recipe, amount: task.amount}
+    : null;
+}
+
 export function validateTask(task) {
-  const wood=validateWoodTask(task);
-  if(wood)return wood;
-  return task&&typeof task==='object'&&task.type==='collect_item'
-    &&typeof task.itemId==='string'&&/^minecraft:[a-z0-9_]{1,64}$/.test(task.itemId)
-    &&Number.isInteger(task.amount)&&task.amount>=1&&task.amount<=64
-    ?{type:'collect_item',itemId:task.itemId,amount:task.amount}:null;
+  const wood = validateWoodTask(task);
+  if (wood) return wood;
+  const craft = validateCraftTask(task);
+  if (craft) return craft;
+  return task && typeof task === 'object' && task.type === 'collect_item'
+    && typeof task.itemId === 'string' && /^minecraft:[a-z0-9_]{1,64}$/.test(task.itemId)
+    && Number.isInteger(task.amount) && task.amount >= 1 && task.amount <= 64
+    ? {type: 'collect_item', itemId: task.itemId, amount: task.amount} : null;
 }

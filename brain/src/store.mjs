@@ -19,6 +19,8 @@ const safeTask = value => {
     return {type, material: boundedText(value.material, 20), amount};
   if (type === 'collect_item' && typeof value.itemId === 'string' && /^minecraft:[a-z0-9_]{1,80}$/.test(value.itemId))
     return {type, itemId: value.itemId, amount};
+  if (type === 'craft_item' && (value.recipe === 'minecraft:oak_planks' || value.recipe === 'minecraft:stick') && amount >= 4 && amount <= 64 && amount % 4 === 0)
+    return {type, recipe: value.recipe, amount};
   return null;
 };
 const validHistoryRow = row => row && typeof row === 'object' && !Array.isArray(row)

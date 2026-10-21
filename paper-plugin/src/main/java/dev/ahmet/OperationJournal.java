@@ -31,7 +31,7 @@ final class OperationJournal {
     if (!Files.exists(path)) return;
     try {
       Data loaded = GSON.fromJson(Files.readString(path, StandardCharsets.UTF_8), Data.class);
-      if (loaded == null || loaded.version < 1 || loaded.version > 3) throw new IOException("Unsupported operation journal version");
+      if (loaded == null || loaded.version < 1 || loaded.version > 4) throw new IOException("Unsupported operation journal version");
       if (loaded.harvests == null) loaded.harvests = new ArrayList<>();
       if (loaded.clears == null) loaded.clears = new ArrayList<>();
       if (loaded.harvests.size() > 64 || loaded.clears.size() > 64) throw new IOException("Operation journal exceeds the task bound");
@@ -41,9 +41,25 @@ final class OperationJournal {
           throw new IOException("Version 2 operation journal lacks recovery safety fields; it was preserved for manual recovery");
         }
       }
-      loaded.version = 3;
+      if (loaded.version < 3 && loaded.pendingCraft != null) {
+        throw new IOException("Legacy operation journal version cannot contain a craft operation");
+      }
+      if (loaded.pendingCraft != null && (loaded.pendingHarvest != null || loaded.pendingDeposit != null
+          || loaded.pendingClear != null || !loaded.harvests.isEmpty() || !loaded.clears.isEmpty())) {
+        throw new IOException("Craft journal cannot coexist with other operations; it was preserved for manual recovery");
+      }
+      if (loaded.pendingCraft != null) {
+        loaded.pendingCraft = new Craft(
+            loaded.pendingCraft.taskId(), loaded.pendingCraft.owner(), loaded.pendingCraft.kind(),
+            loaded.pendingCraft.recipeKey(), loaded.pendingCraft.world(), loaded.pendingCraft.x(),
+            loaded.pendingCraft.y(), loaded.pendingCraft.z(), loaded.pendingCraft.inventorySize(),
+            loaded.pendingCraft.requested(), loaded.pendingCraft.inputCount(), loaded.pendingCraft.beforeCollected(),
+            loaded.pendingCraft.beforeDeposited(), loaded.pendingCraft.afterCollected(), loaded.pendingCraft.afterDeposited(),
+            loaded.pendingCraft.before(), loaded.pendingCraft.after(), loaded.pendingCraft.changes());
+      }
+      loaded.version = loaded.pendingCraft != null ? 4 : 3;
       data = loaded;
-    } catch (JsonParseException | IllegalStateException e) {
+    } catch (RuntimeException e) {
       throw new IOException("Operation journal is invalid; it was preserved for manual recovery", e);
     }
   }
@@ -72,23 +88,28 @@ final class OperationJournal {
     return Optional.ofNullable(data.pendingClear);
   }
 
+  synchronized Optional<Craft> pendingCraft() {
+    return Optional.ofNullable(data.pendingCraft);
+  }
+
   synchronized List<Clear> clears() {
     return List.copyOf(data.clears);
   }
 
   synchronized boolean hasOperations() {
-    return data.pendingHarvest != null || data.pendingDeposit != null || data.pendingClear != null
-        || !data.harvests.isEmpty() || !data.clears.isEmpty();
+    return hasPendingOperation() || !data.harvests.isEmpty() || !data.clears.isEmpty();
   }
 
   synchronized boolean hasCommittedOperationsReadyForCheckpoint() {
-    return data.pendingHarvest == null && data.pendingDeposit == null && data.pendingClear == null
-        && (!data.harvests.isEmpty() || !data.clears.isEmpty());
+    return !hasPendingOperation() && (!data.harvests.isEmpty() || !data.clears.isEmpty());
+  }
+
+  synchronized boolean hasPendingOperation() {
+    return data.pendingHarvest != null || data.pendingDeposit != null || data.pendingClear != null || data.pendingCraft != null;
   }
 
   synchronized void prepareHarvest(Harvest operation) throws IOException {
-    if (operation == null || data.pendingHarvest != null || data.pendingDeposit != null
-        || data.pendingClear != null || data.harvests.size() >= 64) {
+    if (operation == null || hasPendingOperation() || data.harvests.size() >= 64) {
       throw new IllegalStateException("Cannot prepare another harvest operation");
     }
     data.pendingHarvest = operation;
@@ -109,8 +130,7 @@ final class OperationJournal {
   }
 
   synchronized void prepareDeposit(Deposit operation) throws IOException {
-    if (operation == null || data.pendingHarvest != null || data.pendingDeposit != null
-        || data.pendingClear != null) {
+    if (operation == null || hasPendingOperation()) {
       throw new IllegalStateException("Cannot prepare another deposit operation");
     }
     data.pendingDeposit = operation;
@@ -118,8 +138,7 @@ final class OperationJournal {
   }
 
   synchronized void prepareClear(Clear operation) throws IOException {
-    if (operation == null || data.pendingHarvest != null || data.pendingDeposit != null
-        || data.pendingClear != null || data.clears.size() >= 64) {
+    if (operation == null || hasPendingOperation() || data.clears.size() >= 64) {
       throw new IllegalStateException("Cannot prepare another clear operation");
     }
     data.pendingClear = operation;
@@ -139,14 +158,28 @@ final class OperationJournal {
     persistOrDeleteIfEmpty();
   }
 
+  synchronized void prepareCraft(Craft operation) throws IOException {
+    if (operation == null || hasPendingOperation() || !data.harvests.isEmpty() || !data.clears.isEmpty()) {
+      throw new IllegalStateException("Cannot prepare craft operation while other journal records exist");
+    }
+    data.version = 4;
+    data.pendingCraft = operation;
+    persist();
+  }
+
+  synchronized void discardPendingCraft() throws IOException {
+    if (data.pendingCraft == null) return;
+    data.pendingCraft = null;
+    persistOrDeleteIfEmpty();
+  }
+
   synchronized void clearAfterWorldSave() throws IOException {
     Files.deleteIfExists(path);
     data = new Data();
   }
 
   private void persistOrDeleteIfEmpty() throws IOException {
-    if (data.harvests.isEmpty() && data.clears.isEmpty() && data.pendingDeposit == null
-        && data.pendingHarvest == null && data.pendingClear == null) {
+    if (!hasPendingOperation() && data.harvests.isEmpty() && data.clears.isEmpty()) {
       Files.deleteIfExists(path);
       data = new Data();
     } else {
@@ -254,6 +287,61 @@ final class OperationJournal {
     }
   }
 
+  record Craft(String taskId, String owner, String kind, String recipeKey, String world,
+      int x, int y, int z, int inventorySize, int requested, int inputCount,
+      int beforeCollected, int beforeDeposited, int afterCollected, int afterDeposited,
+      List<CraftingPlanner.Slot> before, List<CraftingPlanner.Slot> after,
+      List<CraftingPlanner.Change> changes) {
+
+    Craft {
+      if (taskId == null || taskId.isBlank()
+          || owner == null || owner.isBlank()
+          || !"CRAFT".equals(kind)
+          || world == null || world.isBlank()
+          || beforeCollected != 0 || beforeDeposited != 0
+          || afterCollected != requested || afterDeposited != requested
+          || before == null || after == null || changes == null || changes.isEmpty()) {
+        throw new IllegalArgumentException("Invalid craft journal entry");
+      }
+      CraftRecipe recipe = CraftRecipe.forKey(recipeKey);
+      if (recipe == null) {
+        throw new IllegalArgumentException("Invalid craft journal entry: unsupported recipe");
+      }
+      CraftingPlanner.Plan validated;
+      try {
+        validated = new CraftingPlanner.Plan(recipe, requested, inputCount, before, after, changes, inventorySize);
+      } catch (RuntimeException e) {
+        throw new IllegalArgumentException("Invalid craft journal entry", e);
+      }
+      before = validated.before();
+      after = validated.after();
+      changes = validated.changes();
+    }
+
+    Craft(String taskId, String owner, String world, int x, int y, int z, CraftingPlanner.Plan plan) {
+      this(taskId, owner, "CRAFT", plan.recipe().key(), world, x, y, z,
+          plan.inventorySize(), plan.outputCount(), plan.inputCount(), 0, 0,
+          plan.outputCount(), plan.outputCount(), plan.before(), plan.after(), plan.changes());
+    }
+
+    static Craft fromPlan(String taskId, String owner, String world, int x, int y, int z, CraftingPlanner.Plan plan) {
+      Objects.requireNonNull(plan, "Plan is required");
+      return new Craft(taskId, owner, "CRAFT", plan.recipe().key(), world, x, y, z,
+          plan.inventorySize(), plan.outputCount(), plan.inputCount(), 0, 0,
+          plan.outputCount(), plan.outputCount(), plan.before(), plan.after(), plan.changes());
+    }
+
+    CraftRecipe recipe() { return CraftRecipe.forKey(recipeKey); }
+
+    CraftingPlanner.Plan toPlan() {
+      return new CraftingPlanner.Plan(recipe(), requested, inputCount, before, after, changes, inventorySize);
+    }
+
+    boolean matchesChest(String worldName, int blockX, int blockY, int blockZ) {
+      return Objects.equals(world, worldName) && x == blockX && y == blockY && z == blockZ;
+    }
+  }
+
   private static final class Data {
     int version = 3;
     Harvest pendingHarvest;
@@ -261,6 +349,7 @@ final class OperationJournal {
     Deposit pendingDeposit;
     Clear pendingClear;
     List<Clear> clears = new ArrayList<>();
+    Craft pendingCraft;
   }
 }
 

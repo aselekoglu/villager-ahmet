@@ -32,6 +32,8 @@ export async function chat(req,{store,models={chooseAction,conversationalReply,i
           if(busy)reply=busyReply(req);
           else if(!req.context?.chestBound)reply='Topladıklarımı nereye koyacağımı bilmiyorum. Bir sandığa bakıp /ahmet chest komutunu kullan.';
           else {task=validated;taskSource='llm';}
+        }else if(turn.task?.type==='craft_item'){
+          reply="Bu üretim isteğini güvenli ve desteklenen bir tarif olarak çözemiyorum. Sadece meşe tahtası (oak_planks) veya çubuk (stick) için 4–64 arası 4'ün katı miktar belirt.";
         }else reply='Bu isteği güvenli ve desteklenen bir kaynak görevi olarak çözemiyorum. Türü ve 1–64 arası miktarı belirt.';
       }
     }else if(modelFailed){
@@ -39,7 +41,14 @@ export async function chat(req,{store,models={chooseAction,conversationalReply,i
       if(parsed?.error)reply=parsed.error;
       else if(parsed&&busy)reply=busyReply(req);
       else if(parsed&&!req.context?.chestBound)reply='Topladıklarımı nereye koyacağımı bilmiyorum. Bir sandığa bakıp /ahmet chest komutunu kullan.';
-      else if(parsed){task=validateTask(parsed);taskSource='heuristic';reply=`Tamam ${name}, ${parsed.amount} kaynak toplayıp işaretlediğin sandığa bırakacağım.`;}
+      else if(parsed){
+        task=validateTask(parsed);
+        taskSource='heuristic';
+        if(task?.type==='craft_item')
+          reply=`Tamam ${name}, işaretlediğin sandıktaki malzemelerle ${parsed.amount} ürün üretip sandığa bırakacağım.`;
+        else
+          reply=`Tamam ${name}, ${parsed.amount} kaynak toplayıp işaretlediğin sandığa bırakacağım.`;
+      }
       else {
         try {reply=await models.conversationalReply(message,name,store.history(actor),modelOptions);}
         catch {reply=`Selam ${name}! Buradayım. Yaygın odun ve kaynakları toplamamı istersen söyle.`;}

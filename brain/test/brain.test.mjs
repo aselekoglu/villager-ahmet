@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {parseTask,validateTask} from '../src/intent.mjs';
+import {parseTask,validateTask,validateCraftTask,isCraftCommand} from '../src/intent.mjs';
 import {chat,decide} from '../src/engine.mjs';
 import {MemoryStore} from '../src/store.mjs';
 import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';
@@ -162,4 +162,90 @@ test('return home intent cancels and flags goHome',async()=>{
   assert.equal(result.goHome,true);
   assert.match(result.reply,/eve dönüyorum/);
  }finally{await rm(d,{recursive:true,force:true});}
+});
+
+test('craft requests parse Turkish and English phrases for oak planks and sticks at valid 4-multiples', () => {
+  assert.equal(isCraftCommand('16 meşe tahtası üret'), true);
+  assert.equal(isCraftCommand('craft 8 sticks'), true);
+  assert.equal(isCraftCommand('çubuk yap 4'), true);
+  assert.equal(isCraftCommand('12 ladin tahtası üret'), false);
+  assert.equal(isCraftCommand('topla meşe odunu'), false);
+
+  assert.deepEqual(parseTask('16 meşe tahtası üret'), {type: 'craft_item', recipe: 'minecraft:oak_planks', amount: 16});
+  assert.deepEqual(parseTask('craft 8 oak planks'), {type: 'craft_item', recipe: 'minecraft:oak_planks', amount: 8});
+  assert.deepEqual(parseTask('çubuk yap 4'), {type: 'craft_item', recipe: 'minecraft:stick', amount: 4});
+  assert.deepEqual(parseTask('make 12 sticks'), {type: 'craft_item', recipe: 'minecraft:stick', amount: 12});
+  assert.deepEqual(parseTask('meşe tahtası yap'), {type: 'craft_item', recipe: 'minecraft:oak_planks', amount: 4});
+
+  assert.match(parseTask('0 meşe tahtası üret').error, /4 ile 64 arasında ve 4'ün katı/);
+  assert.match(parseTask('3 meşe tahtası üret').error, /4 ile 64 arasında ve 4'ün katı/);
+  assert.match(parseTask('6 meşe tahtası üret').error, /4 ile 64 arasında ve 4'ün katı/);
+  assert.match(parseTask('68 meşe tahtası üret').error, /4 ile 64 arasında ve 4'ün katı/);
+
+  // Non-oak planks with craft action does NOT fall through to collect_wood
+  assert.equal(parseTask('8 ladin tahtası üret'), null);
+  assert.equal(parseTask('craft 8 spruce planks'), null);
+  assert.equal(parseTask('huş tahtası yap'), null);
+});
+
+test('validateCraftTask and validateTask accept valid craft tasks and reject unsupported recipes or invalid amounts', () => {
+  assert.deepEqual(validateCraftTask({type: 'craft_item', recipe: 'minecraft:oak_planks', amount: 4}), {type: 'craft_item', recipe: 'minecraft:oak_planks', amount: 4});
+  assert.deepEqual(validateCraftTask({type: 'craft_item', recipe: 'minecraft:stick', amount: 64}), {type: 'craft_item', recipe: 'minecraft:stick', amount: 64});
+  assert.deepEqual(validateTask({type: 'craft_item', recipe: 'minecraft:oak_planks', amount: 16}), {type: 'craft_item', recipe: 'minecraft:oak_planks', amount: 16});
+
+  assert.equal(validateCraftTask({type: 'craft_item', recipe: 'minecraft:spruce_planks', amount: 4}), null);
+  assert.equal(validateCraftTask({type: 'craft_item', recipe: 'minecraft:crafting_table', amount: 4}), null);
+  assert.equal(validateCraftTask({type: 'craft_item', recipe: 'minecraft:oak_planks', amount: 5}), null);
+  assert.equal(validateCraftTask({type: 'craft_item', recipe: 'minecraft:oak_planks', amount: 68}), null);
+  assert.equal(validateCraftTask({type: 'craft_item', recipe: 'minecraft:oak_planks', amount: 0}), null);
+  assert.equal(validateTask({type: 'craft_item', recipe: 'minecraft:spruce_planks', amount: 4}), null);
+});
+
+test('chat accepts craft_item via LLM and heuristic fallback when chest bound, and rejects when unbound or busy', async () => {
+  const d = await mkdtemp(join(tmpdir(), 'ahmet-craft-'));
+  try {
+    const store = new MemoryStore(join(d, 'memory.json'));
+    await store.load();
+
+    // 1. LLM path success
+    const llmRes = await chat({actorUuid: 'player-1', actorName: 'Ali', text: '16 meşe tahtası üret', context: {chestBound: true, busy: false}}, {
+      store,
+      models: {interpretTurn: async () => ({reply: '16 meşe tahtası üretiyorum.', task: {type: 'craft_item', recipe: 'minecraft:oak_planks', amount: 16}})}
+    });
+    assert.deepEqual(llmRes.task, {type: 'craft_item', recipe: 'minecraft:oak_planks', amount: 16});
+    assert.equal(llmRes.taskSource, 'llm');
+
+    // 2. LLM path invalid craft task
+    const invalidLlmRes = await chat({actorUuid: 'player-1', actorName: 'Ali', text: '5 ladin tahtası yap', context: {chestBound: true, busy: false}}, {
+      store,
+      models: {interpretTurn: async () => ({reply: 'Tamam.', task: {type: 'craft_item', recipe: 'minecraft:ladin_tahtasi', amount: 5}})}
+    });
+    assert.equal(invalidLlmRes.task, null);
+    assert.match(invalidLlmRes.reply, /Bu üretim isteğini güvenli ve desteklenen bir tarif olarak çözemiyorum/);
+
+    // 3. Fallback path success
+    const fbRes = await chat({actorUuid: 'player-1', actorName: 'Ali', text: 'Ahmet 8 çubuk yap', context: {chestBound: true, busy: false}}, {store});
+    assert.deepEqual(fbRes.task, {type: 'craft_item', recipe: 'minecraft:stick', amount: 8});
+    assert.equal(fbRes.taskSource, 'heuristic');
+    assert.match(fbRes.reply, /işaretlediğin sandıktaki malzemelerle 8 ürün üretip/);
+
+    // 4. Refuse when chest unbound
+    const unboundRes = await chat({actorUuid: 'player-1', actorName: 'Ali', text: 'Ahmet 8 çubuk yap', context: {chestBound: false, busy: false}}, {store});
+    assert.equal(unboundRes.task, null);
+    assert.match(unboundRes.reply, /\/ahmet chest/);
+
+    // 5. Refuse when busy
+    const busyRes = await chat({actorUuid: 'player-1', actorName: 'Ali', text: 'Ahmet 8 çubuk yap', context: {chestBound: true, busy: true}}, {store});
+    assert.equal(busyRes.task, null);
+
+    // 6. Verify persistence in MemoryStore
+    const reloaded = new MemoryStore(join(d, 'memory.json'));
+    await reloaded.load();
+    const history = reloaded.history('player-1');
+    assert.equal(history.length, 5);
+    assert.deepEqual(history[0].task, {type: 'craft_item', recipe: 'minecraft:oak_planks', amount: 16});
+    assert.deepEqual(history[2].task, {type: 'craft_item', recipe: 'minecraft:stick', amount: 8});
+  } finally {
+    await rm(d, {recursive: true, force: true});
+  }
 });

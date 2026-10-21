@@ -14,4 +14,16 @@ final class TaskAdmission {
     if(!chestBound)return Result.CHEST_REQUIRED;
     return Result.ACCEPT;
   }
+
+  static boolean canCancelOrReturnHome(boolean taskStateValid, boolean recoveryBlocked, boolean pendingOperation) {
+    return taskStateValid && !recoveryBlocked && !pendingOperation;
+  }
+
+  static boolean canExecuteGatherStep(WoodTask task) {
+    return task != null && task.active && task.isGather();
+  }
+
+  static boolean canExecuteCraftStep(WoodTask task) {
+    return task != null && task.active && task.isCraft();
+  }
 }

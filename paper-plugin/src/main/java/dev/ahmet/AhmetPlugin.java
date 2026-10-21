@@ -80,6 +80,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private Location protectedHome;
   private int protectHomeRadius=10;
   private boolean woodProtectionStateValid=true;
+  private boolean taskStateValid=true;
   private boolean deciding=false;
   private int waitDecisions=0;
   private final DecisionRetry decisionRetry=new DecisionRetry(2_000);
@@ -129,7 +130,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     catch(Exception e){woodProtectionStateValid=false;blockRecovery("Player-placed wood protection data is invalid",e);}
     protectionHook.addHook((block, loc) -> getProtectedHomeArea() != null && getProtectedHomeArea().contains(block.getWorld().getName(), block.getX(), block.getY(), block.getZ()));
     protectionHook.addHook((block, loc) -> playerPlacedWood != null && playerPlacedWood.contains(block.getWorld().getName(), block.getX(), block.getY(), block.getZ()));
-    boolean taskStateValid=true;
+    taskStateValid=true;
     try{task.load(getConfig());}catch(Exception e){taskStateValid=false;blockRecovery("Saved task state is invalid and must be inspected",e);}
     journal=new OperationJournal(getDataFolder().toPath().resolve("operations.json"));
     try{journal.load();if(taskStateValid)recoverJournal();}
@@ -143,10 +144,11 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     getLogger().info("Villager Ahmet ready. Run /ahmet spawn as an operator to summon Ahmet.");
   }
   @Override public void onDisable(){
-    try{scheduleAdapter.suspend(npc,"shutdown");persist();flushJournalOnShutdown();}
+    try{scheduleAdapter.suspend(npc,"shutdown");if(taskStateValid)persist();flushJournalOnShutdown();}
     finally{activationRangeGuard.clear();}
   }
   private void persist(){
+    if(!taskStateValid)return;
     Integer liveNpcId=npc==null?null:npc.getId();
     getConfig().set("npc-id",savedNpcReference==null?(liveNpcId==null?-1:liveNpcId):savedNpcReference.idForPersistence(liveNpcId));
     saveLoc("chest",chestLocation);saveLoc("home",home);saveLoc("protection.home",protectedHome);
@@ -237,16 +239,57 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       if(args.length!=3){player.sendMessage("§eKullanım: /ahmet collect <item|odun> <1-64>");return true;}
       TaskRequest request=TaskRequest.parse(args[1],args[2]).orElse(null);
       if(request==null){player.sendMessage("§cBu kaynak desteklenmiyor veya miktar 1-64 arasında değil. Örnek aramalar: /ahmet items oak_log, /ahmet items raw_iron. Genel odun için 'odun' yaz.");return true;}
-      if(recoveryBlocked){player.sendMessage("§cKurtarma bekliyor; yeni görev güvenli değil.");return true;}
       if(npc==null||!npc.isSpawned()){player.sendMessage("§cÖnce /ahmet spawn ile Ahmet'i oluştur.");return true;}
       if(!player.getWorld().equals(npc.getEntity().getWorld())||player.getLocation().distanceSquared(npc.getEntity().getLocation())>18*18){player.sendMessage("§cGörev vermek için Ahmet'e yaklaş.");return true;}
-      if(task.active||task.cargo>0){player.sendMessage("§cÖnce mevcut görevi bitir veya /ahmet deliver ile taşıdığı yükü boşalt.");return true;}
-      if(journal.hasOperations()){player.sendMessage("§cKurtarma bekliyor; yeni görev güvenli değil.");return true;}
-      if(chestLocation==null||!chestLocation.getWorld().equals(npc.getEntity().getWorld())){player.sendMessage("§cÖnce aynı dünyadaki teslimat sandığını /ahmet chest ile bağla.");return true;}
+      boolean chestBound=chestLocation!=null&&chestLocation.getWorld().equals(npc.getEntity().getWorld());
+      TaskAdmission.Result admission=TaskAdmission.evaluate(true,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound);
+      switch(admission){
+        case RECOVERY_REQUIRED -> {player.sendMessage("§cKurtarma bekliyor; yeni görev güvenli değil.");return true;}
+        case BUSY -> {player.sendMessage("§cÖnce mevcut görevi bitir veya /ahmet deliver ile taşıdığı yükü boşalt.");return true;}
+        case CHEST_REQUIRED -> {player.sendMessage("§cÖnce aynı dünyadaki teslimat sandığını /ahmet chest ile bağla.");return true;}
+        case ACCEPT -> {}
+        default -> {player.sendMessage("§cBu kaynak desteklenmiyor.");return true;}
+      }
       scheduleAdapter.suspend(npc,"task admitted");
       productionGoalAdapter.prepareTaskAdmission(true,getConfig().getBoolean("options.production-goals-enabled",false),this::clearPriorNavigationForTaskAdmission);
       task.start(player.getUniqueId(),request.amount(),request.preference());navigationPurpose=AgentGoal.HARVEST_RESOURCE;treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Task started via command");controller.clearHelp();persist();event("task_started",request.amount());
       say("Tamam, "+request.amount()+" "+request.itemName()+" toplamaya başlıyorum.");
+      return true;
+    }
+    if(op.equals("craft")){
+      if(args.length!=3){player.sendMessage("§eKullanım: /ahmet craft <oak_planks|stick> <4-64 (4'ün katı)>");return true;}
+      TaskRequest.CraftRequest request=TaskRequest.parseCraft(args[1],args[2]).orElse(null);
+      if(request==null){player.sendMessage("§cSadece oak_planks veya stick üretilebilir ve miktar 4 ile 64 arasında 4'ün katı olmalı (ör. 4, 8, 12, 16).");return true;}
+      if(npc==null||!npc.isSpawned()){player.sendMessage("§cÖnce /ahmet spawn ile Ahmet'i oluştur.");return true;}
+      if(!player.getWorld().equals(npc.getEntity().getWorld())||player.getLocation().distanceSquared(npc.getEntity().getLocation())>18*18){player.sendMessage("§cGörev vermek için Ahmet'e yaklaş.");return true;}
+      boolean chestBound=chestLocation!=null&&chestLocation.getWorld()!=null&&chestLocation.getWorld().equals(npc.getEntity().getWorld());
+      TaskAdmission.Result admission=TaskAdmission.evaluate(true,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound);
+      switch(admission){
+        case RECOVERY_REQUIRED -> {player.sendMessage("§cKurtarma bekliyor; yeni görev güvenli değil.");return true;}
+        case BUSY -> {player.sendMessage("§cÖnce mevcut görevi bitir veya /ahmet deliver ile taşıdığı yükü boşalt.");return true;}
+        case CHEST_REQUIRED -> {player.sendMessage("§cÖnce aynı dünyadaki teslimat sandığını /ahmet chest ile bağla.");return true;}
+        case ACCEPT -> {}
+        default -> {player.sendMessage("§cBu üretim desteklenmiyor.");return true;}
+      }
+      if(!chestLocation.getWorld().isChunkLoaded(chestLocation.getBlockX()>>4,chestLocation.getBlockZ()>>4)||!(chestLocation.getBlock().getState() instanceof Chest boundChest)){
+        player.sendMessage("§cİşaretli sandık yüklü değil veya artık orada değil.");return true;
+      }
+      CraftingPlanner.Result prePlan=CraftingPlanner.plan(craftInventorySlots(deliveryInventory(boundChest)),request.recipe(),request.amount());
+      if(prePlan.failure()==CraftingPlanner.Failure.INSUFFICIENT_INPUTS){
+        player.sendMessage("§cSandıkta yeterli malzeme yok ("+request.itemName()+" x"+request.amount()+" için girdi eksik).");return true;
+      }
+      if(prePlan.failure()==CraftingPlanner.Failure.OUTPUT_CAPACITY){
+        player.sendMessage("§cSandıkta üretilecek ürünler için yeterli boş yer yok.");return true;
+      }
+      if(!prePlan.succeeded()){
+        player.sendMessage("§cBu üretim isteği şu an gerçekleştirilemiyor.");return true;
+      }
+      scheduleAdapter.suspend(npc,"craft task admitted");
+      productionGoalAdapter.prepareTaskAdmission(true,getConfig().getBoolean("options.production-goals-enabled",false),this::clearPriorNavigationForTaskAdmission);
+      task.startCraft(player.getUniqueId(),request.recipe(),request.amount());
+      navigationPurpose=AgentGoal.DELIVER_CARGO;treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;
+      controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Craft task started via command");controller.clearHelp();persist();event("task_started",request.amount());
+      say("Tamam, sandığa gidip "+request.amount()+" "+request.itemName()+" üreteceğim.");
       return true;
     }
     if(op.equals("spawn")){
@@ -296,11 +339,19 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       scheduleAdapter.suspend(npc,"delivery admitted");task.resumeDelivery();treeTarget=null;controller.nextGeneration();controller.clearHelp();controller.transitionTo(AgentState.PLANNING,"Cargo delivery resumed");persist();say("Kalan kaynakları sandığa götürüyorum.");return true;
     }
     if(op.equals("cancel")){
-      if(TaskAuthorization.mayControl(player.getUniqueId().toString(),task.owner,player.hasPermission("ahmet.admin"),task.active) && task.active){cancel();say("Görevi iptal ettim. Topladığım kaynaklar şimdilik bende.");}
-      else player.sendMessage("§cİptal edebileceğin bir görevin yok.");return true;
+      if(!TaskAuthorization.mayControl(player.getUniqueId().toString(),task.owner,player.hasPermission("ahmet.admin"),task.active)||!task.active){
+        player.sendMessage("§cİptal edebileceğin bir görevin yok.");
+        return true;
+      }
+      if(!canCancelOrReturnHome()){
+        player.sendMessage("§cKurtarma veya bekleyen işlem var; görev şu an iptal edilemez.");
+        return true;
+      }
+      if(cancel())say("Görevi iptal ettim. Topladığım kaynaklar şimdilik bende.");
+      return true;
     }
     if(op.equals("home")||op.equals("return")){
-      if(recoveryBlocked){player.sendMessage("§cKurtarma bekliyor; işlem güvenli değil.");return true;}
+      if(!canCancelOrReturnHome()){player.sendMessage("§cKurtarma bekliyor; işlem güvenli değil.");return true;}
       if(npc==null||!npc.isSpawned()){player.sendMessage("§cÖnce /ahmet spawn ile Ahmet'i oluştur.");return true;}
       Location effectiveHome=getEffectiveHome();
       if(effectiveHome==null){player.sendMessage("§cKayıtlı ev konumu yok.");return true;}
@@ -324,6 +375,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     sender.sendMessage("§e/ahmet status §7— görev, program ve NPC durumu");
     sender.sendMessage("§e/ahmet cargo §7— taşıdığı kaynakların tür ve adetleri");
     sender.sendMessage("§e/ahmet collect <item|odun> <1-64> §7— doğrudan toplama görevi");
+    sender.sendMessage("§e/ahmet craft <oak_planks|stick> <4-64> §7— bağlı sandıktaki malzemeyle üretim");
     sender.sendMessage("§e/ahmet items [ara] §7— 1.21.6 item kataloğu ve toplama desteği");
     sender.sendMessage("§e/ahmet ask <mesaj> §7— Ahmet'le komut/sohbet");
     sender.sendMessage("§e/ahmet deliver §7— iptalden kalan yükü sandığa teslim et");
@@ -334,7 +386,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
   @Override public List<String> onTabComplete(CommandSender sender,Command command,String alias,String[] args){
     if(!command.getName().equalsIgnoreCase("ahmet")||args.length==0)return List.of();
-    List<String> commands=new ArrayList<>(List.of("help","status","cargo","collect","items","ask","deliver","cancel","home"));
+    List<String> commands=new ArrayList<>(List.of("help","status","cargo","collect","craft","items","ask","deliver","cancel","home"));
     if(sender.hasPermission("ahmet.admin"))commands.addAll(List.of("spawn","summon","chest","bed","protecthome"));
     if(args.length==1)return commands.stream().filter(value->value.startsWith(args[0].toLowerCase(java.util.Locale.ROOT))).toList();
     if(args.length==2&&args[0].equalsIgnoreCase("protecthome")&&sender.hasPermission("ahmet.admin"))return List.of("0","8","10","12","16").stream().filter(value->value.startsWith(args[1])).toList();
@@ -343,6 +395,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       return resources.stream().filter(value->value.startsWith(args[1].toLowerCase(java.util.Locale.ROOT))).toList();
     }
     if(args.length==3&&args[0].equalsIgnoreCase("collect"))return List.of("8","16","32","64").stream().filter(value->value.startsWith(args[2])).toList();
+    if(args.length==2&&args[0].equalsIgnoreCase("craft"))return List.of("oak_planks","stick").stream().filter(value->value.startsWith(args[1].toLowerCase(java.util.Locale.ROOT))).toList();
+    if(args.length==3&&args[0].equalsIgnoreCase("craft"))return List.of("4","8","12","16","32","64").stream().filter(value->value.startsWith(args[2])).toList();
     return List.of();
   }
   private Location findSafeSummonLocation(Player player){
@@ -378,13 +432,28 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     if(pendingDepositInventory(event.getSource())||pendingDepositInventory(event.getDestination()))event.setCancelled(true);
   }
   private boolean pendingDepositInventory(Inventory inventory){
-    if(inventory==null||journal==null||journal.pendingDeposit().isEmpty())return false;
-    OperationJournal.Deposit pending=journal.pendingDeposit().orElseThrow();
-    World world=Bukkit.getWorld(pending.world());
-    if(world==null)return false;
-    Block block=world.getBlockAt(pending.x(),pending.y(),pending.z());
-    if(!(block.getState() instanceof Chest chest))return false;
-    return inventory==deliveryInventory(chest)||inventory.equals(deliveryInventory(chest));
+    if(inventory==null||journal==null)return false;
+    if(journal.pendingDeposit().isPresent()){
+      OperationJournal.Deposit pending=journal.pendingDeposit().get();
+      World world=Bukkit.getWorld(pending.world());
+      if(world!=null){
+        Block block=world.getBlockAt(pending.x(),pending.y(),pending.z());
+        if(block.getState() instanceof Chest chest){
+          if(inventory==deliveryInventory(chest)||inventory.equals(deliveryInventory(chest)))return true;
+        }
+      }
+    }
+    if(journal.pendingCraft().isPresent()){
+      OperationJournal.Craft pending=journal.pendingCraft().get();
+      World world=Bukkit.getWorld(pending.world());
+      if(world!=null){
+        Block block=world.getBlockAt(pending.x(),pending.y(),pending.z());
+        if(block.getState() instanceof Chest chest){
+          if(inventory==deliveryInventory(chest)||inventory.equals(deliveryInventory(chest)))return true;
+        }
+      }
+    }
+    return false;
   }
   @EventHandler(ignoreCancelled=true) public void onPlayerPlaceWood(BlockPlaceEvent event){
     if(!woodProtectionStateValid)return;
@@ -419,41 +488,107 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       if((requestedHome||requestedCancel) && !TaskAuthorization.mayControl(player.getUniqueId().toString(),task.owner,player.hasPermission("ahmet.admin"),task.active||task.cargo>0)){
         player.sendMessage("§cBaşkasının görevini iptal edemez veya yönlendiremezsin.");return;
       }
-      if(requestedCancel&&task.active)cancel();
-      if(requestedHome){
-        if(task.active)cancel();
-        scheduleAdapter.suspend(npc,"chat return-home");returningHome=true;homeStepAttempt=0;clearNavigation();persist();
+      if(requestedHome||requestedCancel){
+        if(!canCancelOrReturnHome()){
+          getLogger().warning("Chat cancel/home rejected because operation recovery or pending operation is present.");
+          answer="Görev günlüğü kurtarma veya bekleyen işlemde; şu an iptal edilemez veya eve yönlendirilemez.";
+          presentation.replyToActor(npc,player,answer);
+          return;
+        }else{
+          if(requestedCancel&&task.active)cancel();
+          if(requestedHome){
+            if(task.active)cancel();
+            scheduleAdapter.suspend(npc,"chat return-home");returningHome=true;homeStepAttempt=0;clearNavigation();persist();
+          }
+        }
       }
       if(reply.has("task")&&reply.get("task").isJsonObject()){
         JsonObject spec=reply.getAsJsonObject("task");
-        String preference=null;int amount=0;
-        if(spec.has("type")&&spec.has("amount")){
-          amount=spec.get("amount").getAsInt();
-          if(spec.get("type").getAsString().equals("collect_wood")&&spec.has("material"))
-            preference=spec.get("material").getAsString();
-          else if(spec.get("type").getAsString().equals("collect_item")&&spec.has("itemId"))
-            preference=ResourceCatalog.preferenceFor(spec.get("itemId").getAsString()).orElse(null);
-        }
-        boolean validIntent=preference!=null&&amount>=1&&amount<=64&&WoodMaterials.isPreference(preference);
-        boolean chestBound=chestLocation!=null&&chestLocation.getWorld().equals(npc.getEntity().getWorld());
-        TaskAdmission.Result admission=TaskAdmission.evaluate(validIntent,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound);
-        switch(admission){
-          case ACCEPT -> {
-            scheduleAdapter.suspend(npc,"task admitted");
-            productionGoalAdapter.prepareTaskAdmission(true,getConfig().getBoolean("options.production-goals-enabled",false),this::clearPriorNavigationForTaskAdmission);
-            task.start(player.getUniqueId(),amount,preference);navigationPurpose=AgentGoal.HARVEST_RESOURCE;treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Task started via chat");controller.clearHelp();persist();event("task_started",amount);
+        if(spec.has("type")&&"craft_item".equals(spec.get("type").getAsString())){
+          String recipeKey=spec.has("recipe")&&spec.get("recipe").isJsonPrimitive()?spec.get("recipe").getAsString():null;
+          String amountText=spec.has("amount")&&spec.get("amount").isJsonPrimitive()?spec.get("amount").getAsString():null;
+          TaskRequest.CraftRequest craftReq=TaskRequest.parseCraft(recipeKey,amountText).orElse(null);
+          boolean validIntent=craftReq!=null;
+          boolean chestBound=chestLocation!=null&&chestLocation.getWorld()!=null&&chestLocation.getWorld().equals(npc.getEntity().getWorld());
+          TaskAdmission.Result admission=TaskAdmission.evaluate(validIntent,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound);
+          switch(admission){
+            case ACCEPT -> {
+              if(!chestLocation.getWorld().isChunkLoaded(chestLocation.getBlockX()>>4,chestLocation.getBlockZ()>>4)||!(chestLocation.getBlock().getState() instanceof Chest boundChest)){
+                answer="İşaretli sandık yüklü değil veya artık orada değil; önce sandığı kontrol et.";
+              }else{
+                CraftingPlanner.Result prePlan=CraftingPlanner.plan(craftInventorySlots(deliveryInventory(boundChest)),craftReq.recipe(),craftReq.amount());
+                if(prePlan.failure()==CraftingPlanner.Failure.INSUFFICIENT_INPUTS){
+                  answer="Sandıkta "+craftReq.amount()+" "+craftReq.itemName()+" üretmek için yeterli malzeme yok.";
+                }else if(prePlan.failure()==CraftingPlanner.Failure.OUTPUT_CAPACITY){
+                  answer="Sandıkta üretilecek ürünler için yeterli boş yer yok.";
+                }else if(!prePlan.succeeded()){
+                  answer="Bu üretim isteği şu an gerçekleştirilemiyor.";
+                }else{
+                  scheduleAdapter.suspend(npc,"craft task admitted");
+                  productionGoalAdapter.prepareTaskAdmission(true,getConfig().getBoolean("options.production-goals-enabled",false),this::clearPriorNavigationForTaskAdmission);
+                  task.startCraft(player.getUniqueId(),craftReq.recipe(),craftReq.amount());
+                  navigationPurpose=AgentGoal.DELIVER_CARGO;treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;
+                  controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Craft task started via chat");controller.clearHelp();persist();event("task_started",craftReq.amount());
+                }
+              }
+            }
+            case UNSUPPORTED -> answer="Şimdilik sadece bağlı sandıktaki malzemelerle 4–64 arası (4'ün katı) oak_planks veya stick üretebilirim.";
+            case RECOVERY_REQUIRED -> {getLogger().warning("Chat task request rejected because operation recovery/checkpoint is pending.");answer="Görev günlüğü kurtarma veya dünya kaydı bekliyor; güvenli duruma gelince tekrar dene.";}
+            case BUSY -> answer="Önce mevcut görevi bitir veya taşıdığım kaynakları /ahmet deliver ile teslim et.";
+            case CHEST_REQUIRED -> answer="Önce Ahmet'le aynı dünyada bir teslimat sandığı bağla: sandığa bakıp /ahmet chest kullan.";
           }
-          case UNSUPPORTED -> answer="Bu item kataloğumda tanımlı, ancak güvenli toplama yeteneğim henüz yok. Şimdilik yaygın odun, toprak, kum, taş, kömür, demir ve altın kaynaklarını isteyebilirsin.";
-          case RECOVERY_REQUIRED -> {getLogger().warning("Chat task request rejected because operation recovery/checkpoint is pending.");answer="Görev günlüğü kurtarma veya dünya kaydı bekliyor; güvenli duruma gelince tekrar dene.";}
-          case BUSY -> answer="Önce mevcut görevi bitir veya taşıdığım kaynakları /ahmet deliver ile teslim et.";
-          case CHEST_REQUIRED -> answer="Önce Ahmet'le aynı dünyada bir teslimat sandığı bağla: sandığa bakıp /ahmet chest kullan.";
+        }else{
+          String preference=null;int amount=0;
+          if(spec.has("type")&&spec.has("amount")){
+            amount=spec.get("amount").getAsInt();
+            if(spec.get("type").getAsString().equals("collect_wood")&&spec.has("material"))
+              preference=spec.get("material").getAsString();
+            else if(spec.get("type").getAsString().equals("collect_item")&&spec.has("itemId"))
+              preference=ResourceCatalog.preferenceFor(spec.get("itemId").getAsString()).orElse(null);
+          }
+          boolean validIntent=preference!=null&&amount>=1&&amount<=64&&WoodMaterials.isPreference(preference);
+          boolean chestBound=chestLocation!=null&&chestLocation.getWorld().equals(npc.getEntity().getWorld());
+          TaskAdmission.Result admission=TaskAdmission.evaluate(validIntent,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound);
+          switch(admission){
+            case ACCEPT -> {
+              scheduleAdapter.suspend(npc,"task admitted");
+              productionGoalAdapter.prepareTaskAdmission(true,getConfig().getBoolean("options.production-goals-enabled",false),this::clearPriorNavigationForTaskAdmission);
+              task.start(player.getUniqueId(),amount,preference);navigationPurpose=AgentGoal.HARVEST_RESOURCE;treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Task started via chat");controller.clearHelp();persist();event("task_started",amount);
+            }
+            case UNSUPPORTED -> answer="Bu item kataloğumda tanımlı, ancak güvenli toplama yeteneğim henüz yok. Şimdilik yaygın odun, toprak, kum, taş, kömür, demir ve altın kaynaklarını isteyebilirsin.";
+            case RECOVERY_REQUIRED -> {getLogger().warning("Chat task request rejected because operation recovery/checkpoint is pending.");answer="Görev günlüğü kurtarma veya dünya kaydı bekliyor; güvenli duruma gelince tekrar dene.";}
+            case BUSY -> answer="Önce mevcut görevi bitir veya taşıdığım kaynakları /ahmet deliver ile teslim et.";
+            case CHEST_REQUIRED -> answer="Önce Ahmet'le aynı dünyada bir teslimat sandığı bağla: sandığa bakıp /ahmet chest kullan.";
+          }
         }
       }
       presentation.replyToActor(npc,player,answer);
     }));
   }
   private void clearPriorNavigationForTaskAdmission(){clearNavigation();returningHome=false;homeStepAttempt=0;}
-  private void cancel(){event("task_cancelled",task.requested);task.cancel();controller.nextGeneration();controller.transitionTo(AgentState.IDLE,"Task cancelled");controller.clearHelp();treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;clearNavigation();explorationAttempts=0;returningHome=task.cargo==0;persist();}
+  private boolean canCancelOrReturnHome(){
+    return TaskAdmission.canCancelOrReturnHome(taskStateValid,recoveryBlocked,journal==null||journal.hasPendingOperation());
+  }
+  private boolean cancel(){
+    if(!canCancelOrReturnHome())return false;
+    event("task_cancelled",task.requested);
+    task.cancel();
+    controller.nextGeneration();
+    controller.transitionTo(AgentState.IDLE,"Task cancelled");
+    controller.clearHelp();
+    treeTarget=null;
+    failedTargets.clear();
+    treeRetryAfterMs=0;
+    waitDecisions=0;
+    decisionRetry.clear();
+    partialDeliveryPolicy.reset();
+    routeClears=0;
+    clearNavigation();
+    explorationAttempts=0;
+    returningHome=task.cargo==0;
+    persist();
+    return true;
+  }
 
   private boolean authorizeProductionGoal(AgentGoal executorBranch,Location current,long now,
       boolean routeBlocked,boolean clearOfferedByLiveJev){
@@ -502,10 +637,10 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
 
   private ProductionGoalAdapter.Facts captureProductionGoalFacts(Location current,boolean routeBlocked,
       boolean clearOfferedByLiveJev,boolean routeRetryAvailable,boolean foreignNavigationWaitExpired){
-    boolean pending=journal==null||journal.pendingHarvest().isPresent()||journal.pendingDeposit().isPresent()
-        ||journal.pendingClear().isPresent();
-    boolean scanPending=task.active&&!task.readyToDeliver()&&(!targetScanner.complete()||!scanEvaluated);
-    boolean scanExhausted=task.active&&!task.readyToDeliver()&&targetScanner.complete()&&scanEvaluated&&!productionCandidateAvailable;
+    boolean pending=journal==null||journal.hasPendingOperation();
+    boolean gatherActive = TaskAdmission.canExecuteGatherStep(task);
+    boolean scanPending=gatherActive&&!task.readyToDeliver()&&(!targetScanner.complete()||!scanEvaluated);
+    boolean scanExhausted=gatherActive&&!task.readyToDeliver()&&targetScanner.complete()&&scanEvaluated&&!productionCandidateAvailable;
     boolean navigationInProgress=navigationGoal!=null&&taskNavigationRoute.matches(npc);
     Location effectiveHome=getEffectiveHome();
     boolean outsideSafeHome=outsideHomeBoundary(current,effectiveHome);
@@ -513,7 +648,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     long serverStep=productionGoalAdapter.globalStepId(Bukkit.getCurrentTick());
     ProductionGoalPolicy.SafetyContext safety=ProductionGoalPolicy.SafetyContext
         .builder(controller.jobGeneration(),task.taskId,owner,serverStep)
-        .taskActive(task.active).cargo(task.cargo).readyToDeliver(task.readyToDeliver())
+        .taskActive(gatherActive).cargo(task.cargo).readyToDeliver(task.readyToDeliver())
         .recoveryBlocked(recoveryBlocked).transactionPending(pending)
         .committedJournalHistory(journal!=null&&journal.hasOperations())
         .navigationInProgress(navigationInProgress).routeBlocked(routeBlocked)
@@ -543,12 +678,13 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
 
   private AgentGoal currentNavigationGoal(Location current){
-    if(task.active){
+    if(task.active && TaskAdmission.canExecuteGatherStep(task)){
       if(task.readyToDeliver())return AgentGoal.DELIVER_CARGO;
       if(outsideHomeBoundary(current,getEffectiveHome()))return AgentGoal.RETURN_HOME;
       if(navigationPurpose==AgentGoal.EXPLORE_RESOURCES||navigationPurpose==AgentGoal.RETURN_HOME)return navigationPurpose;
       return AgentGoal.HARVEST_RESOURCE;
     }
+    if(task.isCraft())return AgentGoal.REST_IDLE;
     if(task.cargo>0)return AgentGoal.REST_IDLE;
     return returningHome||homeStepTarget!=null||outsideHomeBoundary(current,getEffectiveHome())
         ?AgentGoal.RETURN_HOME:AgentGoal.REST_IDLE;
@@ -569,8 +705,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       foreignNavigationWait.resetWaitForSafetyBlock();
       return;
     }
-    if(recoveryBlocked || journal.pendingHarvest().isPresent() || journal.pendingDeposit().isPresent()
-        || journal.pendingClear().isPresent()){
+    if(recoveryBlocked || journal.hasPendingOperation()){
       foreignNavigationWait.resetWaitForSafetyBlock();
       return;
     }
@@ -580,6 +715,14 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     }
     final Location current=npc.getEntity().getLocation();
     final long now=System.currentTimeMillis();
+    if(task.active && TaskAdmission.canExecuteCraftStep(task)){
+      stepCraftTask(current, now);
+      return;
+    }
+    if(task.active && !TaskAdmission.canExecuteGatherStep(task)){
+      foreignNavigationWait.resetWaitForSafetyBlock();
+      return;
+    }
     final boolean productionGoalsEnabled=getConfig().getBoolean("options.production-goals-enabled",false);
     boolean foreignRoute=task.active&&npc.getNavigator().isNavigating()&&!taskNavigationRoute.matches(npc);
     long serverTick=productionGoalAdapter.globalStepId(Bukkit.getCurrentTick());
@@ -770,6 +913,10 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       return;
     }
 
+    if (!TaskAdmission.canExecuteGatherStep(task)) {
+      return;
+    }
+
     if(explorationTarget!=null){
       List<Block> spotted=findTargets(current,task.materialPreference);
       if(spotted==null)return;
@@ -919,7 +1066,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
 
   private void advanceSchedule(){
-    boolean journalBusy=journal==null||journal.hasOperations()||(journal!=null&&(journal.pendingHarvest().isPresent()||journal.pendingDeposit().isPresent()||journal.pendingClear().isPresent()));
+    boolean journalBusy=journal==null||journal.hasOperations()||journal.hasPendingOperation();
     boolean allowed=VillagerSchedule.allowed(task.active,task.cargo,recoveryBlocked,journalBusy);
     Location effectiveHome=home!=null?home:protectedHome;
     scheduleAdapter.tick(npc,effectiveHome,scheduleBed,getConfig().getBoolean("options.schedule-enabled",true),!allowed,returningHome,
@@ -945,6 +1092,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
 
   private boolean evaluateObstructionClearing(Location current,Location goal){
+    if(!TaskAdmission.canExecuteGatherStep(task))return false;
     if(deciding)return false;
     List<ObstructionPolicy.CandidateObstruction> candidates=ObstructionPolicy.findCandidates(current,goal,getProtectedHomeArea(),playerPlacedWood);
     if(candidates.isEmpty()){
@@ -1087,10 +1235,88 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
   private JsonObject candidate(String id,String description){JsonObject result=new JsonObject();result.addProperty("id",id);result.addProperty("description",description);return result;}
 
+  private void stepCraftTask(Location current, long now) {
+    if (!TaskAdmission.canExecuteCraftStep(task)) return;
+    if (task.readyToFinish()) {
+      finishTaskIfReady();
+      return;
+    }
+    boolean foreignRoute = npc.getNavigator().isNavigating() && !taskNavigationRoute.matches(npc);
+    long serverTick = productionGoalAdapter.globalStepId(Bukkit.getCurrentTick());
+    ForeignNavigationWait.Observation foreignWait = foreignNavigationWait.observe(task.active, task.taskId,
+        taskOwner(), controller.jobGeneration(), serverTick, foreignRoute);
+    if (foreignWait.helpSequenceToClear() != null
+        && controller.clearHelp(foreignWait.helpSequenceToClear())
+        && FOREIGN_NAVIGATION_HELP_REASON.equals(lastPlayerHelpReason)) {
+      lastPlayerHelpReason = null;
+    }
+    if (foreignRoute) {
+      if (foreignWait.status() == ForeignNavigationWait.Status.HELP_DUE
+          && foreignNavigationWait.beginHelpAttempt(serverTick)
+          && controller.recordHelpRequest(now)) {
+        foreignNavigationWait.markHelpAccepted(controller.helpRequestSequence());
+        lastPlayerHelpReason = FOREIGN_NAVIGATION_HELP_REASON;
+        say(lastPlayerHelpReason);
+      }
+      return;
+    }
+    if (chestLocation == null || chestLocation.getWorld() == null || !chestLocation.getWorld().equals(current.getWorld())) {
+      abortCraftTask("İşaretli sandık kayıp veya başka dünyada; üretim görevini iptal ettim.");
+      return;
+    }
+    if (current.distanceSquared(chestLocation.clone().add(0.5, 0, 0.5)) <= 3.2 * 3.2) {
+      if (navigationGoal != null || navigationRetry.pending()) {
+        clearNavigation();
+      }
+      controller.clearHelp();
+      execute("craft");
+      return;
+    }
+    if (navigationRetry.pending()) {
+      if (!navigationRetry.consumeIfDue(now)) return;
+      if (navigationGoal != null) {
+        controller.transitionTo(AgentState.NAVIGATING, "Retrying craft chest route");
+        issueNavigationTarget(navigationGoal);
+      }
+      return;
+    }
+    if (navigationGoal != null) {
+      double watchdogDistSq = current.distanceSquared(navigationGoal);
+      NavigationWatchdog.Outcome outcome = navigationWatchdog.observe(watchdogDistSq, now);
+      if (outcome == NavigationWatchdog.Outcome.REACHED) {
+        clearNavigation();
+        controller.clearHelp();
+        if (current.distanceSquared(chestLocation.clone().add(0.5, 0.5, 0.5)) <= ActionPreconditions.MAX_REACH_SQ) {
+          execute("craft");
+        }
+        return;
+      } else if (outcome == NavigationWatchdog.Outcome.RETRY) {
+        taskNavigationRoute.cancelIfOwned(npc);
+        endOwnedNavigation();
+        navigationRetry.schedule(now);
+        return;
+      } else if (outcome == NavigationWatchdog.Outcome.GIVE_UP) {
+        clearNavigation();
+        treeRetryAfterMs = now + 30_000;
+        String reason = "Sandığa giden yolu bulamadım. Sandık çevresindeki yolu açın.";
+        if (controller.recordHelpRequest(now)) say(reason);
+        else warn(reason);
+        return;
+      } else if (outcome == NavigationWatchdog.Outcome.WAIT && !npc.getNavigator().isNavigating()) {
+        return;
+      }
+      return;
+    }
+    if (now < treeRetryAfterMs) return;
+    controller.transitionTo(AgentState.NAVIGATING, "Walking to bound chest for crafting");
+    navigate(NavigationTarget.fromBlock(chestLocation), AgentGoal.DELIVER_CARGO);
+  }
+
   private void execute(String action){
     Location here=npc.getEntity().getLocation();
     switch(action){
       case "harvest" -> {
+        if(!TaskAdmission.canExecuteGatherStep(task))return;
         if(treeTarget==null || here.distanceSquared(treeTarget)>3.5*3.5){treeTarget=null;return;}
         Block block=treeTarget.getBlock();
         ExecutionResult pre=controller.preconditions().validateGather(here,block,task.materialPreference,task.cargo);
@@ -1099,16 +1325,34 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         harvest(block);
       }
       case "deposit" -> {
+        if(!TaskAdmission.canExecuteGatherStep(task))return;
         Block block=chestLocation.getBlock();
         ExecutionResult pre=controller.preconditions().validateDeposit(here,block,task.cargo);
         if(!pre.isSuccess()||!(block.getState() instanceof Chest chest)){warn("İşaretli sandık artık orada değil.");return;}
         controller.transitionTo(AgentState.EXECUTING,"Depositing cargo");
         deposit(chest);
       }
+      case "craft" -> {
+        if (!TaskAdmission.canExecuteCraftStep(task)) return;
+        if (chestLocation == null || chestLocation.getWorld() == null) {
+          abortCraftTask("İşaretli sandık artık bağlı değil; üretim görevini iptal ettim.");
+          return;
+        }
+        Block block = chestLocation.getBlock();
+        ExecutionResult pre = controller.preconditions().validateCraft(here, block);
+        if (!pre.isSuccess() || !(block.getState() instanceof Chest chest)) {
+          if (pre.message() != null && pre.message().contains("out of reach")) return;
+          abortCraftTask("İşaretli sandık artık orada değil veya yüklü değil; üretim görevini iptal ettim.");
+          return;
+        }
+        controller.transitionTo(AgentState.EXECUTING, "Crafting " + task.craftRecipe().key());
+        craft(chest);
+      }
       default -> {}
     }
   }
   private void harvest(Block block){
+    if(!TaskAdmission.canExecuteGatherStep(task))return;
     String outputMaterial=expectedOutput(block,task.materialPreference);
     if(outputMaterial==null){treeTarget=null;return;}
     OperationJournal.Harvest operation=new OperationJournal.Harvest(task.taskId,block.getWorld().getName(),
@@ -1134,6 +1378,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     }
   }
   private void deposit(Chest chest){
+    if(!TaskAdmission.canExecuteGatherStep(task))return;
     if(task.cargo<=0)return;
     String material=task.nextCargoMaterial();if(material==null)return;
     int amount=task.cargoItems().getOrDefault(material,0);if(amount<=0)return;
@@ -1163,6 +1408,64 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       blockRecovery("Deposit transaction is pending; the job is paused",e);
     }
   }
+
+  private void abortCraftTask(String reason) {
+    if (!TaskAdmission.canExecuteCraftStep(task)) return;
+    if (!canCancelOrReturnHome()) return;
+    if (cancel()) {
+      say(reason);
+    }
+  }
+
+  private void craft(Chest chest) {
+    if (!TaskAdmission.canExecuteCraftStep(task)) return;
+    CraftRecipe recipe = task.craftRecipe();
+    if (recipe == null || chestLocation == null) return;
+    if (!chest.getWorld().equals(chestLocation.getWorld())
+        || chest.getX() != chestLocation.getBlockX()
+        || chest.getY() != chestLocation.getBlockY()
+        || chest.getZ() != chestLocation.getBlockZ()) {
+      abortCraftTask("İşaretli sandık konumu değişmiş; hiçbir eşyaya dokunmadan üretim görevini iptal ettim.");
+      return;
+    }
+    Inventory inventory = deliveryInventory(chest);
+    try {
+      List<CraftingPlanner.Slot> before = craftInventorySlots(inventory);
+      CraftingPlanner.Result result = CraftingPlanner.plan(before, recipe, task.requested);
+      if (result.failure() == CraftingPlanner.Failure.INSUFFICIENT_INPUTS) {
+        abortCraftTask("Sandıkta yeterli malzeme kalmamış; hiçbir eşyaya dokunmadan üretim görevini iptal ettim.");
+        return;
+      }
+      if (result.failure() == CraftingPlanner.Failure.OUTPUT_CAPACITY) {
+        abortCraftTask("Sandıkta üretilecek ürünler için yer kalmamış; hiçbir eşyaya dokunmadan üretim görevini iptal ettim.");
+        return;
+      }
+      if (!result.succeeded()) {
+        abortCraftTask("Üretim planı doğrulanamadı; hiçbir eşyaya dokunmadan üretim görevini iptal ettim.");
+        return;
+      }
+      CraftingPlanner.Plan plan = result.plan();
+      OperationJournal.Craft operation = OperationJournal.Craft.fromPlan(
+          task.taskId,
+          task.owner,
+          chest.getWorld().getName(),
+          chestLocation.getBlockX(),
+          chestLocation.getBlockY(),
+          chestLocation.getBlockZ(),
+          plan
+      );
+      journal.prepareCraft(operation);
+      writeCraftInventoryPlan(inventory, plan);
+      task.completeCraft(plan.outputCount());
+      persist();
+      saveJournalWorlds(chest.getWorld());
+      journal.clearAfterWorldSave();
+      presentation.committedWorkCue(npc, true);
+      finishTaskIfReady();
+    } catch (Exception e) {
+      blockRecovery("Craft transaction is pending; the job is paused", e);
+    }
+  }
   private List<CargoDepositPlanner.Slot> inventorySlots(Inventory inventory){
     List<CargoDepositPlanner.Slot> slots=new ArrayList<>();
     int emptyLimit=Math.min(64,inventory.getMaxStackSize());
@@ -1186,6 +1489,27 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       if(material==null)throw new IllegalStateException("Deposit item material is unavailable");
       inventory.setItem(change.slot(),new ItemStack(material,slot.amount()));
     }
+  }
+  private List<CraftingPlanner.Slot> craftInventorySlots(Inventory inventory){
+    List<CraftingPlanner.Slot> slots=new ArrayList<>();
+    int emptyLimit=Math.min(64,inventory.getMaxStackSize());
+    for(ItemStack item:inventory.getContents()){
+      if(item==null||item.getType().isAir())slots.add(CraftingPlanner.Slot.empty(emptyLimit));
+      else slots.add(new CraftingPlanner.Slot(item.getType().name(),item.getAmount(),Math.min(64,item.getMaxStackSize()),item.isSimilar(new ItemStack(item.getType()))));
+    }
+    return List.copyOf(slots);
+  }
+  private void writeCraftInventoryPlan(Inventory inventory,CraftingPlanner.Plan plan){
+    List<CraftingPlanner.Slot> currentSlots=craftInventorySlots(inventory);
+    OperationRecovery.applyCraftChanges(currentSlots,plan,(slot,materialName,amount)->{
+      if(materialName==null||amount<=0){
+        inventory.setItem(slot,null);
+      }else{
+        Material material=Material.matchMaterial(materialName);
+        if(material==null)throw new IllegalStateException("Craft item material is unavailable: "+materialName);
+        inventory.setItem(slot,new ItemStack(material,amount));
+      }
+    });
   }
   private void recoverJournal(){
     try{
@@ -1257,6 +1581,41 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         saveJournalWorlds(world);
         journal.clearAfterWorldSave();
       }
+      var pendingCraft=journal.pendingCraft();
+      if(pendingCraft.isPresent()){
+        OperationJournal.Craft operation=pendingCraft.get();
+        World world=Bukkit.getWorld(operation.world());
+        if(world==null){blockRecovery("Craft journal world is unavailable: "+operation.world(),null);return;}
+        Block block=world.getBlockAt(operation.x(),operation.y(),operation.z());
+        if(!(block.getState() instanceof Chest chest)){blockRecovery("Craft journal chest is missing",null);return;}
+        boolean chestBound=chestLocation!=null&&operation.matchesChest(chestLocation.getWorld().getName(),chestLocation.getBlockX(),chestLocation.getBlockY(),chestLocation.getBlockZ());
+        Inventory inventory=deliveryInventory(chest);
+        List<CraftingPlanner.Slot> currentSlots=craftInventorySlots(inventory);
+        var disposition=OperationRecovery.recoverCraft(
+            operation,
+            task,
+            chestBound,
+            currentSlots,
+            new OperationRecovery.CraftRecoveryEffects(){
+              @Override public void applyInventory(CraftingPlanner.Plan plan){
+                writeCraftInventoryPlan(inventory,plan);
+              }
+              @Override public void persistTask() throws IOException {
+                persist();
+              }
+              @Override public void saveWorld() throws IOException {
+                saveJournalWorlds(world);
+              }
+              @Override public void retireJournal() throws IOException {
+                journal.clearAfterWorldSave();
+              }
+            }
+        );
+        if(disposition==OperationRecovery.CraftDisposition.CONFLICT){
+          blockRecovery("Craft journal conflicts with saved task or chest state",null);
+          return;
+        }
+      }
       if(journal.hasCommittedOperationsReadyForCheckpoint()){
         saveJournalWorlds(null);
         journal.clearAfterWorldSave();
@@ -1269,10 +1628,13 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private void finishTaskIfReady(){
     if(!task.active||!task.readyToFinish())return;
     boolean partial=task.partialDelivery;int delivered=task.deposited;int requested=task.requested;
-    task.finish();controller.nextGeneration();controller.transitionTo(AgentState.IDLE,"Task completed");controller.clearHelp();persist();event("task_delivered",task.deposited);
+    boolean craft=task.isCraft();
+    CraftRecipe recipe=task.craftRecipe();
+    task.finish();controller.nextGeneration();controller.transitionTo(AgentState.IDLE,"Task completed");controller.clearHelp();persist();event("task_delivered",delivered);
     returningHome=true;homeStepAttempt=0;clearNavigation();
-    if(partial)say("Şimdilik "+delivered+"/"+requested+" kaynak topladım ve sandığa bıraktım. Ulaşılabilir kaynağı bulamayınca durdum; yolu açınca kalanını tekrar isteyebilirsin.");
-    else say("Bitti! "+task.deposited+" itemi sandığa bıraktım.");
+    if(craft)say("Bitti! "+delivered+" "+(recipe!=null?recipe.key().substring("minecraft:".length()):"ürün")+" ürettim ve sandığa bıraktım.");
+    else if(partial)say("Şimdilik "+delivered+"/"+requested+" kaynak topladım ve sandığa bıraktım. Ulaşılabilir kaynağı bulamayınca durdum; yolu açınca kalanını tekrar isteyebilirsin.");
+    else say("Bitti! "+delivered+" itemi sandığa bıraktım.");
   }
   private void beginPartialDelivery(String reason){
     if(!task.active||task.cargo<=0)return;
@@ -1290,6 +1652,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     journal.pendingHarvest().ifPresent(operation->names.add(operation.world()));
     journal.pendingDeposit().ifPresent(operation->names.add(operation.world()));
     journal.pendingClear().ifPresent(operation->names.add(operation.world()));
+    journal.pendingCraft().ifPresent(operation->names.add(operation.world()));
     if(additional!=null)names.add(additional.getName());
     for(String name:names){
       World world=Bukkit.getWorld(name);
@@ -1299,7 +1662,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
   private void flushJournalOnShutdown(){
     if(journal==null||!journal.hasOperations())return;
-    if(journal.pendingHarvest().isPresent()||journal.pendingDeposit().isPresent()||journal.pendingClear().isPresent()){
+    if(journal.hasPendingOperation()){
       getLogger().warning("An unfinished operation journal was retained for startup recovery.");return;
     }
     try{saveJournalWorlds(null);journal.clearAfterWorldSave();}
@@ -1392,8 +1755,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private void reconcileActivationRange(){
     if(!Bukkit.isPrimaryThread())return;
     boolean scheduleRoute=scheduleAdapter.ownsRoute(npc);
-    boolean pendingOperation=journal==null||journal.pendingHarvest().isPresent()
-        ||journal.pendingDeposit().isPresent()||journal.pendingClear().isPresent();
+    boolean pendingOperation=journal==null||journal.hasPendingOperation();
     boolean taskRoute=ActivationRangeGuard.taskRouteEligible(taskNavigationRoute.matches(npc),recoveryBlocked,
         pendingOperation,deciding,navigationGoal!=null,navigationRetry.pending());
     boolean eligible=scheduleRoute||taskRoute;
