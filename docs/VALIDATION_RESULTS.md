@@ -549,4 +549,11 @@ The four-entry M7 ZIP package (`dist/villager-ahmet-plugins-paper-1.21.6.zip`) w
 - **Pinned Citizens SHA-256**: `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158` (`Citizens-2.0.41-b4138.jar`)
 - **Turkish Package README SHA-256**: `a0d261946bb98cf488fbbab0949f88db0f621c42aeda6e669c3133b25f38959a` (`README-TR.txt`)
 
+### Source publication, live package installation and startup/save read-back
+- Source commit `240b2ff577c5a70aef9de61e750d59902745b545` was pushed through the normal Git CLI and matched `origin/main`.
+- Before atomic JAR installation on `server-live`, a stopped-server backup was verified: `/private/tmp/ahmet-m7-live-backup-20261021/stopped-server-state.tar.gz`, **229 entries / 29,312,779 bytes**, archive SHA-256 `77939b7535ccd6ed6fda9761360943edb361c16279728c1c2096d627fc0445d9` (mode `0600`).
+- Exact core JAR `25f0fba9ad6ec049243124fafdfa6783ccb4450860372a9893935437d929fbe2` was extracted from the verified four-entry ZIP `475c80dbd23b435c1976ce7c0bf6835fc1671fea6f09f2aac84425407e3ddaff` and installed atomically into `server-live/plugins/VillagerAhmet.jar`.
+- Paper 1.21.6 build 48 started in **9.227 seconds** (`Done (9.227s)! For help, type "help"`) with **0 ERROR** lines. Node health at `http://127.0.0.1:3197/health` returned `ok=true`, `service="villager-ahmet-brain"`, `decisionMode="jev"`, `chatMode="llm"`, and `configuredJevModel="jev-preview"` (configured mode only; no live provider call was issued).
+- Console `list` reported `There are 0 of a max of 6 players online: `. `/ahmet status` reported `Ahmet: boşta (taşınan kaynak: 0) | Durum: IDLE | Rol: genel | Program: wander (walking; wander radius exceeded) | Yatak: bağlı değil | Sandık: bağlı | NPC: yok | Korunan ev: 10 blok | Yerleştirilmiş odun işareti: 15 | Tarla: bağlı değil`. `/ahmet roster` reported `Kayıtlı köylüler (1/4): • Ahmet (id: ahmet, rol: genel, NPC: yok, görev: boşta)`. `save-all flush` acknowledged `Saved the game (world, DIM-1, DIM1)` across all three dimensions. The live server was left running after read-back.
+
 Human in-game multi-villager gameplay, live provider calls on the M7 path, production-store inspection, and forced-crash durability across concurrent journals remain unverified.
