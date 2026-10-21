@@ -36,4 +36,22 @@ final class ResourceCatalogTest {
     assertFalse(ResourceCatalog.matchesBlockName("IRON_ORE", coal));
     assertFalse(ResourceCatalog.preferenceFor("minecraft:diamond").isPresent());
   }
+
+  @Test
+  void matchesGatherTargetSupportsCropsResourcesAndWood() {
+    assertTrue(ResourceCatalog.matchesGatherTarget("WHEAT", "crop:WHEAT"));
+    assertTrue(ResourceCatalog.matchesGatherTarget("CARROTS", "crop:CARROT"));
+    assertTrue(ResourceCatalog.matchesGatherTarget("POTATOES", "crop:POTATO"));
+    assertTrue(ResourceCatalog.matchesGatherTarget("WHEAT", "crop:ANY"));
+    assertTrue(ResourceCatalog.matchesGatherTarget("CARROTS", "crop:ANY"));
+    assertTrue(ResourceCatalog.matchesGatherTarget("POTATOES", "crop:ANY"));
+
+    assertFalse(ResourceCatalog.matchesGatherTarget("BEETROOTS", "crop:ANY"));
+    assertFalse(ResourceCatalog.matchesGatherTarget("WHEAT", "crop:CARROT"));
+    assertFalse(ResourceCatalog.matchesGatherTarget("AIR", "crop:WHEAT"));
+
+    String coalPref = ResourceCatalog.preferenceFor("minecraft:coal").orElseThrow();
+    assertTrue(ResourceCatalog.matchesGatherTarget("COAL_ORE", coalPref));
+    assertFalse(ResourceCatalog.matchesGatherTarget("COAL_ORE", "crop:WHEAT"));
+  }
 }

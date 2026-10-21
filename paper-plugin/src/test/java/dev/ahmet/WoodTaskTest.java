@@ -471,5 +471,160 @@ final class WoodTaskTest {
     assertThrows(IllegalStateException.class, () -> task.startCraft(user, CraftRecipe.STICK, 4));
     assertThrows(IllegalStateException.class, () -> task.completeCraft(8));
   }
+
+  @Test
+  void startFarmAndHarvestValidation() {
+    WoodTask task = new WoodTask();
+    UUID user = UUID.randomUUID();
+
+    assertThrows(IllegalArgumentException.class, () -> task.startFarm(null, 5));
+    assertThrows(IllegalArgumentException.class, () -> task.startFarm(user, 0));
+    assertThrows(IllegalArgumentException.class, () -> task.startFarm(user, 65));
+    assertThrows(IllegalArgumentException.class, () -> task.startFarm(user, 5, "invalid_crop"));
+
+    task.startFarm(user, 3);
+    assertTrue(task.isFarm());
+    assertFalse(task.isGather());
+    assertFalse(task.isCraft());
+    assertEquals("crop:ANY", task.materialPreference);
+    assertFalse(task.canClearObstruction());
+    assertThrows(IllegalStateException.class, task::recordClear);
+
+    task.harvestOne("WHEAT");
+    task.harvestOne("CARROT");
+    task.harvestOne("POTATO");
+    assertEquals(3, task.collected);
+    assertEquals(3, task.cargo);
+    assertEquals(1, task.cargoCount("WHEAT"));
+    assertEquals(1, task.cargoCount("CARROT"));
+    assertEquals(1, task.cargoCount("POTATO"));
+
+    // Exceed requested
+    assertThrows(IllegalStateException.class, () -> task.harvestOne("WHEAT"));
+
+    // Specific crop preference rejects other crops and non-crops
+    WoodTask wheatTask = new WoodTask();
+    wheatTask.startFarm(user, 2, "crop:WHEAT");
+    assertThrows(IllegalArgumentException.class, () -> wheatTask.harvestOne("OAK_LOG"));
+    assertThrows(IllegalArgumentException.class, () -> wheatTask.harvestOne("CARROT"));
+    wheatTask.harvestOne("WHEAT");
+    assertEquals(1, wheatTask.collected);
+  }
+
+  @Test
+  void farmPartialDeliveryAndDepositWorkflow() {
+    WoodTask task = new WoodTask();
+    UUID user = UUID.randomUUID();
+    task.startFarm(user, 5, "crop:CARROT");
+
+    assertThrows(IllegalStateException.class, task::requestPartialDelivery);
+    task.harvestOne("CARROT");
+    task.harvestOne("CARROT");
+
+    task.requestPartialDelivery();
+    assertTrue(task.partialDelivery);
+    assertTrue(task.readyToDeliver());
+
+    task.deposit("CARROT", 2);
+    assertEquals(2, task.deposited);
+    assertEquals(0, task.cargo);
+    assertTrue(task.readyToFinish());
+    task.finish();
+    assertFalse(task.active);
+  }
+
+  @Test
+  void farmTaskDescribeOutput() {
+    WoodTask task = new WoodTask();
+    UUID user = UUID.randomUUID();
+
+    task.startFarm(user, 5, "crop:ANY");
+    assertEquals("ekin 0/5 toplandı, 0 teslim", task.describe());
+
+    WoodTask wheatTask = new WoodTask();
+    wheatTask.startFarm(user, 3, "crop:WHEAT");
+    wheatTask.harvestOne("WHEAT");
+    assertEquals("buğday 1/3 toplandı, 0 teslim", wheatTask.describe());
+
+    wheatTask.requestPartialDelivery();
+    assertEquals("buğday 1/3 toplandı, 0 teslim (kısmi teslimat)", wheatTask.describe());
+
+    wheatTask.cancel();
+    assertEquals("boşta (taşınan kaynak: 1)", wheatTask.describe());
+  }
+
+  @Test
+  void farmTaskPersistenceRoundTrip() {
+    WoodTask original = new WoodTask();
+    UUID user = UUID.randomUUID();
+    original.startFarm(user, 4, "crop:ANY");
+    original.harvestOne("WHEAT");
+    original.harvestOne("POTATO");
+
+    YamlConfiguration config = new YamlConfiguration();
+    original.save(config);
+
+    assertEquals("FARM", config.getString("task.kind"));
+    assertEquals("crop:ANY", config.getString("task.materialPreference"));
+
+    WoodTask restored = new WoodTask();
+    restored.load(config);
+
+    assertTrue(restored.isFarm());
+    assertEquals(4, restored.requested);
+    assertEquals(2, restored.collected);
+    assertEquals(2, restored.cargo);
+    assertEquals(1, restored.cargoCount("WHEAT"));
+    assertEquals(1, restored.cargoCount("POTATO"));
+  }
+
+  @Test
+  void malformedFarmTaskPersistenceFailsClosed() {
+    // 1. Cleared > 0
+    YamlConfiguration c1 = validFarmConfig(5, 0, 0);
+    c1.set("task.cleared", 1);
+    assertThrows(IllegalStateException.class, () -> new WoodTask().load(c1));
+
+    // 2. Craft recipe attached
+    YamlConfiguration c2 = validFarmConfig(5, 0, 0);
+    c2.set("task.craftRecipe", "minecraft:oak_planks");
+    assertThrows(IllegalStateException.class, () -> new WoodTask().load(c2));
+
+    // 3. Cargo > 0 but missing cargoItems
+    YamlConfiguration c3 = validFarmConfig(5, 2, 0);
+    c3.set("task.cargo", 2);
+    assertThrows(IllegalStateException.class, () -> new WoodTask().load(c3));
+
+    // 4. Non-crop cargo item
+    YamlConfiguration c4 = validFarmConfig(5, 1, 0);
+    c4.set("task.cargo", 1);
+    c4.set("task.cargoItems", Map.of("OAK_LOG", 1));
+    assertThrows(IllegalStateException.class, () -> new WoodTask().load(c4));
+
+    // 5. Cargo doesn't match specific preference
+    YamlConfiguration c5 = validFarmConfig(5, 1, 0);
+    c5.set("task.materialPreference", "crop:WHEAT");
+    c5.set("task.cargo", 1);
+    c5.set("task.cargoItems", Map.of("CARROT", 1));
+    assertThrows(IllegalStateException.class, () -> new WoodTask().load(c5));
+
+    // 6. Unsupported crop preference
+    YamlConfiguration c6 = validFarmConfig(5, 0, 0);
+    c6.set("task.materialPreference", "any"); // "any" is gather, not crop
+    assertThrows(IllegalStateException.class, () -> new WoodTask().load(c6));
+  }
+
+  private static YamlConfiguration validFarmConfig(int requested, int collected, int deposited) {
+    YamlConfiguration config = new YamlConfiguration();
+    config.set("task.kind", "FARM");
+    config.set("task.materialPreference", "crop:ANY");
+    config.set("task.requested", requested);
+    config.set("task.collected", collected);
+    config.set("task.deposited", deposited);
+    config.set("task.cargo", collected - deposited);
+    config.set("task.cleared", 0);
+    config.set("task.partialDelivery", false);
+    return config;
+  }
 }
 

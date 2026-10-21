@@ -403,5 +403,98 @@ final class OperationRecoveryTest {
     assertTrue(effects.persistedTask.get());
     assertTrue(effects.savedWorld.get());
   }
+
+  @Test
+  void classifyCropHarvestDispositions() {
+    var wheat = OperationJournal.Harvest.forCrop("task-c", "world", 10, 64, 20, 0, 0, "WHEAT", "WHEAT", 0);
+
+    // 1. NOT_APPLIED: counters at before, block still at age 7 on FARMLAND
+    assertEquals(OperationRecovery.HarvestDisposition.NOT_APPLIED,
+        OperationRecovery.classifyCropHarvest(wheat, "task-c", 0, 0, 0, "WHEAT", "FARMLAND", 7));
+
+    // 2. APPLY: counters at before, block already replanted to age 0 on FARMLAND
+    assertEquals(OperationRecovery.HarvestDisposition.APPLY,
+        OperationRecovery.classifyCropHarvest(wheat, "task-c", 0, 0, 0, "WHEAT", "FARMLAND", 0));
+
+    // 3. ALREADY_APPLIED: counters at after, block at age 0 on FARMLAND
+    assertEquals(OperationRecovery.HarvestDisposition.ALREADY_APPLIED,
+        OperationRecovery.classifyCropHarvest(wheat, "task-c", 1, 1, 1, "WHEAT", "FARMLAND", 0));
+
+    // Overload without materialCargo
+    assertEquals(OperationRecovery.HarvestDisposition.NOT_APPLIED,
+        OperationRecovery.classifyCropHarvest(wheat, "task-c", 0, 0, "WHEAT", "FARMLAND", 7));
+  }
+
+  @Test
+  void classifyCropHarvestConflictConditions() {
+    var wheat = OperationJournal.Harvest.forCrop("task-c", "world", 10, 64, 20, 0, 0, "WHEAT", "WHEAT", 0);
+
+    // Missing FARMLAND below
+    assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
+        OperationRecovery.classifyCropHarvest(wheat, "task-c", 0, 0, 0, "WHEAT", "DIRT", 7));
+    assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
+        OperationRecovery.classifyCropHarvest(wheat, "task-c", 0, 0, 0, "WHEAT", null, 7));
+
+    // Block material mismatch
+    assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
+        OperationRecovery.classifyCropHarvest(wheat, "task-c", 0, 0, 0, "AIR", "FARMLAND", 0));
+    assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
+        OperationRecovery.classifyCropHarvest(wheat, "task-c", 0, 0, 0, "CARROTS", "FARMLAND", 0));
+    assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
+        OperationRecovery.classifyCropHarvest(wheat, "task-c", 0, 0, 0, null, "FARMLAND", 0));
+
+    // Unexpected crop ages while pending (1..6)
+    for (int age = 1; age <= 6; age++) {
+      assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
+          OperationRecovery.classifyCropHarvest(wheat, "task-c", 0, 0, 0, "WHEAT", "FARMLAND", age));
+    }
+    assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
+        OperationRecovery.classifyCropHarvest(wheat, "task-c", 0, 0, 0, "WHEAT", "FARMLAND", null));
+
+    // Task counters at after, but crop age is not 0
+    assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
+        OperationRecovery.classifyCropHarvest(wheat, "task-c", 1, 1, 1, "WHEAT", "FARMLAND", 7));
+
+    // Task counters mismatch
+    assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
+        OperationRecovery.classifyCropHarvest(wheat, "task-c", 2, 2, 0, "WHEAT", "FARMLAND", 0));
+
+    // Task ID mismatch or null operation
+    assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
+        OperationRecovery.classifyCropHarvest(wheat, "other-task", 0, 0, 0, "WHEAT", "FARMLAND", 7));
+    assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
+        OperationRecovery.classifyCropHarvest(null, "task-c", 0, 0, 0, "WHEAT", "FARMLAND", 7));
+
+    // Wood operation passed to crop classifier
+    var wood = new OperationJournal.Harvest("task-w", "world", 0, 64, 0, 0, 0, "OAK_LOG");
+    assertEquals(OperationRecovery.HarvestDisposition.CONFLICT,
+        OperationRecovery.classifyCropHarvest(wood, "task-w", 0, 0, 0, "OAK_LOG", "FARMLAND", 7));
+  }
+
+  @Test
+  void isCommittedCropHarvestValidVerification() {
+    var wheat = OperationJournal.Harvest.forCrop("task-c", "world", 10, 64, 20, 0, 0, "WHEAT", "WHEAT", 0);
+
+    // Valid: on farmland, matching block, 0 <= age < 7
+    assertTrue(OperationRecovery.isCommittedCropHarvestValid(wheat, "WHEAT", "FARMLAND", 0));
+    assertTrue(OperationRecovery.isCommittedCropHarvestValid(wheat, "WHEAT", "FARMLAND", 1));
+    assertTrue(OperationRecovery.isCommittedCropHarvestValid(wheat, "WHEAT", "FARMLAND", 6));
+
+    // Invalid: age == 7
+    assertFalse(OperationRecovery.isCommittedCropHarvestValid(wheat, "WHEAT", "FARMLAND", 7));
+
+    // Invalid: broken to AIR or wrong material
+    assertFalse(OperationRecovery.isCommittedCropHarvestValid(wheat, "AIR", "FARMLAND", 0));
+    assertFalse(OperationRecovery.isCommittedCropHarvestValid(wheat, "POTATOES", "FARMLAND", 0));
+
+    // Invalid: not FARMLAND below
+    assertFalse(OperationRecovery.isCommittedCropHarvestValid(wheat, "WHEAT", "DIRT", 0));
+    assertFalse(OperationRecovery.isCommittedCropHarvestValid(wheat, "WHEAT", null, 0));
+
+    // Invalid: null harvest or non-crop harvest
+    assertFalse(OperationRecovery.isCommittedCropHarvestValid(null, "WHEAT", "FARMLAND", 0));
+    var wood = new OperationJournal.Harvest("task-w", "world", 0, 64, 0, 0, 0, "OAK_LOG");
+    assertFalse(OperationRecovery.isCommittedCropHarvestValid(wood, "WHEAT", "FARMLAND", 0));
+  }
 }
 

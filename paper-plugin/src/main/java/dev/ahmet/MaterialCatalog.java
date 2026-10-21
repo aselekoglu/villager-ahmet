@@ -77,7 +77,8 @@ final class MaterialCatalog {
 
   private static Entry toEntry(Material material) {
     String capability = WoodMaterials.isWoodName(material.name()) ? "collect_wood"
-        : ResourceCatalog.isSupportedOutput(material.name()) ? "collect_resource" : "none";
+        : ResourceCatalog.isSupportedOutput(material.name()) ? "collect_resource"
+        : FarmCatalog.isCropOutput(material.name()) ? "harvest_crop" : "none";
     return new Entry(material.getKey().toString(), material.name(), material.isBlock(), material.getMaxStackSize(),
         !"none".equals(capability), capability);
   }

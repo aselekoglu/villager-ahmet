@@ -50,6 +50,51 @@ final class OperationRecovery {
     return HarvestDisposition.CONFLICT;
   }
 
+  static HarvestDisposition classifyCropHarvest(OperationJournal.Harvest operation, String taskId,
+      int collected, int cargo, String blockMaterial, String belowMaterial, Integer cropAge) {
+    return classifyCropHarvest(operation, taskId, collected, cargo,
+        operation == null ? -1 : operation.beforeOutputCargoCount(),
+        blockMaterial, belowMaterial, cropAge);
+  }
+
+  static HarvestDisposition classifyCropHarvest(OperationJournal.Harvest operation, String taskId,
+      int collected, int cargo, int materialCargo, String blockMaterial, String belowMaterial, Integer cropAge) {
+    if (operation == null || !Objects.equals(operation.taskId(), taskId) || !operation.isCropHarvest()) {
+      return HarvestDisposition.CONFLICT;
+    }
+    if (blockMaterial == null || belowMaterial == null || cropAge == null) {
+      return HarvestDisposition.CONFLICT;
+    }
+    if (!"FARMLAND".equals(belowMaterial)) {
+      return HarvestDisposition.CONFLICT;
+    }
+    if (!operation.effectiveMaterial().equals(blockMaterial)) {
+      return HarvestDisposition.CONFLICT;
+    }
+    int beforeMaterialCargo = operation.beforeOutputCargoCount();
+    if (beforeMaterialCargo < 0) {
+      return HarvestDisposition.CONFLICT;
+    }
+    if (collected == operation.afterCollected() && cargo == operation.afterCargo() && materialCargo == beforeMaterialCargo + 1) {
+      return cropAge == 0 ? HarvestDisposition.ALREADY_APPLIED : HarvestDisposition.CONFLICT;
+    }
+    if (collected != operation.beforeCollected() || cargo != operation.beforeCargo() || materialCargo != beforeMaterialCargo) {
+      return HarvestDisposition.CONFLICT;
+    }
+    if (cropAge == 7) return HarvestDisposition.NOT_APPLIED;
+    if (cropAge == 0) return HarvestDisposition.APPLY;
+    return HarvestDisposition.CONFLICT;
+  }
+
+  static boolean isCommittedCropHarvestValid(OperationJournal.Harvest harvest,
+      String blockMaterial, String belowMaterial, Integer cropAge) {
+    if (harvest == null || !harvest.isCropHarvest()) return false;
+    if (blockMaterial == null || belowMaterial == null || cropAge == null) return false;
+    if (!"FARMLAND".equals(belowMaterial)) return false;
+    if (!harvest.effectiveMaterial().equals(blockMaterial)) return false;
+    return cropAge >= 0 && cropAge < 7;
+  }
+
   static DepositDisposition classifyDeposit(OperationJournal.Deposit operation, String taskId,
       int cargo, int deposited) {
     if (operation == null || !Objects.equals(operation.taskId(), taskId)) return DepositDisposition.CONFLICT;

@@ -25,6 +25,27 @@ const CRAFT_RECIPES = [
   ['minecraft:oak_planks', ['meşe tahtası', 'mese tahtasi', 'meşe tahta', 'mese tahta', 'oak planks', 'oak plank', 'oak_planks']],
   ['minecraft:stick', ['çubuk', 'cubuk', 'stick', 'sticks', 'minecraft:stick']],
 ];
+export const CROPS = [
+  ['minecraft:wheat', ['buğday', 'bugday', 'wheat']],
+  ['minecraft:carrot', ['havuç', 'havuc', 'carrot', 'carrots']],
+  ['minecraft:potato', ['patates', 'potato', 'potatoes']],
+  ['any', ['ekin', 'ekinler', 'mahsul', 'tarla', 'crop', 'crops']],
+];
+export const UNSUPPORTED_CROPS = [
+  ['beetroot', ['pancar', 'beetroot', 'beetroots']],
+  ['nether_wart', ['nether wart', 'nether siğili', 'nether sigili']],
+  ['melon', ['karpuz', 'melon']],
+  ['pumpkin', ['balkabağı', 'balkabagi', 'kabak', 'pumpkin']],
+  ['cocoa', ['kakao', 'cocoa']],
+  ['sweet_berries', ['tatlı böğürtlen', 'tatli bogurtlen', 'sweet berry', 'sweet berries']],
+];
+
+export function isFarmCommand(text) {
+  const s = String(text ?? '').toLocaleLowerCase('tr-TR');
+  const crop = /(buğday|bugday|wheat|havuç|havuc|carrot|carrots|patates|potato|potatoes|ekin|ekinler|mahsul|tarla|crop|crops)/i.test(s);
+  const action = /(topla|getir|hasat|biç|bic|biriktir|gather|collect|bring|harvest|farm)/i.test(s);
+  return Boolean(crop && action);
+}
 
 export function isCraftCommand(text) {
   const s = String(text ?? '').toLocaleLowerCase('tr-TR');
@@ -51,11 +72,19 @@ export function parseTask(text) {
     }
     return {type: 'craft_item', recipe: craftRecipe[0], amount};
   }
-  const action = /(topla|getir|kes|biriktir|bul|ara|gather|collect|bring|get|chop|harvest|find|search)/i.test(s);
+  const action = /(topla|getir|kes|biriktir|bul|ara|biç|bic|hasat|gather|collect|bring|get|chop|harvest|find|search|farm)/i.test(s);
   if (!action) return null;
+  const unsupportedCrop = UNSUPPORTED_CROPS.find(([, names]) => names.some(name => s.includes(name)));
+  if (unsupportedCrop) {
+    return {error: 'Şimdilik sadece onaylı tarladaki olgun buğday (wheat), havuç (carrot) ve patates (potato) ekinlerini hasat edebilirim.'};
+  }
   const quantity = s.match(/\b(\d{1,3})\b/);
   const amount = quantity ? Number(quantity[1]) : 8;
   if (amount < 1 || amount > 64) return {error:'Bir seferde 1–64 kaynak isteyebilirsin.'};
+  if (isFarmCommand(s)) {
+    const matched = CROPS.find(([, names]) => names.some(name => s.includes(name)));
+    return {type: 'harvest_crop', crop: matched ? matched[0] : 'any', amount};
+  }
   if (isWoodCommand(s)) {
     const matched = MATERIALS.find(([, names]) => names.some(name => s.includes(name)));
     return {type:'collect_wood',material:matched?.[0]??'any',amount};
@@ -85,11 +114,36 @@ export function validateCraftTask(task) {
     : null;
 }
 
+export function validateFarmTask(task) {
+  if (!task || typeof task !== 'object' || task.type !== 'harvest_crop') return null;
+  if (!Number.isInteger(task.amount) || task.amount < 1 || task.amount > 64) return null;
+  const canonical = {
+    'any': 'any',
+    'crop:ANY': 'any',
+    'minecraft:wheat': 'minecraft:wheat',
+    'wheat': 'minecraft:wheat',
+    'crop:WHEAT': 'minecraft:wheat',
+    'minecraft:carrot': 'minecraft:carrot',
+    'carrot': 'minecraft:carrot',
+    'carrots': 'minecraft:carrot',
+    'crop:CARROT': 'minecraft:carrot',
+    'minecraft:potato': 'minecraft:potato',
+    'potato': 'minecraft:potato',
+    'potatoes': 'minecraft:potato',
+    'crop:POTATO': 'minecraft:potato',
+  };
+  const crop = canonical[task.crop];
+  if (!crop) return null;
+  return {type: 'harvest_crop', crop, amount: task.amount};
+}
+
 export function validateTask(task) {
   const wood = validateWoodTask(task);
   if (wood) return wood;
   const craft = validateCraftTask(task);
   if (craft) return craft;
+  const farm = validateFarmTask(task);
+  if (farm) return farm;
   return task && typeof task === 'object' && task.type === 'collect_item'
     && typeof task.itemId === 'string' && /^minecraft:[a-z0-9_]{1,64}$/.test(task.itemId)
     && Number.isInteger(task.amount) && task.amount >= 1 && task.amount <= 64

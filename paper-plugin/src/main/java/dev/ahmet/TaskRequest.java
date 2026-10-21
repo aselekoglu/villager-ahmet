@@ -50,4 +50,23 @@ record TaskRequest(String preference, int amount, String itemName) {
     String itemName = recipe == CraftRecipe.OAK_PLANKS ? "oak_planks" : "stick";
     return Optional.of(new CraftRequest(recipe, amount, itemName));
   }
+
+  record FarmRequest(String preference, int amount, String itemName) {}
+
+  static Optional<FarmRequest> parseFarm(String cropArg, String amountText) {
+    if (cropArg == null || amountText == null) return Optional.empty();
+    final int amount;
+    try {
+      amount = Integer.parseInt(amountText.trim());
+    } catch (NumberFormatException ignored) {
+      return Optional.empty();
+    }
+    if (amount < 1 || amount > 64) return Optional.empty();
+    Optional<String> prefOpt = FarmCatalog.preferenceForAlias(cropArg);
+    if (prefOpt.isEmpty()) return Optional.empty();
+    String preference = prefOpt.get();
+    String itemName = FarmCatalog.displayItemName(preference);
+    if (itemName == null) itemName = "ekin";
+    return Optional.of(new FarmRequest(preference, amount, itemName));
+  }
 }

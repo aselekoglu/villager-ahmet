@@ -2,6 +2,7 @@ package dev.ahmet;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -466,6 +467,80 @@ final class OperationJournalTest {
     OperationJournal j3 = new OperationJournal(p3);
     j3.load();
     assertEquals("legacy-3", j3.pendingHarvest().orElseThrow().taskId());
+  }
+
+  @Test
+  void cropHarvestFactoryAndValidationInvariants() {
+    var wheat = OperationJournal.Harvest.forCrop("task-1", "world", 10, 64, 20, 0, 0, "WHEAT", "WHEAT", 0);
+    assertTrue(wheat.isCropHarvest());
+    assertEquals(7, wheat.beforeCropAge());
+    assertEquals(0, wheat.afterCropAge());
+    assertEquals("WHEAT", wheat.effectiveMaterial());
+    assertEquals("WHEAT", wheat.effectiveOutputMaterial());
+
+    var carrot = OperationJournal.Harvest.forCrop("task-1", "world", 11, 64, 20, 1, 1, "CARROTS", "CARROT", 1);
+    assertTrue(carrot.isCropHarvest());
+    assertEquals("CARROTS", carrot.effectiveMaterial());
+    assertEquals("CARROT", carrot.effectiveOutputMaterial());
+
+    var potato = OperationJournal.Harvest.forCrop("task-1", "world", 12, 64, 20, 2, 2, "POTATOES", "POTATO", 0);
+    assertTrue(potato.isCropHarvest());
+
+    // Non-crop harvest has null crop ages and isCropHarvest() == false
+    var wood = new OperationJournal.Harvest("task-1", "world", 0, 64, 0, 0, 0, "OAK_LOG");
+    assertFalse(wood.isCropHarvest());
+    assertNull(wood.beforeCropAge());
+    assertNull(wood.afterCropAge());
+
+    // Invariant: crop block must specify crop ages
+    assertThrows(IllegalArgumentException.class, () ->
+        new OperationJournal.Harvest("task-1", "world", 0, 64, 0, 0, 0, "WHEAT", "WHEAT", 0, null, null));
+
+    // Invariant: crop ages require valid crop block and matching output
+    assertThrows(IllegalArgumentException.class, () ->
+        new OperationJournal.Harvest("task-1", "world", 0, 64, 0, 0, 0, "OAK_LOG", "OAK_LOG", 0, 7, 0));
+    assertThrows(IllegalArgumentException.class, () ->
+        new OperationJournal.Harvest("task-1", "world", 0, 64, 0, 0, 0, "CARROTS", "WHEAT", 0, 7, 0));
+
+    // Invariant: crop ages must be exactly 7 and 0
+    assertThrows(IllegalArgumentException.class, () ->
+        new OperationJournal.Harvest("task-1", "world", 0, 64, 0, 0, 0, "WHEAT", "WHEAT", 0, 6, 0));
+    assertThrows(IllegalArgumentException.class, () ->
+        new OperationJournal.Harvest("task-1", "world", 0, 64, 0, 0, 0, "WHEAT", "WHEAT", 0, 7, 1));
+  }
+
+  @Test
+  void cropHarvestPersistsAndReloadsAccurately() throws Exception {
+    Path path = temp.resolve("crop-operations.json");
+    OperationJournal journal = new OperationJournal(path);
+    journal.load();
+
+    var harvest = OperationJournal.Harvest.forCrop("task-crop", "world", 5, 65, 10, 2, 2, "WHEAT", "WHEAT", 1);
+    journal.prepareHarvest(harvest);
+
+    OperationJournal restored = new OperationJournal(path);
+    restored.load();
+    var pending = restored.pendingHarvest().orElseThrow();
+    assertTrue(pending.isCropHarvest());
+    assertEquals(7, pending.beforeCropAge());
+    assertEquals(0, pending.afterCropAge());
+    assertEquals("WHEAT", pending.effectiveMaterial());
+    assertEquals("WHEAT", pending.effectiveOutputMaterial());
+
+    restored.completeHarvest();
+    assertEquals(1, restored.harvests().size());
+    assertTrue(restored.harvests().get(0).isCropHarvest());
+  }
+
+  @Test
+  void forgedCropHarvestJsonFailsClosedAndPreservesFile() throws Exception {
+    Path p = temp.resolve("forged-crop.json");
+    String forged = """
+        {"version":3,"harvests":[],"pendingHarvest":{"taskId":"t","world":"world","x":1,"y":2,"z":3,"beforeCollected":0,"beforeCargo":0,"material":"WHEAT","outputMaterial":"CARROT","beforeOutputCargo":0,"beforeCropAge":7,"afterCropAge":0}}
+        """;
+    Files.writeString(p, forged);
+    assertThrows(java.io.IOException.class, () -> new OperationJournal(p).load());
+    assertEquals(forged, Files.readString(p));
   }
 }
 

@@ -93,4 +93,59 @@ final class TaskRequestTest {
     assertFalse(TaskRequest.parseCraft("diamond", "4").isPresent());
     assertFalse(TaskRequest.parseCraft("crafting_table", "4").isPresent());
   }
+
+  @Test
+  void parseFarmAcceptsAllowedCropsAndValidAmounts() {
+    var any1 = TaskRequest.parseFarm("ekin", "8").orElseThrow();
+    assertEquals("crop:ANY", any1.preference());
+    assertEquals(8, any1.amount());
+    assertEquals("ekin", any1.itemName());
+
+    var any2 = TaskRequest.parseFarm("hasat", "1").orElseThrow();
+    assertEquals("crop:ANY", any2.preference());
+    assertEquals(1, any2.amount());
+    assertEquals("ekin", any2.itemName());
+
+    var wheat1 = TaskRequest.parseFarm("buğday", "16").orElseThrow();
+    assertEquals("crop:WHEAT", wheat1.preference());
+    assertEquals(16, wheat1.amount());
+    assertEquals("buğday", wheat1.itemName());
+
+    var wheat2 = TaskRequest.parseFarm("wheat", "64").orElseThrow();
+    assertEquals("crop:WHEAT", wheat2.preference());
+    assertEquals(64, wheat2.amount());
+    assertEquals("buğday", wheat2.itemName());
+
+    var carrot1 = TaskRequest.parseFarm("havuç", "32").orElseThrow();
+    assertEquals("crop:CARROT", carrot1.preference());
+    assertEquals(32, carrot1.amount());
+    assertEquals("havuç", carrot1.itemName());
+
+    var potato1 = TaskRequest.parseFarm("patates", "5").orElseThrow();
+    assertEquals("crop:POTATO", potato1.preference());
+    assertEquals(5, potato1.amount());
+    assertEquals("patates", potato1.itemName());
+  }
+
+  @Test
+  void parseFarmRejectsInvalidAmountsNonNumericAndUnsupportedCrops() {
+    // Out of range (must be 1..64)
+    assertFalse(TaskRequest.parseFarm("buğday", "0").isPresent());
+    assertFalse(TaskRequest.parseFarm("buğday", "-1").isPresent());
+    assertFalse(TaskRequest.parseFarm("buğday", "65").isPresent());
+    assertFalse(TaskRequest.parseFarm("buğday", "100").isPresent());
+
+    // Non-numeric or null
+    assertFalse(TaskRequest.parseFarm("buğday", "five").isPresent());
+    assertFalse(TaskRequest.parseFarm(null, "5").isPresent());
+    assertFalse(TaskRequest.parseFarm("buğday", null).isPresent());
+
+    // Unsupported crops
+    assertFalse(TaskRequest.parseFarm("beetroot", "5").isPresent());
+    assertFalse(TaskRequest.parseFarm("pancar", "5").isPresent());
+    assertFalse(TaskRequest.parseFarm("melon", "5").isPresent());
+    assertFalse(TaskRequest.parseFarm("pumpkin", "5").isPresent());
+    assertFalse(TaskRequest.parseFarm("oak_log", "5").isPresent());
+    assertFalse(TaskRequest.parseFarm("diamond", "5").isPresent());
+  }
 }

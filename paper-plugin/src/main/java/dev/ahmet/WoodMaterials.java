@@ -36,7 +36,7 @@ final class WoodMaterials {
 
   static boolean isAllowedName(String name) {
     if (name == null) return false;
-    return isWoodName(name) || ResourceCatalog.isCargoName(name);
+    return isWoodName(name) || ResourceCatalog.isCargoName(name) || FarmCatalog.isCropOutput(name);
   }
 
   static boolean isWoodName(String name) {

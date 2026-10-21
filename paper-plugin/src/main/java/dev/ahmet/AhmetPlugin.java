@@ -79,6 +79,8 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private Location home;
   private Location protectedHome;
   private int protectHomeRadius=10;
+  private FarmPlot farmPlot;
+  private boolean farmPlotStateValid=true;
   private boolean woodProtectionStateValid=true;
   private boolean taskStateValid=true;
   private boolean deciding=false;
@@ -128,8 +130,17 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     if(protectHomeRadius<0||protectHomeRadius>32){getLogger().warning("Invalid options.protect-home-radius; using 10 blocks.");protectHomeRadius=10;}
     try{playerPlacedWood.load(getConfig().getStringList("protection.playerPlacedWood"));}
     catch(Exception e){woodProtectionStateValid=false;blockRecovery("Player-placed wood protection data is invalid",e);}
+    farmPlotStateValid = true;
+    try {
+      farmPlot = FarmPlot.load(getConfig());
+    } catch (Exception e) {
+      farmPlotStateValid = false;
+      blockRecovery("Saved farm plot configuration is invalid", e);
+    }
     protectionHook.addHook((block, loc) -> getProtectedHomeArea() != null && getProtectedHomeArea().contains(block.getWorld().getName(), block.getX(), block.getY(), block.getZ()));
     protectionHook.addHook((block, loc) -> playerPlacedWood != null && playerPlacedWood.contains(block.getWorld().getName(), block.getX(), block.getY(), block.getZ()));
+    protectionHook.addHook((block, loc) -> FarmCatalog.isCropBlock(block.getType().name())
+        && (farmPlot == null || !farmPlot.contains(block.getWorld().getName(), block.getX(), block.getY(), block.getZ())));
     taskStateValid=true;
     try{task.load(getConfig());}catch(Exception e){taskStateValid=false;blockRecovery("Saved task state is invalid and must be inspected",e);}
     journal=new OperationJournal(getDataFolder().toPath().resolve("operations.json"));
@@ -154,6 +165,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     saveLoc("chest",chestLocation);saveLoc("home",home);saveLoc("protection.home",protectedHome);
     getConfig().set("options.protect-home-radius",protectHomeRadius);
     if(woodProtectionStateValid)getConfig().set("protection.playerPlacedWood",playerPlacedWood.serialize());
+    if(farmPlotStateValid)FarmPlot.save(getConfig(),farmPlot);
     task.save(getConfig());
     try {
       java.nio.file.Path configFile=getDataFolder().toPath().resolve("config.yml");
@@ -198,7 +210,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     if(!cmd.getName().equalsIgnoreCase("ahmet"))return false;
     if(args.length==0||args[0].equalsIgnoreCase("help")){sendHelp(sender);return true;}
     String op=args[0].toLowerCase();
-    if(op.equals("status")){sender.sendMessage("§6Ahmet: §f"+task.describe()+" | Durum: "+controller.state()+" | Program: "+scheduleAdapter.status()+" | Yatak: "+(scheduleBed==null?"bağlı değil":coords(scheduleBed))+" | Sandık: "+(chestLocation!=null?"bağlı":"bağlı değil")+" | NPC: "+(npc!=null&&npc.isSpawned()?"aktif":"yok")+" | Korunan ev: "+(protectedHome==null||protectHomeRadius==0?"yok":protectHomeRadius+" blok")+" | Yerleştirilmiş odun işareti: "+playerPlacedWood.size()+(recoveryBlocked?" | Kurtarma: manuel inceleme gerekli":""));return true;}
+    if(op.equals("status")){sender.sendMessage("§6Ahmet: §f"+task.describe()+" | Durum: "+controller.state()+" | Program: "+scheduleAdapter.status()+" | Yatak: "+(scheduleBed==null?"bağlı değil":coords(scheduleBed))+" | Sandık: "+(chestLocation!=null?"bağlı":"bağlı değil")+" | NPC: "+(npc!=null&&npc.isSpawned()?"aktif":"yok")+" | Korunan ev: "+(protectedHome==null||protectHomeRadius==0?"yok":protectHomeRadius+" blok")+" | Yerleştirilmiş odun işareti: "+playerPlacedWood.size()+" | Tarla: "+(farmPlot==null?"bağlı değil":farmPlot.centerX()+","+farmPlot.centerY()+","+farmPlot.centerZ()+" (r="+farmPlot.radius()+")")+(recoveryBlocked?" | Kurtarma: manuel inceleme gerekli":""));return true;}
     if(op.equals("cargo")){
       if(task.cargoItems().isEmpty())sender.sendMessage("§eAhmet'in taşıdığı kaynak yok.");
       else {
@@ -292,6 +304,86 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       say("Tamam, sandığa gidip "+request.amount()+" "+request.itemName()+" üreteceğim.");
       return true;
     }
+    if (op.equals("farmplot") || op.equals("plot")) {
+      if (!player.hasPermission("ahmet.admin")) { player.sendMessage("§cYetkin yok."); return true; }
+      if (args.length == 2) {
+        if (args[1].equalsIgnoreCase("off") || args[1].equals("0")) {
+          farmPlot = null; invalidateTargetScan(); persist(); player.sendMessage("§aOnaylı tarla alanı kaldırıldı."); return true;
+        }
+        int radius;
+        try {
+          radius = Integer.parseInt(args[1]);
+        } catch (NumberFormatException error) {
+          player.sendMessage("§cTarla yarıçapı 1-16 arasında olmalı (0 kapatır)."); return true;
+        }
+        if (radius < 1 || radius > 16) {
+          player.sendMessage("§cTarla yarıçapı 1-16 arasında olmalı (0 kapatır)."); return true;
+        }
+        int cx, cy, cz;
+        Block target = player.getTargetBlockExact(6);
+        if (target != null && target.getType() == Material.FARMLAND) {
+          cx = target.getX(); cy = target.getY() + 1; cz = target.getZ();
+        } else if (target != null && FarmCatalog.isCropBlock(target.getType().name())) {
+          cx = target.getX(); cy = target.getY(); cz = target.getZ();
+        } else {
+          Location loc = player.getLocation(); cx = loc.getBlockX(); cy = loc.getBlockY(); cz = loc.getBlockZ();
+        }
+        farmPlot = new FarmPlot(player.getWorld().getName(), cx, cy, cz, radius);
+        invalidateTargetScan(); persist();
+        player.sendMessage("§aOnaylı tarla alanı kaydedildi: " + cx + "," + cy + "," + cz + " (r=" + radius + ")"); return true;
+      } else if (args.length == 5) {
+        int cx, cy, cz, radius;
+        try {
+          cx = Integer.parseInt(args[1]);
+          cy = Integer.parseInt(args[2]);
+          cz = Integer.parseInt(args[3]);
+          radius = Integer.parseInt(args[4]);
+        } catch (NumberFormatException error) {
+          player.sendMessage("§cKullanım: /ahmet farmplot <x> <y> <z> <1-16>"); return true;
+        }
+        if (radius < 1 || radius > 16) {
+          player.sendMessage("§cKullanım: /ahmet farmplot <x> <y> <z> <1-16>"); return true;
+        }
+        farmPlot = new FarmPlot(player.getWorld().getName(), cx, cy, cz, radius);
+        invalidateTargetScan(); persist();
+        player.sendMessage("§aOnaylı tarla alanı kaydedildi: " + cx + "," + cy + "," + cz + " (r=" + radius + ")"); return true;
+      } else {
+        player.sendMessage("§eKullanım: /ahmet farmplot <1-16|0> veya /ahmet farmplot <x> <y> <z> <1-16>"); return true;
+      }
+    }
+    if (op.equals("farm") || op.equals("harvest")) {
+      if (args.length != 3) {
+        player.sendMessage("§eKullanım: /ahmet farm <wheat|carrot|potato|ekin> <1-64>"); return true;
+      }
+      TaskRequest.FarmRequest request = TaskRequest.parseFarm(args[1], args[2]).orElse(null);
+      if (request == null) {
+        player.sendMessage("§cSadece olgun buğday (wheat), havuç (carrot), patates (potato) veya genel ekin (1-64 adet) hasat edilebilir."); return true;
+      }
+      if (npc == null || !npc.isSpawned()) {
+        player.sendMessage("§cÖnce /ahmet spawn ile Ahmet'i oluştur."); return true;
+      }
+      if (!player.getWorld().equals(npc.getEntity().getWorld()) || player.getLocation().distanceSquared(npc.getEntity().getLocation()) > 18 * 18) {
+        player.sendMessage("§cGörev vermek için Ahmet'e yaklaş."); return true;
+      }
+      boolean chestBound = chestLocation != null && chestLocation.getWorld() != null && chestLocation.getWorld().equals(npc.getEntity().getWorld());
+      boolean plotBound = farmPlot != null && farmPlot.world().equals(npc.getEntity().getWorld().getName());
+      TaskAdmission.Result admission = TaskAdmission.evaluateFarm(true, recoveryBlocked, journal.hasOperations(), task.active, task.cargo, chestBound, plotBound);
+      switch (admission) {
+        case RECOVERY_REQUIRED -> { player.sendMessage("§cKurtarma bekliyor; yeni görev güvenli değil."); return true; }
+        case BUSY -> { player.sendMessage("§cÖnce mevcut görevi bitir veya /ahmet deliver ile taşıdığı yükü boşalt."); return true; }
+        case CHEST_REQUIRED -> { player.sendMessage("§cÖnce aynı dünyadaki teslimat sandığını /ahmet chest ile bağla."); return true; }
+        case PLOT_REQUIRED -> { player.sendMessage("§cÖnce aynı dünyada onaylı bir tarla alanını /ahmet farmplot <1-16> ile bağla."); return true; }
+        case ACCEPT -> {}
+        default -> { player.sendMessage("§cBu hasat görevi desteklenmiyor."); return true; }
+      }
+      scheduleAdapter.suspend(npc, "farm task admitted");
+      productionGoalAdapter.prepareTaskAdmission(true, getConfig().getBoolean("options.production-goals-enabled", false), this::clearPriorNavigationForTaskAdmission);
+      task.startFarm(player.getUniqueId(), request.amount(), request.preference());
+      navigationPurpose = AgentGoal.HARVEST_RESOURCE; treeTarget = null; failedTargets.clear(); treeRetryAfterMs = 0; waitDecisions = 0; decisionRetry.clear(); partialDeliveryPolicy.reset(); routeClears = 0;
+      controller.nextGeneration(); controller.transitionTo(AgentState.PLANNING, "Farm task started via command"); controller.clearHelp(); persist(); event("task_started", request.amount());
+      say("Tamam, onaylı tarladan " + request.amount() + " " + request.itemName() + " hasat edip yeniden ekeceğim.");
+      return true;
+    }
     if(op.equals("spawn")){
       if(!player.hasPermission("ahmet.admin")){player.sendMessage("§cYetkin yok.");return true;}
       if(npc==null&&savedNpcReference.pending()){
@@ -376,20 +468,24 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     sender.sendMessage("§e/ahmet cargo §7— taşıdığı kaynakların tür ve adetleri");
     sender.sendMessage("§e/ahmet collect <item|odun> <1-64> §7— doğrudan toplama görevi");
     sender.sendMessage("§e/ahmet craft <oak_planks|stick> <4-64> §7— bağlı sandıktaki malzemeyle üretim");
+    sender.sendMessage("§e/ahmet farm <wheat|carrot|potato|ekin> <1-64> §7— onaylı tarladan ekin hasadı");
     sender.sendMessage("§e/ahmet items [ara] §7— 1.21.6 item kataloğu ve toplama desteği");
     sender.sendMessage("§e/ahmet ask <mesaj> §7— Ahmet'le komut/sohbet");
     sender.sendMessage("§e/ahmet deliver §7— iptalden kalan yükü sandığa teslim et");
     sender.sendMessage("§e/ahmet cancel §7— kendi görevini iptal et");
     sender.sendMessage("§e/ahmet home §7— görevi bırakıp eve dön");
-    if(sender.hasPermission("ahmet.admin"))sender.sendMessage("§e/ahmet spawn | summon | chest | bed | protecthome <0-32> §7— yönetici işlemleri");
+    if(sender.hasPermission("ahmet.admin"))sender.sendMessage("§e/ahmet spawn | summon | chest | bed | farmplot <1-16|0> | protecthome <0-32> §7— yönetici işlemleri");
     sender.sendMessage("§7Ahmet doğal ağaç adaylarını seçer; oyuncu tarafından konan odunları ve korunan ev alanını atlar.");
   }
   @Override public List<String> onTabComplete(CommandSender sender,Command command,String alias,String[] args){
     if(!command.getName().equalsIgnoreCase("ahmet")||args.length==0)return List.of();
-    List<String> commands=new ArrayList<>(List.of("help","status","cargo","collect","craft","items","ask","deliver","cancel","home"));
-    if(sender.hasPermission("ahmet.admin"))commands.addAll(List.of("spawn","summon","chest","bed","protecthome"));
+    List<String> commands=new ArrayList<>(List.of("help","status","cargo","collect","craft","farm","items","ask","deliver","cancel","home"));
+    if(sender.hasPermission("ahmet.admin"))commands.addAll(List.of("spawn","summon","chest","bed","farmplot","protecthome"));
     if(args.length==1)return commands.stream().filter(value->value.startsWith(args[0].toLowerCase(java.util.Locale.ROOT))).toList();
     if(args.length==2&&args[0].equalsIgnoreCase("protecthome")&&sender.hasPermission("ahmet.admin"))return List.of("0","8","10","12","16").stream().filter(value->value.startsWith(args[1])).toList();
+    if(args.length==2&&args[0].equalsIgnoreCase("farmplot")&&sender.hasPermission("ahmet.admin"))return List.of("0","4","8","12","16").stream().filter(value->value.startsWith(args[1])).toList();
+    if(args.length==2&&args[0].equalsIgnoreCase("farm"))return List.of("wheat","carrot","potato","ekin","buğday","havuç","patates").stream().filter(value->value.startsWith(args[1].toLowerCase(java.util.Locale.ROOT))).toList();
+    if(args.length==3&&args[0].equalsIgnoreCase("farm"))return List.of("8","16","32","64").stream().filter(value->value.startsWith(args[2])).toList();
     if(args.length==2&&args[0].equalsIgnoreCase("collect")){
       List<String> resources=new ArrayList<>(List.of("odun","oak_log","spruce_log","birch_log","jungle_log","acacia_log","dark_oak_log","mangrove_log","cherry_log","pale_oak_log","crimson_stem","warped_stem","bamboo","dirt","sand","red_sand","cobblestone","coal","raw_iron","raw_gold"));
       return resources.stream().filter(value->value.startsWith(args[1].toLowerCase(java.util.Locale.ROOT))).toList();
@@ -473,7 +569,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         getConfig().getBoolean("perception.enabled",true),
         getConfig().getBoolean("perception.include-bound-chest",false),
         getConfig().getBoolean("perception.include-players",false),interactionGeneration);
-    JsonObject context=new JsonObject();context.addProperty("generation",interactionGeneration);context.add("perception",com.google.gson.JsonParser.parseString(perception.toJson()));context.addProperty("busy",task.active || task.cargo>0);context.addProperty("taskActive",task.active);context.addProperty("cargo",task.cargo);context.addProperty("chestBound",chestLocation!=null);req.add("context",context);
+    JsonObject context=new JsonObject();context.addProperty("generation",interactionGeneration);context.add("perception",com.google.gson.JsonParser.parseString(perception.toJson()));context.addProperty("busy",task.active || task.cargo>0);context.addProperty("taskActive",task.active);context.addProperty("cargo",task.cargo);context.addProperty("chestBound",chestLocation!=null);context.addProperty("plotBound",farmPlot!=null&&npc.getEntity().getWorld()!=null&&farmPlot.world().equals(npc.getEntity().getWorld().getName()));req.add("context",context);
     brain.post("/api/chat",req).whenComplete((reply,error)->Bukkit.getScheduler().runTask(this,()->{
       if(controller.jobGeneration()!=interactionGeneration)return;
       if(error!=null){player.sendMessage("§cAhmet'in beyni şu an yanıt vermiyor: "+error.getMessage());return;}
@@ -536,6 +632,28 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
             case RECOVERY_REQUIRED -> {getLogger().warning("Chat task request rejected because operation recovery/checkpoint is pending.");answer="Görev günlüğü kurtarma veya dünya kaydı bekliyor; güvenli duruma gelince tekrar dene.";}
             case BUSY -> answer="Önce mevcut görevi bitir veya taşıdığım kaynakları /ahmet deliver ile teslim et.";
             case CHEST_REQUIRED -> answer="Önce Ahmet'le aynı dünyada bir teslimat sandığı bağla: sandığa bakıp /ahmet chest kullan.";
+          }
+        }else if(spec.has("type")&&"harvest_crop".equals(spec.get("type").getAsString())){
+          String cropKey=spec.has("crop")&&spec.get("crop").isJsonPrimitive()?spec.get("crop").getAsString():null;
+          String amountText=spec.has("amount")&&spec.get("amount").isJsonPrimitive()?spec.get("amount").getAsString():null;
+          TaskRequest.FarmRequest farmReq=TaskRequest.parseFarm(cropKey,amountText).orElse(null);
+          boolean validIntent=farmReq!=null;
+          boolean chestBound=chestLocation!=null&&chestLocation.getWorld()!=null&&chestLocation.getWorld().equals(npc.getEntity().getWorld());
+          boolean plotBound=farmPlot!=null&&npc.getEntity().getWorld()!=null&&farmPlot.world().equals(npc.getEntity().getWorld().getName());
+          TaskAdmission.Result admission=TaskAdmission.evaluateFarm(validIntent,recoveryBlocked,journal.hasOperations(),task.active,task.cargo,chestBound,plotBound);
+          switch(admission){
+            case ACCEPT -> {
+              scheduleAdapter.suspend(npc,"farm task admitted");
+              productionGoalAdapter.prepareTaskAdmission(true,getConfig().getBoolean("options.production-goals-enabled",false),this::clearPriorNavigationForTaskAdmission);
+              task.startFarm(player.getUniqueId(),farmReq.amount(),farmReq.preference());
+              navigationPurpose=AgentGoal.HARVEST_RESOURCE;treeTarget=null;failedTargets.clear();treeRetryAfterMs=0;waitDecisions=0;decisionRetry.clear();partialDeliveryPolicy.reset();routeClears=0;
+              controller.nextGeneration();controller.transitionTo(AgentState.PLANNING,"Farm task started via chat");controller.clearHelp();persist();event("task_started",farmReq.amount());
+            }
+            case UNSUPPORTED -> answer="Şimdilik sadece onaylı tarladaki olgun buğday (wheat), havuç (carrot) ve patates (potato) ekinlerini (1–64 adet) hasat edebilirim.";
+            case RECOVERY_REQUIRED -> {getLogger().warning("Chat task request rejected because operation recovery/checkpoint is pending.");answer="Görev günlüğü kurtarma veya dünya kaydı bekliyor; güvenli duruma gelince tekrar dene.";}
+            case BUSY -> answer="Önce mevcut görevi bitir veya taşıdığım kaynakları /ahmet deliver ile teslim et.";
+            case CHEST_REQUIRED -> answer="Önce Ahmet'le aynı dünyada bir teslimat sandığı bağla: sandığa bakıp /ahmet chest kullan.";
+            case PLOT_REQUIRED -> answer="Hangi tarlayı hasat edeceğimi bilmiyorum. Önce yönetici /ahmet farmplot <1-16> komutuyla tarlayı onaylamalı.";
           }
         }else{
           String preference=null;int amount=0;
@@ -638,7 +756,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   private ProductionGoalAdapter.Facts captureProductionGoalFacts(Location current,boolean routeBlocked,
       boolean clearOfferedByLiveJev,boolean routeRetryAvailable,boolean foreignNavigationWaitExpired){
     boolean pending=journal==null||journal.hasPendingOperation();
-    boolean gatherActive = TaskAdmission.canExecuteGatherStep(task);
+    boolean gatherActive = TaskAdmission.canExecuteHarvestOrDeliverStep(task);
     boolean scanPending=gatherActive&&!task.readyToDeliver()&&(!targetScanner.complete()||!scanEvaluated);
     boolean scanExhausted=gatherActive&&!task.readyToDeliver()&&targetScanner.complete()&&scanEvaluated&&!productionCandidateAvailable;
     boolean navigationInProgress=navigationGoal!=null&&taskNavigationRoute.matches(npc);
@@ -678,7 +796,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
 
   private AgentGoal currentNavigationGoal(Location current){
-    if(task.active && TaskAdmission.canExecuteGatherStep(task)){
+    if(task.active && TaskAdmission.canExecuteHarvestOrDeliverStep(task)){
       if(task.readyToDeliver())return AgentGoal.DELIVER_CARGO;
       if(outsideHomeBoundary(current,getEffectiveHome()))return AgentGoal.RETURN_HOME;
       if(navigationPurpose==AgentGoal.EXPLORE_RESOURCES||navigationPurpose==AgentGoal.RETURN_HOME)return navigationPurpose;
@@ -719,7 +837,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       stepCraftTask(current, now);
       return;
     }
-    if(task.active && !TaskAdmission.canExecuteGatherStep(task)){
+    if(task.active && !TaskAdmission.canExecuteHarvestOrDeliverStep(task)){
       foreignNavigationWait.resetWaitForSafetyBlock();
       return;
     }
@@ -913,7 +1031,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
       return;
     }
 
-    if (!TaskAdmission.canExecuteGatherStep(task)) {
+    if (!TaskAdmission.canExecuteHarvestOrDeliverStep(task)) {
       return;
     }
 
@@ -986,6 +1104,18 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     if(waitForDecision)return;
     final JsonArray options=new JsonArray();
     if(found.isEmpty()){
+      if(task.isFarm()){
+        if(task.cargo>0){
+          beginPartialDelivery("Bağlı tarlada başka olgun ekin kalmadı");
+          return;
+        }else{
+          if(!authorizeProductionGoal(AgentGoal.REQUEST_PLAYER_HELP,current,now,false,false))return;
+          explorationAttempts=0;explorationTarget=null;
+          treeRetryAfterMs=now+30000;
+          warn("Bağlı tarlada şu an hasat edilebilecek olgun ekin bulamadım.");
+          return;
+        }
+      }
       if(explorationAttempts<MAX_EXPLORATION_ATTEMPTS){
         int nextAttempt=explorationAttempts+1;
         Location waypoint=ExplorationPlanner.findExplorationWaypoint(current,home,protectedHome,protectHomeRadius,maxDist,nextAttempt,this::isSafeGround);
@@ -1014,7 +1144,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     for(int i=0;i<found.size();i++){
       String id="target_"+(char)('a'+i);Block block=found.get(i);
       double distance=Math.sqrt(current.distanceSquared(block.getLocation()));
-      String itemName=ResourceCatalog.outputMaterial(task.materialPreference);
+      String itemName=expectedOutput(block,task.materialPreference);
       String output= itemName==null?block.getType().name():itemName;
       String desc="Walk to "+block.getType().name().toLowerCase(java.util.Locale.ROOT)+" and collect "+output.toLowerCase(java.util.Locale.ROOT)+", distance "+Math.round(distance)+" blocks";
       options.add(candidate(id,desc));
@@ -1026,9 +1156,16 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     controller.registerOfferedActions(offeredActionList);
     controller.transitionTo(AgentState.AWAITING_DECISION,"Awaiting target choice");
     JsonObject req=new JsonObject();JsonObject observation=new JsonObject();
-    boolean woodTask=!task.materialPreference.startsWith("item:");
-    observation.addProperty("task",woodTask?"collect_wood":"collect_item");observation.addProperty("materialPreference",task.materialPreference);observation.addProperty("requested",task.requested);observation.addProperty("collected",task.collected);
-    observation.addProperty("cargo",task.cargo);observation.addProperty("deposited",task.deposited);observation.addProperty("requiredAction",woodTask?"select_tree":"select_resource");
+    if(task.isFarm()){
+      observation.addProperty("task","harvest_crop");
+      observation.addProperty("requiredAction","select_crop");
+    } else {
+      boolean woodTask=!task.materialPreference.startsWith("item:");
+      observation.addProperty("task",woodTask?"collect_wood":"collect_item");
+      observation.addProperty("requiredAction",woodTask?"select_tree":"select_resource");
+    }
+    observation.addProperty("materialPreference",task.materialPreference);observation.addProperty("requested",task.requested);observation.addProperty("collected",task.collected);
+    observation.addProperty("cargo",task.cargo);observation.addProperty("deposited",task.deposited);
     observation.addProperty("chestBound",chestLocation!=null);observation.addProperty("position",coords(current));
     final long generation=controller.jobGeneration();
     GroundedPerception.Snapshot perception=BukkitPerception.capture(npc,taskViewer(),chestLocation,
@@ -1316,7 +1453,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     Location here=npc.getEntity().getLocation();
     switch(action){
       case "harvest" -> {
-        if(!TaskAdmission.canExecuteGatherStep(task))return;
+        if(!TaskAdmission.canExecuteHarvestOrDeliverStep(task))return;
         if(treeTarget==null || here.distanceSquared(treeTarget)>3.5*3.5){treeTarget=null;return;}
         Block block=treeTarget.getBlock();
         ExecutionResult pre=controller.preconditions().validateGather(here,block,task.materialPreference,task.cargo);
@@ -1325,7 +1462,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         harvest(block);
       }
       case "deposit" -> {
-        if(!TaskAdmission.canExecuteGatherStep(task))return;
+        if(!TaskAdmission.canExecuteHarvestOrDeliverStep(task))return;
         Block block=chestLocation.getBlock();
         ExecutionResult pre=controller.preconditions().validateDeposit(here,block,task.cargo);
         if(!pre.isSuccess()||!(block.getState() instanceof Chest chest)){warn("İşaretli sandık artık orada değil.");return;}
@@ -1352,15 +1489,31 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     }
   }
   private void harvest(Block block){
-    if(!TaskAdmission.canExecuteGatherStep(task))return;
+    if(!TaskAdmission.canExecuteHarvestOrDeliverStep(task))return;
     String outputMaterial=expectedOutput(block,task.materialPreference);
     if(outputMaterial==null){treeTarget=null;return;}
-    OperationJournal.Harvest operation=new OperationJournal.Harvest(task.taskId,block.getWorld().getName(),
-      block.getX(),block.getY(),block.getZ(),task.collected,task.cargo,block.getType().name(),outputMaterial,task.cargoCount(outputMaterial));
+    OperationJournal.Harvest operation;
+    if(task.isFarm()){
+      operation=OperationJournal.Harvest.forCrop(task.taskId,block.getWorld().getName(),
+        block.getX(),block.getY(),block.getZ(),task.collected,task.cargo,block.getType().name(),outputMaterial,task.cargoCount(outputMaterial));
+    }else{
+      operation=new OperationJournal.Harvest(task.taskId,block.getWorld().getName(),
+        block.getX(),block.getY(),block.getZ(),task.collected,task.cargo,block.getType().name(),outputMaterial,task.cargoCount(outputMaterial));
+    }
     try{
       journal.prepareHarvest(operation);
       // Write-ahead record precedes the world mutation; task YAML follows it.
-      block.setType(Material.AIR,false);
+      if(task.isFarm()){
+        if(block.getBlockData() instanceof org.bukkit.block.data.Ageable ageable){
+          org.bukkit.block.data.Ageable replanted=(org.bukkit.block.data.Ageable)ageable.clone();
+          replanted.setAge(0);
+          block.setBlockData(replanted,false);
+        }else{
+          throw new IllegalStateException("Harvest target is not ageable crop: "+block.getType());
+        }
+      }else{
+        block.setType(Material.AIR,false);
+      }
       task.harvestOne(outputMaterial);
       persist();
       journal.completeHarvest();
@@ -1378,7 +1531,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     }
   }
   private void deposit(Chest chest){
-    if(!TaskAdmission.canExecuteGatherStep(task))return;
+    if(!TaskAdmission.canExecuteHarvestOrDeliverStep(task))return;
     if(task.cargo<=0)return;
     String material=task.nextCargoMaterial();if(material==null)return;
     int amount=task.cargoItems().getOrDefault(material,0);if(amount<=0)return;
@@ -1541,7 +1694,15 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         World world=Bukkit.getWorld(operation.world());
         if(world==null){blockRecovery("Harvest journal world is unavailable: "+operation.world(),null);return;}
         Block block=world.getBlockAt(operation.x(),operation.y(),operation.z());
-        var disposition=OperationRecovery.classifyHarvest(operation,task.taskId,task.collected,task.cargo,task.cargoCount(operation.effectiveOutputMaterial()),block.getType().name());
+        OperationRecovery.HarvestDisposition disposition;
+        if(operation.isCropHarvest()){
+          if(operation.y()<=world.getMinHeight()||operation.y()>=world.getMaxHeight()){blockRecovery("Crop harvest journal y coordinate is out of world bounds",null);return;}
+          Block below=world.getBlockAt(operation.x(),operation.y()-1,operation.z());
+          Integer cropAge=block.getBlockData() instanceof org.bukkit.block.data.Ageable a?a.getAge():null;
+          disposition=OperationRecovery.classifyCropHarvest(operation,task.taskId,task.collected,task.cargo,task.cargoCount(operation.effectiveOutputMaterial()),block.getType().name(),below.getType().name(),cropAge);
+        }else{
+          disposition=OperationRecovery.classifyHarvest(operation,task.taskId,task.collected,task.cargo,task.cargoCount(operation.effectiveOutputMaterial()),block.getType().name());
+        }
         switch(disposition){
           case NOT_APPLIED -> journal.discardPendingHarvest();
           case APPLY -> {task.harvestOne(operation.effectiveOutputMaterial());persist();journal.completeHarvest();}
@@ -1554,8 +1715,18 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
         if(world==null||!operation.taskId().equals(task.taskId)||task.collected<operation.afterCollected()){
           blockRecovery("Committed harvest does not match saved task state",null);return;
         }
-        if(world.getBlockAt(operation.x(),operation.y(),operation.z()).getType()!=Material.AIR){
-          blockRecovery("A previously harvested block changed before its world save",null);return;
+        Block block=world.getBlockAt(operation.x(),operation.y(),operation.z());
+        if(operation.isCropHarvest()){
+          if(operation.y()<=world.getMinHeight()||operation.y()>=world.getMaxHeight()){blockRecovery("Crop harvest journal y coordinate is out of world bounds",null);return;}
+          Block below=world.getBlockAt(operation.x(),operation.y()-1,operation.z());
+          Integer cropAge=block.getBlockData() instanceof org.bukkit.block.data.Ageable a?a.getAge():null;
+          if(!OperationRecovery.isCommittedCropHarvestValid(operation,block.getType().name(),below.getType().name(),cropAge)){
+            blockRecovery("A previously harvested crop block changed before its world save",null);return;
+          }
+        }else{
+          if(block.getType()!=Material.AIR){
+            blockRecovery("A previously harvested block changed before its world save",null);return;
+          }
         }
       }
       var pendingDeposit=journal.pendingDeposit();
@@ -1841,12 +2012,26 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
     return List.copyOf(current);
   }
   private boolean matchesTarget(Block block,String preference){
+    if(FarmCatalog.isPreference(preference)){
+      if(farmPlot==null||!farmPlot.contains(block.getWorld().getName(),block.getX(),block.getY(),block.getZ()))return false;
+      if(!FarmCatalog.matchesCropBlock(block.getType().name(),preference))return false;
+      return block.getBlockData() instanceof org.bukkit.block.data.Ageable ageable
+          && ageable.getMaximumAge()==7 && ageable.getAge()==7;
+    }
     if(WoodMaterials.matchesPreference(block.getType(),preference))return true;
     return ResourceCatalog.matchesBlockName(block.getType().name(),preference);
   }
   private boolean isEligibleTarget(Block block,String preference){
     if(!block.getWorld().isChunkLoaded(block.getX()>>4,block.getZ()>>4))return false;
     if(!matchesTarget(block,preference))return false;
+    if(FarmCatalog.isPreference(preference)){
+      if(farmPlot==null||!farmPlot.contains(block.getWorld().getName(),block.getX(),block.getY(),block.getZ()))return false;
+      if(isProtectedWood(block))return false;
+      if(block.getY()<=block.getWorld().getMinHeight())return false;
+      Block below=block.getWorld().getBlockAt(block.getX(),block.getY()-1,block.getZ());
+      if(!(block.getBlockData() instanceof org.bukkit.block.data.Ageable ageable))return false;
+      return FarmCatalog.isMatureAndFarmable(block.getType().name(),preference,below.getType().name(),ageable.getAge(),ageable.getMaximumAge());
+    }
     if(ResourceCatalog.isPreference(preference))return expectedOutput(block,preference)!=null;
     if(WoodMaterials.isCollectableWood(block.getType())&&isProtectedWood(block))return false;
     return hasNaturalWoodMarkers(block);
@@ -1860,6 +2045,7 @@ public final class AhmetPlugin extends JavaPlugin implements Listener, TabComple
   }
 
   private String expectedOutput(Block block,String preference){
+    if(FarmCatalog.isPreference(preference))return isEligibleTarget(block,preference)?FarmCatalog.outputForBlock(block.getType().name(),preference):null;
     if(WoodMaterials.matchesPreference(block.getType(),preference))return block.getType().name();
     var resource=ResourceCatalog.forPreference(preference).orElse(null);
     if(resource==null||!resource.blockMaterials().contains(block.getType().name()))return null;

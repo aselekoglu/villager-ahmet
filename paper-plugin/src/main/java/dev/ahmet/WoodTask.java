@@ -4,7 +4,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 final class WoodTask {
-  enum Kind { GATHER, CRAFT }
+  enum Kind { GATHER, CRAFT, FARM }
   Kind kind = Kind.GATHER;
   CraftRecipe craftRecipe = null;
   String taskId="";
@@ -18,6 +18,7 @@ final class WoodTask {
 
   boolean isGather() { return kind == Kind.GATHER; }
   boolean isCraft() { return kind == Kind.CRAFT; }
+  boolean isFarm() { return kind == Kind.FARM; }
   CraftRecipe craftRecipe() { return craftRecipe; }
 
   void start(UUID user,int count){start(user,count,"any");}
@@ -27,6 +28,15 @@ final class WoodTask {
     if(!WoodMaterials.isPreference(preference))throw new IllegalArgumentException("Unsupported wood preference");
     if(active||cargo>0)throw new IllegalStateException("Finish or recover the current task before starting another");
     taskId=UUID.randomUUID().toString();active=true;partialDelivery=false;kind=Kind.GATHER;craftRecipe=null;owner=user.toString();materialPreference=preference;requested=count;collected=0;deposited=0;cargo=0;cleared=0;cargoItems.clear();
+  }
+
+  void startFarm(UUID user,int count){startFarm(user,count,FarmCatalog.ANY_PREFERENCE);}
+  void startFarm(UUID user,int count,String preference){
+    if(user==null)throw new IllegalArgumentException("Task owner is required");
+    if(count<1||count>64)throw new IllegalArgumentException("Task amount must be between 1 and 64");
+    if(!FarmCatalog.isPreference(preference))throw new IllegalArgumentException("Unsupported crop preference");
+    if(active||cargo>0)throw new IllegalStateException("Finish or recover the current task before starting another");
+    taskId=UUID.randomUUID().toString();active=true;partialDelivery=false;kind=Kind.FARM;craftRecipe=null;owner=user.toString();materialPreference=preference;requested=count;collected=0;deposited=0;cargo=0;cleared=0;cargoItems.clear();
   }
 
   void startCraft(UUID user,CraftRecipe recipe,int exactOutputCount){
@@ -49,28 +59,46 @@ final class WoodTask {
     cleared++;
   }
 
-  void harvestOne(){harvestOne("OAK_LOG");}
+  void harvestOne(){
+    if(kind==Kind.FARM) {
+      if(FarmCatalog.ANY_PREFERENCE.equals(materialPreference)) {
+        harvestOne("WHEAT");
+      } else {
+        harvestOne(materialPreference.substring("crop:".length()));
+      }
+    } else {
+      harvestOne("OAK_LOG");
+    }
+  }
   void harvestOne(String material){
-    if(kind!=Kind.GATHER)throw new IllegalStateException("Craft task cannot harvest blocks");
+    if(kind==Kind.CRAFT)throw new IllegalStateException("Craft task cannot harvest blocks");
     if(!active||requested<1||requested>64||collected>=requested||cargo>=64)
       throw new IllegalStateException("Task cannot collect another wood block");
-    if(!WoodMaterials.isAllowedName(material))throw new IllegalArgumentException("Unsupported wood item");
+    if(kind==Kind.FARM){
+      if(!FarmCatalog.isCropOutput(material))throw new IllegalArgumentException("Unsupported crop item");
+      if(!FarmCatalog.ANY_PREFERENCE.equals(materialPreference)){
+        String expected=materialPreference.substring("crop:".length());
+        if(!expected.equals(material))throw new IllegalArgumentException("Harvested crop does not match crop preference");
+      }
+    } else {
+      if(!WoodMaterials.isAllowedName(material))throw new IllegalArgumentException("Unsupported wood item");
+    }
     collected++;cargo++;cargoItems.merge(material,1,Integer::sum);
   }
   void cancel(){active=false;}
   void requestPartialDelivery(){
-    if(kind!=Kind.GATHER)throw new IllegalStateException("Craft task cannot request partial cargo delivery");
+    if(kind==Kind.CRAFT)throw new IllegalStateException("Craft task cannot request partial cargo delivery");
     if(!active||collected<=0||cargo<=0)throw new IllegalStateException("There is no collected cargo to deliver partially");
     partialDelivery=true;
   }
   void resumeDelivery(){
-    if(kind!=Kind.GATHER)throw new IllegalStateException("Craft task cannot resume cargo delivery");
+    if(kind==Kind.CRAFT)throw new IllegalStateException("Craft task cannot resume cargo delivery");
     if(active||cargo<=0)throw new IllegalStateException("There is no cancelled cargo to deliver");
     requested=collected;active=true;
   }
-  void deposit(int moved){deposit("OAK_LOG",moved);}
+  void deposit(int moved){deposit(nextCargoMaterial()!=null?nextCargoMaterial():"OAK_LOG",moved);}
   void deposit(String material,int moved){
-    if(kind!=Kind.GATHER)throw new IllegalStateException("Craft task cannot deposit gather cargo");
+    if(kind==Kind.CRAFT)throw new IllegalStateException("Craft task cannot deposit gather cargo");
     if(moved<0||moved>cargo)throw new IllegalArgumentException("Deposit exceeds carried cargo");
     int held=cargoItems.getOrDefault(material,0);
     if(!WoodMaterials.isAllowedName(material)||moved>held)throw new IllegalArgumentException("Deposit exceeds this wood type's cargo");
@@ -86,7 +114,7 @@ final class WoodTask {
     }
     return (collected >= requested || partialDelivery) && cargo == 0;
   }
-  boolean readyToDeliver() { return kind == Kind.GATHER && (collected >= requested || partialDelivery); }
+  boolean readyToDeliver() { return (kind == Kind.GATHER || kind == Kind.FARM) && (collected >= requested || partialDelivery); }
   void finish(){
     if(!readyToFinish())throw new IllegalStateException("Task is not ready to finish");
     active=false;partialDelivery=false;
@@ -95,6 +123,11 @@ final class WoodTask {
     if(!active)return "boşta (taşınan kaynak: "+cargo+")";
     if(kind==Kind.CRAFT)
       return (craftRecipe!=null?craftRecipe.key().substring("minecraft:".length()):"üretim")+" "+deposited+"/"+requested+" üretildi";
+    if(kind==Kind.FARM) {
+      String resource = FarmCatalog.displayItemName(materialPreference);
+      if (resource == null) resource = "ekin";
+      return resource+" "+collected+"/"+requested+" toplandı, "+deposited+" teslim"+(partialDelivery?" (kısmi teslimat)":"");
+    }
     String resource=materialPreference.startsWith("item:")?materialPreference.substring("item:".length()).toLowerCase(java.util.Locale.ROOT):"kütük";
     return resource+" "+collected+"/"+requested+" toplandı, "+deposited+" teslim"+(partialDelivery?" (kısmi teslimat)":"");
   }
@@ -109,10 +142,6 @@ final class WoodTask {
     String loadedPreference = c.getString("task.materialPreference", "any");
     int loadedCleared = c.getInt("task.cleared", 0);
 
-    if (!WoodMaterials.isPreference(loadedPreference)) {
-      throw new IllegalStateException("Saved wood preference is unsupported");
-    }
-
     Kind loadedKind;
     Object rawKind = c.get("task.kind");
     if (rawKind == null) {
@@ -122,6 +151,8 @@ final class WoodTask {
         loadedKind = Kind.GATHER;
       } else if ("CRAFT".equals(s)) {
         loadedKind = Kind.CRAFT;
+      } else if ("FARM".equals(s)) {
+        loadedKind = Kind.FARM;
       } else {
         throw new IllegalStateException("Saved task kind is unsupported");
       }
@@ -135,6 +166,9 @@ final class WoodTask {
 
     Object rawRecipe = c.get("task.craftRecipe");
     if (loadedKind == Kind.GATHER) {
+      if (!WoodMaterials.isPreference(loadedPreference)) {
+        throw new IllegalStateException("Saved wood preference is unsupported");
+      }
       if (rawRecipe != null && (!(rawRecipe instanceof String s) || !s.isEmpty())) {
         throw new IllegalStateException("Gather task cannot have a craft recipe");
       }
@@ -167,6 +201,58 @@ final class WoodTask {
       }
       if (loadedCleared < 0 || loadedCleared > 64) {
         throw new IllegalStateException("Saved task cleared count is invalid");
+      }
+    } else if (loadedKind == Kind.FARM) {
+      if (!FarmCatalog.isPreference(loadedPreference)) {
+        throw new IllegalStateException("Saved farm task crop preference is unsupported");
+      }
+      if (rawRecipe != null && (!(rawRecipe instanceof String s) || !s.isEmpty())) {
+        throw new IllegalStateException("Farm task cannot have a craft recipe");
+      }
+      if (loadedRequested < 0 || loadedRequested > 64 || loadedCollected < 0 || loadedCollected > loadedRequested
+          || loadedDeposited < 0 || loadedDeposited > 64 || loadedCargo < 0 || loadedCargo > 64
+          || loadedCollected != loadedDeposited + loadedCargo) {
+        throw new IllegalStateException("Saved task counters violate cargo conservation");
+      }
+      if (loadedCleared != 0) {
+        throw new IllegalStateException("Saved farm task cannot have obstruction clears");
+      }
+      Object stored = c.get("task.cargoItems");
+      int itemsTotal = 0;
+      if (stored instanceof org.bukkit.configuration.ConfigurationSection section) {
+        for (String key : section.getKeys(false)) {
+          if (!FarmCatalog.isCropOutput(key)) {
+            throw new IllegalStateException("Saved farm task cargo contains non-crop material: " + key);
+          }
+          itemsTotal += parseCargoItem(key, section.get(key), loadedCargoItems);
+        }
+      } else if (stored instanceof Map<?,?> items) {
+        for (var entry : items.entrySet()) {
+          if (!(entry.getKey() instanceof String key)) throw new IllegalStateException("Saved cargo has an invalid material key");
+          if (!FarmCatalog.isCropOutput(key)) {
+            throw new IllegalStateException("Saved farm task cargo contains non-crop material: " + key);
+          }
+          itemsTotal += parseCargoItem(key, entry.getValue(), loadedCargoItems);
+        }
+      } else if (stored != null) {
+        throw new IllegalStateException("Saved cargo map has an unsupported format");
+      }
+      if (stored != null && itemsTotal != loadedCargo) {
+        throw new IllegalStateException("Saved cargo map does not match total cargo");
+      }
+      if (stored == null && loadedCargo > 0) {
+        throw new IllegalStateException("Saved farm task is missing cargo items map");
+      }
+      if (!FarmCatalog.ANY_PREFERENCE.equals(loadedPreference)) {
+        String expectedCrop = loadedPreference.substring("crop:".length());
+        for (String key : loadedCargoItems.keySet()) {
+          if (!expectedCrop.equals(key)) {
+            throw new IllegalStateException("Saved farm cargo does not match crop preference");
+          }
+        }
+      }
+      if (loadedTaskId.isBlank() && (loadedActive || loadedCargo > 0)) {
+        loadedTaskId = UUID.randomUUID().toString();
       }
     } else {
       if (!"any".equals(loadedPreference)) {

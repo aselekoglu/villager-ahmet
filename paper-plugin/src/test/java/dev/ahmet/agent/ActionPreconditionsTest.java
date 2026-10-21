@@ -125,6 +125,33 @@ public class ActionPreconditionsTest {
     assertFalse(pre.validateGather(actor, mockBlock(world, Material.OAK_LOG, 10, 64, 10), "item:DIRT", 0).isSuccess());
   }
 
+  @Test
+  void gatherPreferenceValidatesCropsAndRespectsPlotProtection() {
+    World world = mockWorld("world", true);
+    Location actor = new Location(world, 10.0, 64.0, 10.0);
+    Block wheatBlock = mockBlock(world, Material.WHEAT, 10, 64, 10);
+    Block carrotBlock = mockBlock(world, Material.CARROTS, 10, 64, 10);
+    Block potatoBlock = mockBlock(world, Material.POTATOES, 10, 64, 10);
+
+    // Inside plot (not protected)
+    ActionPreconditions allowInsidePlot = new ActionPreconditions((b, l) -> false, ActionBudget.DEFAULT);
+    assertTrue(allowInsidePlot.validateGather(actor, wheatBlock, "crop:WHEAT", 0).isSuccess());
+    assertTrue(allowInsidePlot.validateGather(actor, carrotBlock, "crop:CARROT", 0).isSuccess());
+    assertTrue(allowInsidePlot.validateGather(actor, potatoBlock, "crop:POTATO", 0).isSuccess());
+    assertTrue(allowInsidePlot.validateGather(actor, wheatBlock, "crop:ANY", 0).isSuccess());
+    assertFalse(allowInsidePlot.validateGather(actor, wheatBlock, "crop:CARROT", 0).isSuccess());
+
+    // Outside plot (protected by hook)
+    dev.ahmet.FarmPlot plot = new dev.ahmet.FarmPlot("world", 100, 64, 100, 5);
+    ProtectionHook plotHook = (b, l) -> dev.ahmet.FarmCatalog.isCropBlock(b.getType().name())
+        && !plot.contains(b.getWorld().getName(), b.getX(), b.getY(), b.getZ());
+    ActionPreconditions preWithPlot = new ActionPreconditions(plotHook, ActionBudget.DEFAULT);
+
+    ExecutionResult outsideRes = preWithPlot.validateGather(actor, wheatBlock, "crop:WHEAT", 0);
+    assertFalse(outsideRes.isSuccess());
+    assertTrue(outsideRes.message().contains("protected"));
+  }
+
 
   @Test
   void clearRecomputesSupportRelationshipAndAlwaysSimulatesCurrentSupport() {

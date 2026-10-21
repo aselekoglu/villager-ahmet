@@ -46,6 +46,7 @@ public final class ResourceCatalog {
   /** Matches a supported gather preference using the same wood/resource rules as task planning. */
   public static boolean matchesGatherTarget(String blockMaterial, String preference) {
     if (blockMaterial == null || preference == null || preference.isBlank()) return false;
+    if (FarmCatalog.isPreference(preference)) return FarmCatalog.matchesCropBlock(blockMaterial, preference);
     if (isPreference(preference)) return matchesBlockName(blockMaterial, preference);
     if (WoodMaterials.isPreference(preference)) {
       org.bukkit.Material woodMaterial = org.bukkit.Material.matchMaterial(blockMaterial);

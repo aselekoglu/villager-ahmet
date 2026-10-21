@@ -48,6 +48,24 @@ final class OperationJournal {
           || loaded.pendingClear != null || !loaded.harvests.isEmpty() || !loaded.clears.isEmpty())) {
         throw new IOException("Craft journal cannot coexist with other operations; it was preserved for manual recovery");
       }
+      if (loaded.pendingHarvest != null) {
+        loaded.pendingHarvest = new Harvest(
+            loaded.pendingHarvest.taskId(), loaded.pendingHarvest.world(),
+            loaded.pendingHarvest.x(), loaded.pendingHarvest.y(), loaded.pendingHarvest.z(),
+            loaded.pendingHarvest.beforeCollected(), loaded.pendingHarvest.beforeCargo(),
+            loaded.pendingHarvest.material(), loaded.pendingHarvest.outputMaterial(),
+            loaded.pendingHarvest.beforeOutputCargo(), loaded.pendingHarvest.beforeCropAge(),
+            loaded.pendingHarvest.afterCropAge());
+      }
+      List<Harvest> revalidatedHarvests = new ArrayList<>();
+      for (Harvest h : loaded.harvests) {
+        revalidatedHarvests.add(new Harvest(
+            h.taskId(), h.world(), h.x(), h.y(), h.z(),
+            h.beforeCollected(), h.beforeCargo(),
+            h.material(), h.outputMaterial(),
+            h.beforeOutputCargo(), h.beforeCropAge(), h.afterCropAge()));
+      }
+      loaded.harvests = revalidatedHarvests;
       if (loaded.pendingCraft != null) {
         loaded.pendingCraft = new Craft(
             loaded.pendingCraft.taskId(), loaded.pendingCraft.owner(), loaded.pendingCraft.kind(),
@@ -207,29 +225,57 @@ final class OperationJournal {
   }
 
   record Harvest(String taskId, String world, int x, int y, int z, int beforeCollected, int beforeCargo,
-      String material, String outputMaterial, Integer beforeOutputCargo) {
+      String material, String outputMaterial, Integer beforeOutputCargo, Integer beforeCropAge, Integer afterCropAge) {
     Harvest(String taskId, String world, int x, int y, int z, int beforeCollected, int beforeCargo) {
-      this(taskId, world, x, y, z, beforeCollected, beforeCargo, "OAK_LOG", "OAK_LOG", beforeCargo);
+      this(taskId, world, x, y, z, beforeCollected, beforeCargo, "OAK_LOG", "OAK_LOG", beforeCargo, null, null);
     }
 
     Harvest(String taskId, String world, int x, int y, int z, int beforeCollected, int beforeCargo,
         String material) {
-      this(taskId, world, x, y, z, beforeCollected, beforeCargo, material, material, beforeCargo);
+      this(taskId, world, x, y, z, beforeCollected, beforeCargo, material, material, beforeCargo, null, null);
     }
 
     Harvest(String taskId, String world, int x, int y, int z, int beforeCollected, int beforeCargo,
         String material, String outputMaterial) {
-      this(taskId,world,x,y,z,beforeCollected,beforeCargo,material,outputMaterial,beforeCargo);
+      this(taskId, world, x, y, z, beforeCollected, beforeCargo, material, outputMaterial, beforeCargo, null, null);
+    }
+
+    Harvest(String taskId, String world, int x, int y, int z, int beforeCollected, int beforeCargo,
+        String material, String outputMaterial, Integer beforeOutputCargo) {
+      this(taskId, world, x, y, z, beforeCollected, beforeCargo, material, outputMaterial, beforeOutputCargo, null, null);
+    }
+
+    static Harvest forCrop(String taskId, String world, int x, int y, int z, int beforeCollected, int beforeCargo,
+        String blockMaterial, String outputMaterial, int beforeOutputCargo) {
+      return new Harvest(taskId, world, x, y, z, beforeCollected, beforeCargo, blockMaterial, outputMaterial, beforeOutputCargo, 7, 0);
     }
 
     Harvest {
       if (taskId == null || taskId.isBlank() || world == null || world.isBlank()
           || beforeCollected < 0 || beforeCollected >= 64 || beforeCargo < 0 || beforeCargo >= 64
-          || material != null && !WoodMaterials.isAllowedName(material) && !ResourceCatalog.isBlockMaterial(material)
-          || outputMaterial != null && !WoodMaterials.isAllowedName(outputMaterial)
-          || beforeOutputCargo != null && (beforeOutputCargo < 0 || beforeOutputCargo > beforeCargo)) {
+          || (material != null && !WoodMaterials.isAllowedName(material) && !ResourceCatalog.isBlockMaterial(material) && !FarmCatalog.isCropBlock(material))
+          || (outputMaterial != null && !WoodMaterials.isAllowedName(outputMaterial) && !FarmCatalog.isCropOutput(outputMaterial))
+          || (beforeOutputCargo != null && (beforeOutputCargo < 0 || beforeOutputCargo > beforeCargo))) {
         throw new IllegalArgumentException("Invalid harvest journal entry");
       }
+      if (beforeCropAge != null || afterCropAge != null) {
+        if (beforeCropAge == null || afterCropAge == null
+            || beforeCropAge != 7 || afterCropAge != 0
+            || beforeOutputCargo == null
+            || material == null || !FarmCatalog.isCropBlock(material)
+            || outputMaterial == null || !FarmCatalog.isCropOutput(outputMaterial)
+            || !FarmCatalog.matchesCropBlock(material, outputMaterial)) {
+          throw new IllegalArgumentException("Invalid crop harvest journal entry");
+        }
+      } else {
+        if (material != null && FarmCatalog.isCropBlock(material)) {
+          throw new IllegalArgumentException("Crop harvest entry must specify crop ages 7 and 0");
+        }
+      }
+    }
+
+    boolean isCropHarvest() {
+      return beforeCropAge != null && afterCropAge != null;
     }
 
     String effectiveMaterial() { return material == null ? "OAK_LOG" : material; }

@@ -21,6 +21,8 @@ const safeTask = value => {
     return {type, itemId: value.itemId, amount};
   if (type === 'craft_item' && (value.recipe === 'minecraft:oak_planks' || value.recipe === 'minecraft:stick') && amount >= 4 && amount <= 64 && amount % 4 === 0)
     return {type, recipe: value.recipe, amount};
+  if (type === 'harvest_crop' && typeof value.crop === 'string' && ['any', 'minecraft:wheat', 'minecraft:carrot', 'minecraft:potato'].includes(value.crop))
+    return {type, crop: value.crop, amount};
   return null;
 };
 const validHistoryRow = row => row && typeof row === 'object' && !Array.isArray(row)

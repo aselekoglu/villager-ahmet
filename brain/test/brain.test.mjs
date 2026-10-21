@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {parseTask,validateTask,validateCraftTask,isCraftCommand} from '../src/intent.mjs';
+import {parseTask,validateTask,validateCraftTask,validateFarmTask,isCraftCommand,isFarmCommand} from '../src/intent.mjs';
 import {chat,decide} from '../src/engine.mjs';
 import {MemoryStore} from '../src/store.mjs';
 import {mkdtemp,rm} from 'node:fs/promises';import {tmpdir} from 'node:os';import {join} from 'node:path';
@@ -245,6 +245,125 @@ test('chat accepts craft_item via LLM and heuristic fallback when chest bound, a
     assert.equal(history.length, 5);
     assert.deepEqual(history[0].task, {type: 'craft_item', recipe: 'minecraft:oak_planks', amount: 16});
     assert.deepEqual(history[2].task, {type: 'craft_item', recipe: 'minecraft:stick', amount: 8});
+  } finally {
+    await rm(d, {recursive: true, force: true});
+  }
+});
+
+test('farm requests parse Turkish and English phrases for crops and reject unsupported crops or invalid amounts', () => {
+  assert.equal(isFarmCommand('16 buğday topla'), true);
+  assert.equal(isFarmCommand('harvest 8 carrots'), true);
+  assert.equal(isFarmCommand('patates topla 12'), true);
+  assert.equal(isFarmCommand('ekin topla 20'), true);
+  assert.equal(isFarmCommand('tarla hasat et 32'), true);
+  assert.equal(isFarmCommand('topla meşe odunu'), false);
+
+  assert.deepEqual(parseTask('16 buğday topla'), {type: 'harvest_crop', crop: 'minecraft:wheat', amount: 16});
+  assert.deepEqual(parseTask('harvest 8 carrots'), {type: 'harvest_crop', crop: 'minecraft:carrot', amount: 8});
+  assert.deepEqual(parseTask('10 patates getir'), {type: 'harvest_crop', crop: 'minecraft:potato', amount: 10});
+  assert.deepEqual(parseTask('12 ekin topla'), {type: 'harvest_crop', crop: 'any', amount: 12});
+  assert.deepEqual(parseTask('tarla hasat et 20'), {type: 'harvest_crop', crop: 'any', amount: 20});
+  assert.deepEqual(parseTask('buğday topla'), {type: 'harvest_crop', crop: 'minecraft:wheat', amount: 8});
+
+  assert.match(parseTask('0 buğday topla').error, /1–64/);
+  assert.match(parseTask('65 buğday topla').error, /1–64/);
+
+  // Unsupported crops return informative error message
+  assert.match(parseTask('10 pancar topla').error, /olgun buğday.*havuç.*patates/);
+  assert.match(parseTask('pancar hasat et').error, /olgun buğday.*havuç.*patates/);
+  assert.match(parseTask('karpuz topla 5').error, /olgun buğday.*havuç.*patates/);
+});
+
+test('validateFarmTask and validateTask accept valid crop tasks and reject unsupported crops or invalid amounts', () => {
+  assert.deepEqual(validateFarmTask({type: 'harvest_crop', crop: 'minecraft:wheat', amount: 1}), {type: 'harvest_crop', crop: 'minecraft:wheat', amount: 1});
+  assert.deepEqual(validateFarmTask({type: 'harvest_crop', crop: 'wheat', amount: 16}), {type: 'harvest_crop', crop: 'minecraft:wheat', amount: 16});
+  assert.deepEqual(validateFarmTask({type: 'harvest_crop', crop: 'minecraft:carrot', amount: 32}), {type: 'harvest_crop', crop: 'minecraft:carrot', amount: 32});
+  assert.deepEqual(validateFarmTask({type: 'harvest_crop', crop: 'potato', amount: 64}), {type: 'harvest_crop', crop: 'minecraft:potato', amount: 64});
+  assert.deepEqual(validateFarmTask({type: 'harvest_crop', crop: 'any', amount: 8}), {type: 'harvest_crop', crop: 'any', amount: 8});
+  assert.deepEqual(validateTask({type: 'harvest_crop', crop: 'minecraft:wheat', amount: 20}), {type: 'harvest_crop', crop: 'minecraft:wheat', amount: 20});
+
+  assert.equal(validateFarmTask({type: 'harvest_crop', crop: 'beetroot', amount: 10}), null);
+  assert.equal(validateFarmTask({type: 'harvest_crop', crop: 'pumpkin', amount: 5}), null);
+  assert.equal(validateFarmTask({type: 'harvest_crop', crop: 'minecraft:wheat', amount: 0}), null);
+  assert.equal(validateFarmTask({type: 'harvest_crop', crop: 'minecraft:wheat', amount: 65}), null);
+  assert.equal(validateFarmTask({type: 'harvest_crop', crop: 'minecraft:wheat', amount: -1}), null);
+  assert.equal(validateTask({type: 'harvest_crop', crop: 'beetroot', amount: 10}), null);
+});
+
+test('chat accepts harvest_crop via LLM and heuristic fallback when chest and plot are bound, and rejects when unbound or busy', async () => {
+  const d = await mkdtemp(join(tmpdir(), 'ahmet-farm-'));
+  try {
+    const store = new MemoryStore(join(d, 'memory.json'));
+    await store.load();
+
+    // 1. LLM path success (chestBound: true, plotBound: true, busy: false)
+    const llmRes = await chat({actorUuid: 'farmer-1', actorName: 'Ece', text: '16 buğday topla', context: {chestBound: true, plotBound: true, busy: false}}, {
+      store,
+      models: {interpretTurn: async () => ({reply: '16 buğday hasat edeceğim.', task: {type: 'harvest_crop', crop: 'minecraft:wheat', amount: 16}})}
+    });
+    assert.deepEqual(llmRes.task, {type: 'harvest_crop', crop: 'minecraft:wheat', amount: 16});
+    assert.equal(llmRes.taskSource, 'llm');
+
+    // 2. LLM path with invalid crop
+    const invalidLlmRes = await chat({actorUuid: 'farmer-1', actorName: 'Ece', text: '10 pancar topla', context: {chestBound: true, plotBound: true, busy: false}}, {
+      store,
+      models: {interpretTurn: async () => ({reply: 'Tamam.', task: {type: 'harvest_crop', crop: 'minecraft:beetroot', amount: 10}})}
+    });
+    assert.equal(invalidLlmRes.task, null);
+    assert.match(invalidLlmRes.reply, /Bu hasat isteğini güvenli ve desteklenen bir ekin olarak çözemiyorum/);
+
+    // 3. Fallback path success
+    const fbRes = await chat({actorUuid: 'farmer-1', actorName: 'Ece', text: 'Ahmet 20 havuç topla', context: {chestBound: true, plotBound: true, busy: false}}, {store});
+    assert.deepEqual(fbRes.task, {type: 'harvest_crop', crop: 'minecraft:carrot', amount: 20});
+    assert.equal(fbRes.taskSource, 'heuristic');
+    assert.match(fbRes.reply, /bağlı tarladan 20 ekin hasat edip işaretlediğin sandığa bırakacağım/);
+
+    // 4. Refuse when plot unbound (LLM path)
+    const unboundPlotLlm = await chat({actorUuid: 'farmer-1', actorName: 'Ece', text: '16 buğday topla', context: {chestBound: true, plotBound: false, busy: false}}, {
+      store,
+      models: {interpretTurn: async () => ({reply: '16 buğday hasat edeceğim.', task: {type: 'harvest_crop', crop: 'minecraft:wheat', amount: 16}})}
+    });
+    assert.equal(unboundPlotLlm.task, null);
+    assert.match(unboundPlotLlm.reply, /\/ahmet farmplot/);
+
+    // 5. Refuse when plot unbound (fallback path)
+    const unboundPlotFb = await chat({actorUuid: 'farmer-1', actorName: 'Ece', text: 'Ahmet 20 havuç topla', context: {chestBound: true, plotBound: false, busy: false}}, {store});
+    assert.equal(unboundPlotFb.task, null);
+    assert.match(unboundPlotFb.reply, /\/ahmet farmplot/);
+
+    // 6. Refuse when chest unbound
+    const unboundChest = await chat({actorUuid: 'farmer-1', actorName: 'Ece', text: 'Ahmet 20 havuç topla', context: {chestBound: false, plotBound: true, busy: false}}, {store});
+    assert.equal(unboundChest.task, null);
+    assert.match(unboundChest.reply, /\/ahmet chest/);
+
+    // 7. Refuse when busy
+    const busyRes = await chat({actorUuid: 'farmer-1', actorName: 'Ece', text: 'Ahmet 20 havuç topla', context: {chestBound: true, plotBound: true, busy: true}}, {store});
+    assert.equal(busyRes.task, null);
+
+    // 8. Unsupported crop in fallback
+    const unsuppCropRes = await chat({actorUuid: 'farmer-1', actorName: 'Ece', text: '10 pancar topla', context: {chestBound: true, plotBound: true, busy: false}}, {store});
+    assert.equal(unsuppCropRes.task, null);
+    assert.match(unsuppCropRes.reply, /olgun buğday.*havuç.*patates/);
+
+    // 9. Verify persistence in MemoryStore
+    const reloaded = new MemoryStore(join(d, 'memory.json'));
+    await reloaded.load();
+    const history = reloaded.history('farmer-1');
+    assert.equal(history.length, 6);
+    const withTask = history.filter(h => h.task !== null);
+    assert.equal(withTask.length, 1);
+    assert.deepEqual(withTask[0].task, {type: 'harvest_crop', crop: 'minecraft:carrot', amount: 20});
+
+    // Test persistence for dedicated actor with LLM task
+    await chat({actorUuid: 'persisted-farmer', actorName: 'Ece', text: '16 buğday topla', context: {chestBound: true, plotBound: true, busy: false}}, {
+      store,
+      models: {interpretTurn: async () => ({reply: '16 buğday hasat edeceğim.', task: {type: 'harvest_crop', crop: 'minecraft:wheat', amount: 16}})}
+    });
+    const reloaded2 = new MemoryStore(join(d, 'memory.json'));
+    await reloaded2.load();
+    const pHistory = reloaded2.history('persisted-farmer');
+    assert.equal(pHistory.length, 1);
+    assert.deepEqual(pHistory[0].task, {type: 'harvest_crop', crop: 'minecraft:wheat', amount: 16});
   } finally {
     await rm(d, {recursive: true, force: true});
   }
