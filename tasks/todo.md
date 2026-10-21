@@ -10,7 +10,9 @@
 - [x] M3 production goal selection source, review and disposable runtime verification (operator opt-in, default off).
 - [x] Rebuild and verify the final four-entry M3 ZIP locally (SHA-256 `5781ea3489fef9f5828f0c21cc980a414ed9f8c8602a1057b9ce3adb0788c207`; `dist/` is intentionally gitignored, no GitHub asset is claimed).
 - [x] M3 release milestone: publish reviewed source (`6b015f1714be8a0a986516132436a28e1341408f`, remote SHA matched), deploy the exact verified package/core, and read back Node/Paper health, idle status and save completion. Prior shutdown cause/time is unknown; no graceful stop is claimed.
-- [ ] M4 Gestures, sound and nearby speech.
+- [x] M4 presentation source, focused Java suite, disposable runtime acceptance, and corrected four-entry local package verification; evidence in `docs/VALIDATION_RESULTS.md` (ZIP SHA-256 `6846225df2d99b40142f1ca377a014a964d40cf5fe4b3093745f21c5871691a0`).
+- [ ] Publish the current six public documentation changes and verify remote source SHA.
+- [ ] Deploy the exact M4 package and read back the installed core, Paper/Node health, idle status and saved dimensions; previous shutdown cause/time is unknown.
 - [ ] M5 Allowlisted transactional crafting.
 - [ ] M6 Approved-plot mature-crop farming.
 - [ ] M7 Stable multiple villagers, roles, delegation and local resource economy.
@@ -22,7 +24,7 @@
 - [x] JEV preview launcher precedence: copied `scripts/run.sh` without a process-level override used a synthetic dotenv value `jev-latest`; health showed `jev-preview`, mock chat and mock decision.
 - [x] Fresh isolated release checks: Node **43/43** and `scripts/smoke.sh` passed in mock mode.
 - [x] JEV preview source published and live startup verified: published source commit `c8f2777a934cd2355844a0685aacadb1fa715f85`; deployed Node source/launcher matched it byte for byte; Paper startup, configured preview health, idle status, and all-dimension save read-back passed. Installed M2 JAR and distribution were unchanged. No provider call or human interaction occurred during deployment; NPC remained unspawned.
-- [ ] M3 human gameplay, live provider behavior through the current M3 path, production-store inspection, and forced-crash acceptance remain open. M4–M10 remain open.
+- [ ] Human gameplay, live provider behavior through the current path, production-store inspection, and forced-crash acceptance remain open; M5–M10 remain open.
 - [ ] Human/player acceptance for M2 visible-player behavior (runtime used a no-human server and permission proxies only).
 - [ ] Human player/two-client acceptance (requires actual user; never mark from proxy).
 

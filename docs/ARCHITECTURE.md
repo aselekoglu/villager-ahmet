@@ -104,6 +104,16 @@ At WANDER, the planner tries a bounded set of safe, loaded locations no farther 
 
 An active job, cargo, recovery block, or outstanding journal work preempts schedule movement and sleep immediately. Schedule navigation uses Citizens pathfinding with bounded precision for routine waypoints; it does not teleport or alter task-navigation defaults. Only an explicit operator `/ahmet summon` while idle may reposition Ahmet. Schedule retries are bounded and cooled down rather than retried each tick. Runtime probe observations and manual gameplay gaps are recorded in `docs/VALIDATION_RESULTS.md` and `docs/ACCEPTANCE.md`.
 
+## Bounded presentation behavior (M4)
+
+Presentation is a best-effort layer around the authoritative task engine. Paper/Citizens entity, player, world and inventory reads and mutations stay on the server main thread; HTTP work remains asynchronous and time-bounded. A cosmetic API failure must not change task, cargo, chest, journal or recovery outcomes.
+
+- While Ahmet is idle, awake and not navigating, the adapter may look at a nearby eligible player. It examines at most 32 candidates, within six blocks, and reserves scans at least 20 server ticks apart. Chunk preflight checks already-loaded chunks and does not load chunks. Native Bukkit invisibility and spectator state are excluded; third-party vanish plugins are not claimed as supported.
+- Nearby public speech is limited to 18 blocks and at most 16 recipients. A private model reply targets only the initiating player and revalidates online state, same-world presence and range when the asynchronous response returns. Public and private lines share a per-player UUID one-second cooldown, so a recent public line can suppress a private reply; delivery is best effort.
+- After a successful, journaled harvest or chest deposit, the real Citizens villager may swing its arm and play a short work sound. These effects are cosmetic and best effort. Ordinary `RuntimeException` failures are contained and emit fixed-category diagnostics throttled to one per category every 10 seconds; fatal JVM errors are not swallowed.
+
+The M4 disposable runtime verifies real Citizens VILLAGER movement/effect delegation and task transactions with a mock bridge. Synthetic Player/LOS proxies do not establish actual client packet delivery, client-visible head/arm animation, human-readable audio, or multiplayer acceptance. See `docs/VALIDATION_RESULTS.md` for the exact scope and release status.
+
 ## Opt-in production goal policy (M3)
 
 `AgentController` now selects bounded goals from server-authored facts in the production task loop. This policy advances only an explicitly admitted, authorized job: it may harvest an offered resource, clear an eligible obstruction within its budgets, explore within the existing home boundary, retry an owned route, return safely, or request player help. It does not invent village needs, admit work by itself, or authorize a new job. The option `options.production-goals-enabled` defaults to `false` and must be explicitly enabled by an operator.

@@ -1,0 +1,7 @@
+name: PresentationProbe
+version: 1.0.0
+main: dev.ahmetprobe.RuntimePresentationProbe
+api-version: '1.21'
+load: POSTWORLD
+depend: [VillagerAhmet, Citizens]
+description: Opt-in disposable M4 presentation probe; never install on a user or live server.

@@ -391,3 +391,28 @@ The current private LAN server copy has `online-mode=false` by explicit request 
 - First run `local scratch evidence` passed six resource groups but timed out on the second raw-gold target at 600 job ticks. The fresh rerun reproduced a stationary Citizens navigator, then the existing watchdog retries recovered without a production change: gold completed in **641 ticks** (~32 seconds). The fixture now logs routing diagnostics and allows 1,200 ticks so the approximately 49-second full watchdog retry sequence can be observed. Original failure evidence is retained; collection latency is not claimed uniformly short.
 - Stopped live-server world/plugin backup: `local scratch evidence` (mode 0600). No user-world files were manually changed.
 - Distribution rebuilt and archive/embedded JAR checksums verified: plugin SHA-256 `a94f12a0d62b91065abcd623e3d17912e6847bfc709daefc0c24f36725b5f626`; ZIP SHA-256 `a4743a1d5dbe053f17385ab7a512013b65b1555e05b02e2d088b99566252970d`.
+
+
+## M4 presentation runtime and package rebuild gate — 2026-10-21
+
+### Source and unit verification
+
+- Reviewed and published production source commit: `8572c61afb3591130e4499604f26defc10c1db2f`. Exact core JAR SHA-256: `3784fe50fe47dc385b62c34044371dacb33d57185077e749a9598e2314f6aa1c`.
+- Java package: **270 tests, 0 failures, 0 errors, 0 skipped**; focused presentation policy/adapter tests: **11/11**. Node remains at the previously recorded **43/43** with mock smoke; Node was not rerun for this Java and runtime increment.
+- Source and fixture review covered RuntimeException containment for NPC/entity resolution, policy/source reads and face/swing/sound/message effects; 20-tick idle-look scan reservation; invisible/spectator filtering; actor-only private replies; and the shared public/private UUID speech cooldown.
+
+### Disposable Paper runtime
+
+The calibrated presentation fixture used the exact core above, fixture JAR SHA-256 `9b829ab5d06f6b74102a0e6111007274b51db13e384567357ceb0751de67bc84`, and pinned Citizens SHA-256 `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158`. The probe created a real Citizens `EntityType.VILLAGER`, then exercised bounded job and presentation behavior in fresh disposable Paper 1.21.6/Citizens 2.0.41 instances.
+
+- **r10 normal:** exit 0, all three dimensions saved, no ERROR lines and one final `AHMET_PRESENTATION_RUNTIME_PROBE_PASS`. Normal harvest/deposit, injected swing failure, injected sound failure and full-chest hold/retry each completed delivery with collected 1, deposited 1 and cargo 0. During the full-chest hold, cargo remained 1 and no deposit cue occurred; after test-chest capacity was restored, the same cargo delivered. Two cues were recorded; journal clear, recovery false, navigation clean and normal teleports zero. Per-job path lengths were **16.07, 17.45, 18.97 and 18.97 blocks**; maximum sampled step was **0.20 blocks/tick rounded**. Native Citizens/Bukkit effect delegation was observed where no fault was injected.
+- **r11 face-delegate** and **r12 sound-invariant:** each fresh negative control saved all three dimensions and emitted its expected terminal FAIL, with no final runtime PASS. These controls verify detection of failures inside normally best-effort callbacks; they are not positive acceptance runs.
+- The fixture used synthetic Player and LOS proxies for recipient/visibility paths and an embedded mock chat bridge for two HTTP requests; **zero live providers** were called. A shared public/private per-UUID one-second cooldown can suppress a private response after public speech; delivery is best effort. The measured look-specific chunk-preflight count applies only while task/cargo is active; face and LOS remained zero during the job/return window. The probe does not establish all native-navigation look gating or measure runtime 20-tick scan cadence.
+
+### Package and release status
+
+The corrected four-entry M4 ZIP was rebuilt and independently verified, including entry list, CRCs, inner JAR hashes and outer ZIP hash. ZIP SHA-256 **`6846225df2d99b40142f1ca377a014a964d40cf5fe4b3093745f21c5871691a0`**; core SHA-256 `3784fe50fe47dc385b62c34044371dacb33d57185077e749a9598e2314f6aa1c`; pinned Citizens SHA-256 `dd1bff69eb2339a459e56b21aed0810919b40a14a9561577264e3ff94cef9158`; Turkish package README SHA-256 `6aaa7aad02f3b79e8c7f83fb629ca7b4f3360f5fb9e0f09800c2cf32d0b84feb`. The local `dist/` directory is intentionally Git-ignored; no GitHub release asset is claimed.
+
+M4 source, disposable server-side runtime acceptance and corrected local package verification are complete. Publication of the current docs and deployment/read-back of the M4 package remain separate pending gates. When last checked, live server ports were absent; the prior shutdown cause/time is unknown, so no graceful shutdown or M4 installation is claimed. The live installed core remains the M3 SHA-256 `5e8395902b24f374b1176e98cc14957bccde63d07ba9795da940d9ef1500f8a3` unless a later deployment read-back establishes otherwise.
+
+Human client acceptance (visible face/arm animation, understandable audio and two-human multiplayer), live TypeSafe/OpenAI behavior through the current path, production-store inspection and forced-crash durability remain unverified. Earlier M3 evidence above is historical evidence for its named artifacts and does not substitute for this M4 or pending deployment evidence.
